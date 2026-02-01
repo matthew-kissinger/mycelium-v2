@@ -21,9 +21,9 @@
 | 2F | COMPLETE | claude/opus | Notification routes |
 | 3A | COMPLETE | claude/opus | CLI scaffold |
 | 3B-F | PENDING | - | CLI commands |
-| 4A | IN PROGRESS | claude/opus | Discovery prompt |
-| 4B | PENDING | - | Sequencer prompt |
-| 4C | PENDING | - | Shepherd prompt |
+| 4A | COMPLETE | claude/opus | Discovery prompt |
+| 4B | COMPLETE | claude/opus | Sequencer prompt |
+| 4C | COMPLETE | claude/opus | Shepherd prompt |
 | 4D | COMPLETE | claude/opus | Genesis prompt |
 | 4E | COMPLETE | claude/opus | Armory prompt |
 | 5A-B | PENDING | - | Scheduler |
@@ -268,6 +268,31 @@
 - ApiError class for structured error handling
 - Table formatter with auto-column widths and value truncation
 
+### Phase 4D: Genesis Prompt
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T03:30:00Z
+**Completed**: 2026-02-01T03:45:00Z
+**Validation**:
+- TypeScript compiles without errors (bun run tsc --noEmit)
+- Prompt text matches v1 genesis.py exactly (lines 85-228, 316-379, 611-647)
+- All three prompts ported: GENESIS_AGENT_PROMPT, AUTO_GENESIS_PROMPT, GENESIS_CONTINUATION_PROMPT
+- Output markers and helper functions included
+- buildGenesisPrompt, buildAutoGenesisPrompt, buildContinuationPrompt helpers
+
+**Files Created**:
+- `packages/server/src/prompts/genesis.ts` - Complete Genesis agent prompt port
+
+**Notes**:
+- GENESIS_AGENT_PROMPT: Main prompt for manual mode (create repo from request)
+- AUTO_GENESIS_PROMPT: Network analysis mode (propose/create based on network state)
+- GENESIS_CONTINUATION_PROMPT: Human response handling after proposals
+- GENESIS_MARKERS: Output markers for parsing (complete, proposal_sent, no_proposals, continuation_complete)
+- GenesisContext, AutoGenesisContext, ContinuationContext interfaces for type-safe context
+- parseGenesisResult function extracts YAML result from agent output
+- isGenesisSignal function detects Genesis-related alignment signals
+- Scaffold templates for CLAUDE.md and README.md included
+
 ### Phase 4E: Armory Prompt
 **Status**: COMPLETE
 **Agent**: claude/opus
@@ -414,5 +439,7 @@ Before marking a phase complete:
 | 2026-02-01 | 2A | claude/opus | Task routes (extended: context, graph, cancel, dependency resolution) |
 | 2026-02-01 | 2F | claude/opus | Notification routes (notify, align, inbox, status placeholders) |
 | 2026-02-01 | 3A | claude/opus | CLI scaffold (entry point, client, output helpers) |
+| 2026-02-01 | 4D | claude/opus | Genesis prompt (3 prompts: manual, auto, continuation) |
 | 2026-02-01 | 4E | claude/opus | Armory prompt (exact port from v1) |
+| 2026-02-01 | 4C | claude/opus | Shepherd prompt (exact port from v1) |
 
