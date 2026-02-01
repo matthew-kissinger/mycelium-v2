@@ -4,6 +4,16 @@ import { logger } from 'hono/logger'
 import tasksRoutes from './routes/tasks'
 import reposRoutes from './routes/repos'
 import statsRoutes from './routes/stats'
+import memoryRoutes from './routes/memory'
+import signalsRoutes from './routes/signals'
+import notifyRoutes from './routes/notify'
+import {
+  systemAgentsRoutes,
+  discoveryRoutes,
+  sequencerRoutes,
+  shepherdRoutes,
+  schedulerRoutes,
+} from './routes/system-agents'
 import { createSSEResponse, getClientCount, getClientInfo, shutdown as shutdownSSE } from './sse'
 import { db, schema } from './db'
 import { sql } from 'drizzle-orm'
@@ -48,6 +58,16 @@ app.get('/api/events/clients', (c) => {
 app.route('/api/tasks', tasksRoutes)
 app.route('/api/repos', reposRoutes)
 app.route('/api/stats', statsRoutes)
+app.route('/api/memory', memoryRoutes)
+app.route('/api/signals', signalsRoutes)
+app.route('/api', notifyRoutes)  // For /api/notify, /api/align, /api/inbox, /api/status
+
+// System agent routes
+app.route('/api/system-agents', systemAgentsRoutes)
+app.route('/api/discovery', discoveryRoutes)
+app.route('/api/sequencer', sequencerRoutes)
+app.route('/api/shepherd', shepherdRoutes)
+app.route('/api/scheduler', schedulerRoutes)
 
 // Initialize database tables
 async function initDb() {

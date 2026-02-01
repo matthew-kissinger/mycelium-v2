@@ -13,12 +13,12 @@
 | 1A | COMPLETE | claude/opus | Database layer |
 | 1B | COMPLETE | claude/opus | Shared schemas |
 | 1C | COMPLETE | claude/opus | SSE infrastructure |
-| 2A | COMPLETE | initial | Task routes (done in Phase 0) |
+| 2A | COMPLETE | claude/opus | Task routes (extended with full functionality) |
 | 2B | COMPLETE | claude/opus | Signal routes |
 | 2C | COMPLETE | claude/opus | Memory routes |
 | 2D | COMPLETE | claude/opus | Repo routes |
-| 2E | IN PROGRESS | claude/opus | System agent routes |
-| 2F | IN PROGRESS | claude/opus | Notification routes |
+| 2E | COMPLETE | claude/opus | System agent routes |
+| 2F | COMPLETE | claude/opus | Notification routes |
 | 3A-F | PENDING | - | CLI package |
 | 4A-E | PENDING | - | System prompts |
 | 5A-B | PENDING | - | Scheduler |
@@ -160,6 +160,30 @@
 - Broadcasts SSE events on repo add/update/remove
 - Language detection supports: TypeScript, JavaScript, Python, Rust, Go, Java, Ruby, PHP, Elixir, Clojure, C/C++
 
+### Phase 2E: System Agent Routes
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T01:35:00Z
+**Completed**: 2026-02-01T01:40:00Z
+**Validation**:
+- TypeScript compiles without errors
+- GET /api/system-agents/runs returns all system agent runs with filters (agent_type, status, repo_path, limit, offset)
+- GET /api/system-agents/runs/:id returns single run details
+- POST /api/discovery/trigger creates discovery agent run record
+- POST /api/sequencer/trigger creates sequencer agent run record
+- POST /api/shepherd/trigger creates shepherd agent run record (requires repo_path)
+- GET /api/scheduler/status returns scheduler status placeholder
+
+**Files Created**:
+- `packages/server/src/routes/system-agents.ts` - System agent routes with multiple exports
+
+**Notes**:
+- Exports separate routers: systemAgentsRoutes, discoveryRoutes, sequencerRoutes, shepherdRoutes, schedulerRoutes
+- Trigger endpoints create system_agent_run records with status='running' (actual dispatch in Phase 5)
+- Scheduler status returns placeholder with all cycle types (dispatcher, discovery, sequencer, shepherd, digest, compaction, blocked_check)
+- Broadcasts system:agent_started SSE events on trigger
+- Shepherd trigger validates that repo_path is provided
+
 ---
 
 ## Agent Harness Compatibility Matrix
@@ -280,4 +304,5 @@ Before marking a phase complete:
 | 2026-02-01 | 2C | claude/opus | Memory routes (global + repo-specific patterns/warnings) |
 | 2026-02-01 | 2B | claude/opus | Signal routes (CRUD, respond, pending, expiration) |
 | 2026-02-01 | 2D | claude/opus | Repo routes (CRUD, health, discover with language detection) |
+| 2026-02-01 | 2E | claude/opus | System agent routes (runs, triggers, scheduler status) |
 
