@@ -359,4 +359,5 @@ Before marking a phase complete:
 | 2026-02-01 | 2D | claude/opus | Repo routes (CRUD, health, discover with language detection) |
 | 2026-02-01 | 2E | claude/opus | System agent routes (runs, triggers, scheduler status) |
 | 2026-02-01 | 2A | claude/opus | Task routes (extended: context, graph, cancel, dependency resolution) |
+| 2026-02-01 | 2F | claude/opus | Notification routes (notify, align, inbox, status placeholders) |
 
