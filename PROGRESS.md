@@ -20,7 +20,11 @@
 | 2E | COMPLETE | claude/opus | System agent routes |
 | 2F | COMPLETE | claude/opus | Notification routes |
 | 3A | COMPLETE | claude/opus | CLI scaffold |
-| 3B-F | PENDING | - | CLI commands |
+| 3B | COMPLETE | claude/opus | Task CLI commands |
+| 3C | COMPLETE | claude/opus | Signal CLI commands |
+| 3D | COMPLETE | claude/opus | Memory CLI commands |
+| 3E | COMPLETE | claude/opus | Network (Repos) CLI commands |
+| 3F | COMPLETE | claude/opus | Runner CLI commands |
 | 4A | COMPLETE | claude/opus | Discovery prompt |
 | 4B | COMPLETE | claude/opus | Sequencer prompt |
 | 4C | COMPLETE | claude/opus | Shepherd prompt |
@@ -267,6 +271,113 @@
 - Placeholder commands registered for stats, tasks, repos, signals, memory, notify
 - ApiError class for structured error handling
 - Table formatter with auto-column widths and value truncation
+
+### Phase 3C: Signal CLI Commands
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T06:30:00Z
+**Completed**: 2026-02-01T06:45:00Z
+**Validation**:
+- TypeScript compiles without errors (signals.ts file)
+- `bun run packages/cli/src/index.ts align "Test?" --options "Yes" "No"` creates signal
+- `bun run packages/cli/src/index.ts signals` lists all signals
+- `bun run packages/cli/src/index.ts signals --pending` lists pending only
+- `bun run packages/cli/src/index.ts check --once` shows pending signals
+- `bun run packages/cli/src/index.ts notify "Test"` sends notification
+- `bun run packages/cli/src/index.ts inbox` shows inbox
+- `bun run packages/cli/src/index.ts status` shows Telegram connection status
+
+**Files Created**:
+- `packages/cli/src/commands/signals.ts` - Signal and notification CLI commands
+
+**Files Modified**:
+- `packages/cli/src/index.ts` - Import and register signal commands
+
+**Notes**:
+- `align`: Create alignment signal with options, optional wait/timeout, repo/task association
+- `signals`: List signals with --pending and --limit filters, table output
+- `check`: Check pending signals, --once for single check or poll every 5s
+- `notify`: Send notification message
+- `inbox`: View user messages with --limit
+- `status`: Check Telegram connection status
+- All commands handle API errors gracefully
+- Output uses table format with short IDs, truncation, and relative times
+
+### Phase 3D: Memory CLI Commands
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T06:00:00Z
+**Completed**: 2026-02-01T06:30:00Z
+**Validation**:
+- `bun run packages/cli/src/index.ts memory` - displays global memory (patterns and warnings)
+- `bun run packages/cli/src/index.ts memory add "Test pattern"` - adds pattern
+- `bun run packages/cli/src/index.ts memory add "Test warning" --type warning --severity high` - adds warning
+- `bun run packages/cli/src/index.ts memory --repo /path` - displays repo-specific memory
+- `bun run packages/cli/src/index.ts compact` - triggers memory compaction
+
+**Files Created**:
+- `packages/cli/src/commands/memory.ts` - Memory command module
+
+**Notes**:
+- `memory` command lists patterns and warnings (global or repo-specific with --repo)
+- `memory add` subcommand adds patterns (default) or warnings (--type warning)
+- Pattern options: --tags for tagging, --task for task association
+- Warning options: --severity (low/medium/high), --task for task association
+- `compact` is a top-level command (not subcommand of memory)
+- All commands support --repo for repo-specific memory
+
+### Phase 3E: Network (Repos) CLI Commands
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T06:00:00Z
+**Completed**: 2026-02-01T06:30:00Z
+**Validation**:
+- TypeScript compiles without errors in repos.ts
+- `mycel repos` lists all repos in table format
+- `mycel repos health` shows health scores
+- `mycel repos discover <path>` finds git repos
+- `mycel repos add/remove/describe` work correctly
+- `mycel repos paths` subcommands work
+
+**Files Created**:
+- `packages/cli/src/commands/repos.ts` - Complete repos CLI commands
+
+**Notes**:
+- registerRepoCommands registers all repo subcommands
+- Default action lists repos with name, path, mode, language, description
+- Health command shows per-repo health scores and overall network health
+- Discover scans directories for git repos (1 level deep)
+- Paths subcommand manages scheduler scan_paths config
+- Add supports --auto-create and --description options
+- Describe shows or sets repository description
+
+### Phase 3F: Runner CLI Commands
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T08:00:00Z
+**Completed**: 2026-02-01T08:30:00Z
+**Validation**:
+- TypeScript compiles without errors (bun run tsc --noEmit in packages/cli)
+- `mycel runner` shows runner status with formatted cycles table
+- `mycel runner start` shows "not yet implemented" (placeholder for Phase 5)
+- `mycel runner stop` shows "not yet implemented" (placeholder for Phase 5)
+- `mycel runner config` shows current config (empty until Phase 5)
+- `mycel runner config --interval 300` shows requested changes
+- `mycel runner config --allocate myrepo 75` shows allocation message
+- `mycel config show` shows formatted configuration
+- `mycel config set <key> <value>` shows requested changes
+
+**Files Created**:
+- `packages/cli/src/commands/runner.ts` - Runner and config commands
+
+**Notes**:
+- Runner command shows status with cycles table (name, enabled, running, last run, errors)
+- Config command shows formatted scheduler configuration grouped by section
+- All update operations gracefully handle missing API endpoints (Phase 5)
+- Start/stop commands ready for scheduler integration
+- Duration formatting (seconds to human-readable)
+- Relative time formatting for last_run timestamps
+- registerRunnerCommands registers both runner and config commands
 
 ### Phase 4A: Discovery Prompt
 **Status**: COMPLETE
@@ -522,4 +633,7 @@ Before marking a phase complete:
 | 2026-02-01 | 4E | claude/opus | Armory prompt (exact port from v1) |
 | 2026-02-01 | 4C | claude/opus | Shepherd prompt (exact port from v1) |
 | 2026-02-01 | 4A | claude/opus | Discovery prompt (3 prompts: alignment, autonomous, task creator) |
+| 2026-02-01 | 3E | claude/opus | Network (Repos) CLI commands (list, add, remove, health, discover, describe, paths) |
+| 2026-02-01 | 3D | claude/opus | Memory CLI commands (memory, memory add, compact) |
+| 2026-02-01 | 3F | claude/opus | Runner CLI commands (runner, runner start/stop/config, config show/set) |
 

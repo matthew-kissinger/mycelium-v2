@@ -8,6 +8,11 @@
 
 import { Command } from 'commander'
 import { createClient, setGlobalClient } from './client.ts'
+import { registerTaskCommands } from './commands/tasks.ts'
+import { registerSignalCommands } from './commands/signals.ts'
+import { registerMemoryCommands } from './commands/memory.ts'
+import { registerRepoCommands } from './commands/repos.ts'
+import { registerRunnerCommands } from './commands/runner.ts'
 
 const VERSION = '0.1.0'
 const DEFAULT_API_URL = 'http://localhost:8000'
@@ -30,48 +35,12 @@ program
     setGlobalClient(client)
   })
 
-// Placeholder commands - individual command modules will be added in Phase 3B-F
-program
-  .command('stats')
-  .description('Show task statistics')
-  .action(() => {
-    console.log('Command not yet implemented (Phase 3B)')
-  })
-
-program
-  .command('tasks')
-  .description('List and manage tasks')
-  .action(() => {
-    console.log('Command not yet implemented (Phase 3B)')
-  })
-
-program
-  .command('repos')
-  .description('Manage network repositories')
-  .action(() => {
-    console.log('Command not yet implemented (Phase 3C)')
-  })
-
-program
-  .command('signals')
-  .description('View and respond to alignment signals')
-  .action(() => {
-    console.log('Command not yet implemented (Phase 3D)')
-  })
-
-program
-  .command('memory')
-  .description('View and manage patterns and warnings')
-  .action(() => {
-    console.log('Command not yet implemented (Phase 3E)')
-  })
-
-program
-  .command('notify')
-  .description('Send notifications')
-  .action(() => {
-    console.log('Command not yet implemented (Phase 3F)')
-  })
+// Register command modules
+registerTaskCommands(program)     // stats, tasks, task <subcommand>
+registerSignalCommands(program)   // align, signals, check, notify, inbox, status
+registerMemoryCommands(program)   // memory, memory add, compact
+registerRepoCommands(program)     // repos, repos add/remove/health/discover/describe/paths
+registerRunnerCommands(program)   // runner, runner start/stop/config, config show/set
 
 // Parse and execute
 program.parse()
