@@ -292,6 +292,31 @@
 - Success markers: DISCOVERY_SENT_MARKER, DISCOVERY_AUTO_MARKER, TASKS_CREATED_REGEX
 - Helper functions: isDiscoverySignal, extractRepoFromSignal
 
+### Phase 4B: Sequencer Prompt
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-01-31T06:00:00Z
+**Completed**: 2026-01-31T06:15:00Z
+**Validation**:
+- TypeScript compiles without errors (bun run tsc --noEmit)
+- Prompt text matches v1 sequencer.py exactly (lines 74-160)
+- YAML output schema documented
+- Context builder function with full task/memory/evaluation support
+- Response parser function for YAML extraction
+
+**Files Created**:
+- `packages/server/src/prompts/sequencer.ts` - Complete Sequencer agent prompt port
+- `packages/server/src/prompts/index.ts` - Prompts module index (updated)
+
+**Notes**:
+- SEQUENCER_SYSTEM_PROMPT: Main prompt with analysis guidelines, output format, decision criteria
+- SEQUENCER_OUTPUT_SCHEMA: Expected YAML structure (dependency_updates, parallel_groups, summary)
+- buildSequencerPrompt: Context builder with pending tasks, running tasks, memory, Shepherd evals
+- parseSequencerResponse: YAML extraction and parsing into typed structure
+- SequencerTaskContext, RunningTaskContext, ShepherdEvalContext interfaces for type-safe context
+- DependencyUpdate, ParallelGroup, SequencerOutput interfaces for parsed output
+- SEQUENCER_CONFIG: Default agent (claude), model (sonnet), timeout (5 min)
+
 ### Phase 4D: Genesis Prompt
 **Status**: COMPLETE
 **Agent**: claude/opus
