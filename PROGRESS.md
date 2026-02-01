@@ -30,9 +30,13 @@
 | 4C | COMPLETE | claude/opus | Shepherd prompt |
 | 4D | COMPLETE | claude/opus | Genesis prompt |
 | 4E | COMPLETE | claude/opus | Armory prompt |
-| 5A-B | PENDING | - | Scheduler |
-| 6A-E | PENDING | - | Frontend |
-| 7A-B | PENDING | - | MCP package |
+| 5A-B | IN PROGRESS | claude/opus | Scheduler |
+| 6A | COMPLETE | claude/opus | React Flow scaffold (Phase 0) |
+| 6B | IN PROGRESS | claude/opus | Zustand workflow store |
+| 6C | COMPLETE | claude/opus | LiveLogs component |
+| 6D | IN PROGRESS | claude/opus | Task Panel Component |
+| 6E | COMPLETE | claude/opus | Signal Panel Component |
+| 7A-B | IN PROGRESS | claude/opus | MCP package |
 | 8A-C | PENDING | - | Integration |
 
 ---
@@ -505,6 +509,31 @@
 - Tasks without branches handling documented
 - Critical output requirements: YAML block mandatory
 
+### Phase 6E: Signal Panel Component
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T10:00:00Z
+**Completed**: 2026-02-01T10:30:00Z
+**Validation**:
+- TypeScript compiles without errors (SignalPanel.tsx)
+- Component displays signals (pending and all)
+- Quick response buttons for options
+- Custom response input modal
+- SSE subscription for real-time updates
+
+**Files Created**:
+- `packages/client/src/components/SignalPanel.tsx` - Complete signal panel component
+
+**Notes**:
+- Uses TanStack Query for data fetching with 10s polling fallback
+- SSE subscription to signal:* events for real-time updates
+- SignalItem component shows status badges, options, response history
+- SignalResponseModal with option buttons and custom input
+- Mutation handles response submission with error display
+- formatRelativeTime helper for timestamps
+- Dark theme styling matching existing components
+- Status colors: pending=yellow, responded=green, expired=gray
+
 ---
 
 ## Agent Harness Compatibility Matrix
@@ -637,4 +666,6 @@ Before marking a phase complete:
 | 2026-02-01 | 3D | claude/opus | Memory CLI commands (memory, memory add, compact) |
 | 2026-02-01 | 3C | claude/opus | Signal CLI commands (align, signals, check, notify, inbox, status) |
 | 2026-02-01 | 3F | claude/opus | Runner CLI commands (runner, runner start/stop/config, config show/set) |
+| 2026-02-01 | 6E | claude/opus | Signal Panel Component (pending/responded signals, quick response, SSE updates) |
+| 2026-01-31 | 6C | claude/opus | LiveLogs component (real-time task output, filter, auto-scroll, toggle) |
 
