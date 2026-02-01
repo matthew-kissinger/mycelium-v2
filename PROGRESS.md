@@ -86,6 +86,36 @@
 - Client management: subscribe/unsubscribe/disconnect functions
 - Heartbeat starts on first client, stops when no clients
 
+### Phase 2A: Task Routes
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T01:30:00Z
+**Completed**: 2026-02-01T01:45:00Z
+**Validation**:
+- TypeScript compiles without errors (server package)
+- GET /api/tasks returns all tasks with filters (status, repo_path, limit, offset, sequenced)
+- POST /api/tasks creates task with dependency resolution
+- GET /api/tasks/:id returns single task with parsed JSON fields
+- PATCH /api/tasks/:id updates task (status, depends_on, agent, model, etc.)
+- DELETE /api/tasks/:id deletes task (checks for running state and dependents)
+- POST /api/tasks/:id/run executes task via dispatch with optional agent/model overrides
+- POST /api/tasks/:id/cancel cancels running task
+- GET /api/tasks/:id/context returns assembled context (task, repo, patterns, warnings, evaluations, dependencies)
+- GET /api/tasks/graph returns dependency graph with nodes and edges
+
+**Files Modified**:
+- `packages/server/src/routes/tasks.ts` - Extended with full functionality
+- `packages/shared/src/schemas/events.ts` - Added task:deleted, notification:sent, system:agent_started, memory:pattern_deleted, memory:warning_deleted events
+
+**Notes**:
+- Uses query functions from queries.ts for database operations
+- Dependency resolution: supports short IDs (prefix matching) and full UUIDs
+- Run endpoint: checks dependencies are resolved before starting
+- Cancel endpoint: uses AbortController to signal task cancellation
+- Context endpoint: aggregates patterns, warnings, evaluations, related tasks, dependencies
+- Graph endpoint: returns nodes with dependency edges for visualization
+- Broadcasts SSE events for all task state changes
+
 ### Phase 2B: Signal Routes
 **Status**: COMPLETE
 **Agent**: claude/opus
@@ -183,6 +213,29 @@
 - Scheduler status returns placeholder with all cycle types (dispatcher, discovery, sequencer, shepherd, digest, compaction, blocked_check)
 - Broadcasts system:agent_started SSE events on trigger
 - Shepherd trigger validates that repo_path is provided
+
+### Phase 2F: Notification Routes
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T01:35:00Z
+**Completed**: 2026-02-01T01:40:00Z
+**Validation**:
+- TypeScript compiles without errors
+- POST /api/notify logs message and returns success (placeholder for Telegram)
+- POST /api/align creates alignment signal with optional blocking wait
+- GET /api/inbox returns empty array (placeholder for Telegram inbox)
+- GET /api/status returns disconnected status (placeholder for Telegram connection)
+
+**Files Created**:
+- `packages/server/src/routes/notify.ts` - Notification routes implementation
+
+**Notes**:
+- Uses NotifyRequest, NotifyResponse, SignalCreateRequest from @mycelium/shared
+- /api/notify is a placeholder - logs message, returns success (Telegram integration later)
+- /api/align reuses signal creation logic, supports blocking wait with configurable timeout
+- /api/inbox returns empty array (will return Telegram messages when integrated)
+- /api/status returns connection status (will check Telegram bot when integrated)
+- Broadcasts signal:created SSE event when alignment signal is created
 
 ---
 
@@ -305,4 +358,5 @@ Before marking a phase complete:
 | 2026-02-01 | 2B | claude/opus | Signal routes (CRUD, respond, pending, expiration) |
 | 2026-02-01 | 2D | claude/opus | Repo routes (CRUD, health, discover with language detection) |
 | 2026-02-01 | 2E | claude/opus | System agent routes (runs, triggers, scheduler status) |
+| 2026-02-01 | 2A | claude/opus | Task routes (extended: context, graph, cancel, dependency resolution) |
 
