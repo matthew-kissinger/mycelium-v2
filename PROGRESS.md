@@ -13,7 +13,12 @@
 | 1A | COMPLETE | claude/opus | Database layer |
 | 1B | COMPLETE | claude/opus | Shared schemas |
 | 1C | COMPLETE | claude/opus | SSE infrastructure |
-| 2A-F | PENDING | - | API routes |
+| 2A | COMPLETE | initial | Task routes (done in Phase 0) |
+| 2B | COMPLETE | claude/opus | Signal routes |
+| 2C | COMPLETE | claude/opus | Memory routes |
+| 2D | COMPLETE | claude/opus | Repo routes |
+| 2E | IN PROGRESS | claude/opus | System agent routes |
+| 2F | IN PROGRESS | claude/opus | Notification routes |
 | 3A-F | PENDING | - | CLI package |
 | 4A-E | PENDING | - | System prompts |
 | 5A-B | PENDING | - | Scheduler |
@@ -80,6 +85,80 @@
 - Topic patterns: `*` (all), `task:*` (category), `task:123` (specific)
 - Client management: subscribe/unsubscribe/disconnect functions
 - Heartbeat starts on first client, stops when no clients
+
+### Phase 2B: Signal Routes
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T01:35:00Z
+**Completed**: 2026-02-01T01:45:00Z
+**Validation**:
+- TypeScript compiles without errors (server package)
+- GET /api/signals returns all signals with filters (status, repo_path, task_id, limit)
+- POST /api/signals creates alignment signal with question and optional options
+- GET /api/signals/:id returns single signal
+- POST /api/signals/:id/respond records response to signal
+- GET /api/signals/pending returns pending signals only
+- DELETE /api/signals/:id removes signal
+
+**Files Created**:
+- `packages/server/src/routes/signals.ts` - Complete signal routes
+
+**Notes**:
+- Uses SignalCreateRequest and SignalRespondRequest from @mycelium/shared
+- Broadcasts signal:created, signal:responded, signal:expired events via SSE
+- Signal expiration: 24 hours default, auto-expire on list/get
+- Response validation: rejects responses not in options list
+- Supports blocking wait mode with configurable timeout
+- Cannot respond to non-pending signals (already responded or expired)
+
+### Phase 2C: Memory Routes
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T01:30:00Z
+**Completed**: 2026-02-01T01:40:00Z
+**Validation**:
+- TypeScript compiles without errors
+- GET /api/memory/global returns patterns and warnings
+- POST /api/memory/global creates pattern or warning (type discriminated)
+- GET /api/memory/repo/:path returns repo-specific memory (URL-encoded path)
+- POST /api/memory/repo/:path creates repo-specific pattern or warning
+- POST /api/memory/compact triggers compaction (placeholder)
+
+**Files Created**:
+- `packages/server/src/routes/memory.ts` - Memory routes implementation
+
+**Notes**:
+- Uses MemoryWriteRequest from @mycelium/shared (discriminated union for pattern/warning)
+- Global memory: repo_path = null in database
+- Repo memory: repo_path = decoded URL path
+- Broadcasts SSE events for pattern/warning creation
+- Compact endpoint is a placeholder for future system agent integration
+
+### Phase 2D: Repo Routes
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T01:30:00Z
+**Completed**: 2026-02-01T01:40:00Z
+**Validation**:
+- TypeScript compiles without errors for repos.ts
+- GET /api/repos lists all registered repos
+- POST /api/repos adds new repo with validation (path exists, is git repo, not already registered)
+- GET /api/repos/:id returns single repo
+- PATCH /api/repos/:id updates mode and description
+- DELETE /api/repos/:id removes repo
+- GET /api/repos/health returns health summary with per-repo task stats and health scores
+- POST /api/repos/discover scans directories for git repos (1 level deep)
+
+**Files Modified**:
+- `packages/server/src/routes/repos.ts` - Extended with health and discover endpoints
+- `packages/shared/src/schemas/events.ts` - Added repo:added, repo:updated, repo:removed events
+
+**Notes**:
+- Uses RepoCreateRequest, RepoUpdateRequest, RepoDiscoverRequest from @mycelium/shared
+- Discover endpoint: scans for .git directories, detects language, extracts README description
+- Health endpoint: calculates per-repo health score (0-100) based on task success rate, pending tasks, activity
+- Broadcasts SSE events on repo add/update/remove
+- Language detection supports: TypeScript, JavaScript, Python, Rust, Go, Java, Ruby, PHP, Elixir, Clojure, C/C++
 
 ---
 
@@ -198,4 +277,7 @@ Before marking a phase complete:
 | 2026-01-31 | 1A | claude/opus | Database layer with all tables and CRUD |
 | 2026-01-31 | 1B | claude/opus | Shared schemas (shepherd, system-agent, scheduler, api, events) |
 | 2026-01-31 | 1C | claude/opus | SSE infrastructure with topics, heartbeat, client management |
+| 2026-02-01 | 2C | claude/opus | Memory routes (global + repo-specific patterns/warnings) |
+| 2026-02-01 | 2B | claude/opus | Signal routes (CRUD, respond, pending, expiration) |
+| 2026-02-01 | 2D | claude/opus | Repo routes (CRUD, health, discover with language detection) |
 
