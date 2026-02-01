@@ -13,6 +13,7 @@ import { SchedulerConfig } from '@mycelium/shared'
 import * as queries from '../../db/queries'
 import { dispatch } from '../../agents/dispatch'
 import { broadcast } from '../../sse'
+import { buildMycelContext } from '../../prompts/context'
 
 // Shepherd batch size threshold
 const SHEPHERD_BATCH_SIZE = 5
@@ -88,8 +89,15 @@ async function runShepherdForRepo(
   })
 
   try {
-    // Build prompt with task summaries
-    const prompt = buildShepherdPrompt(repo, tasks)
+    // Build context for system agent
+    const mycelContext = buildMycelContext({
+      role: 'shepherd',
+      agentId: 'shepherd',
+    })
+
+    // Build prompt with task summaries and context
+    const basePrompt = buildShepherdPrompt(repo, tasks)
+    const prompt = `${basePrompt}\n\n${mycelContext}`
 
     // Dispatch to agent (use opus for evaluation)
     const result = await dispatch({

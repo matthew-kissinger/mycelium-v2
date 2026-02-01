@@ -13,6 +13,12 @@ import { SchedulerConfig } from '@mycelium/shared'
 import * as queries from '../../db/queries'
 import { dispatch } from '../../agents/dispatch'
 import { broadcast } from '../../sse'
+import {
+  buildMycelContext,
+  buildAgentsSection,
+  buildSkillsSection,
+  buildMcpSection,
+} from '../../prompts/context'
 
 // Track currently running tasks (task_id -> start time)
 const runningTasks = new Map<string, number>()
@@ -44,8 +50,31 @@ async function runTask(task: Awaited<ReturnType<typeof queries.getTask>>): Promi
   const taskId = task.id
   const agent = (task.agent ?? 'claude') as 'claude' | 'codex' | 'gemini' | 'cline' | 'cursor'
   const model = task.model ?? undefined
-  const prompt = task.prompt ?? task.title
   const repoPath = task.repo_path
+
+  // Build context-enriched prompt
+  const basePrompt = task.prompt ?? task.title
+  const mycelContext = buildMycelContext({
+    role: 'task_agent',
+    agentId: agent,
+    model,
+    taskId,
+    taskTitle: task.title,
+  })
+  const agentsSection = buildAgentsSection()
+  const skillsSection = buildSkillsSection([], repoPath)
+  const mcpSection = buildMcpSection()
+
+  // Compose full prompt with all context injections
+  const prompt = `${basePrompt}
+
+---
+
+${mycelContext}
+
+${agentsSection}
+${skillsSection ? `\n${skillsSection}` : ''}
+${mcpSection ? `\n${mcpSection}` : ''}`
 
   console.log(`[Dispatcher] Running task ${taskId.slice(0, 8)}: ${task.title}`)
 

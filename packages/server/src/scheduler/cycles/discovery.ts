@@ -18,46 +18,12 @@ import {
   DISCOVERY_SENT_MARKER,
   DISCOVERY_AUTO_MARKER,
 } from '../../prompts/discovery'
-
-// Default mycel context for Discovery agent
-const MYCEL_CONTEXT = `## Using mycel CLI
-
-You have access to the mycel CLI for all operations:
-
-\`\`\`bash
-# Task Management
-mycel task create "title" --repo /path --agent claude --model sonnet --prompt "..."
-mycel task create "title" --repo /path --depends-on <task_id> --prompt "..."
-mycel tasks [--status pending]
-mycel task info <id>
-
-# Alignment (async, non-blocking)
-mycel align "question" --options "A" "B" "C"
-
-# Notifications
-mycel notify "message"
-
-# Memory
-mycel memory [--repo /path]
-\`\`\`
-
-IMPORTANT: NEVER use \`--wait\` with align. You are a system agent - send the signal and exit.
-The daemon will spawn a continuation agent when the human replies.
-`
-
-// Agent section with available agents
-const AGENTS_SECTION = `## Available Agents
-
-| Agent | Command | Models | Best For |
-|-------|---------|--------|----------|
-| claude | claude | opus, sonnet, haiku | Complex reasoning, architecture |
-| codex | codex | gpt-5.2-codex | Code generation, refactors |
-| gemini | gemini | gemini-3-flash-preview, pro | Fast iteration, research |
-| cursor | cursor | composer-1 | Multi-file composition |
-| cline | cline | kimi-k2, glm-4.7 | Strong reasoning |
-
-Use \`--agent <name> --model <model>\` when creating tasks.
-`
+import {
+  buildMycelContext,
+  buildAgentsSection,
+  buildSkillsSection,
+  buildMcpSection,
+} from '../../prompts/context'
 
 /**
  * Build context for Discovery agent.
@@ -145,8 +111,19 @@ async function runDiscoveryForRepo(
       return
     }
 
-    // Build prompt
-    const prompt = buildDiscoveryPrompt(context, MYCEL_CONTEXT, AGENTS_SECTION)
+    // Build dynamic context sections
+    const mycelContext = buildMycelContext({
+      role: 'discovery',
+      agentId: 'discovery',
+    })
+    const agentsSection = buildAgentsSection()
+    const skillsSection = buildSkillsSection([], repoPath)
+    const mcpSection = buildMcpSection()
+
+    // Build prompt with dynamic context
+    const prompt = buildDiscoveryPrompt(context, mycelContext, agentsSection)
+      + (skillsSection ? `\n\n${skillsSection}` : '')
+      + (mcpSection ? `\n\n${mcpSection}` : '')
 
     // Dispatch to agent
     // Use claude/opus for auto mode (more autonomous), claude/sonnet for align mode

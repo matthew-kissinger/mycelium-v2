@@ -19,6 +19,7 @@ import {
   type RunningTaskContext,
   type ShepherdEvalContext,
 } from '../../prompts/sequencer'
+import { buildMycelContext } from '../../prompts/context'
 
 /**
  * Run the Sequencer cycle.
@@ -107,13 +108,22 @@ async function runSequencerForRepo(
       headline: e.headline,
     }))
 
+    // Build context for system agent
+    const mycelContext = buildMycelContext({
+      role: 'sequencer',
+      agentId: 'sequencer',
+    })
+
     // Build prompt (using the new context structure)
-    const prompt = buildSequencerPrompt({
+    const basePrompt = buildSequencerPrompt({
       pendingTasks,
       runningTasks: runningTaskContext,
       repoPath,
       shepherdEvals: evalContext,
     })
+
+    // Add context to prompt
+    const prompt = `${basePrompt}\n\n${mycelContext}`
 
     // Dispatch to agent
     const result = await dispatch({
