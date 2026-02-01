@@ -8,6 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^2.0.3",
     "@mycelium/shared": "workspace:*",
     "@tanstack/react-query": "latest",
     "@xyflow/react": "latest",

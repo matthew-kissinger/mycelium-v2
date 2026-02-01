@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useMemo, useEffect, useRef } from 'react'
 import {
   ReactFlow,
   Background,
@@ -11,184 +11,354 @@ import {
   type Node,
   type Edge,
 } from '@xyflow/react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import Dagre from '@dagrejs/dagre'
 import { nodeTypes } from './nodes'
 import { Sidebar } from './components/Sidebar'
 import { Header } from './components/Header'
-import type { Stats } from '@mycelium/shared'
+import type {
+  Stats,
+  Task,
+  Repo,
+  Signal,
+  RepoMemory,
+  SSEEvent,
+} from '@mycelium/shared'
 
-// Initial nodes for demo - showcasing all node types
-const initialNodes: Node[] = [
-  // System agent nodes (top row)
-  {
-    id: 'discovery',
-    type: 'agent',
-    position: { x: 100, y: 50 },
-    data: { label: 'Discovery', agentType: 'discovery', status: 'idle' },
-  },
-  {
-    id: 'sequencer',
-    type: 'agent',
-    position: { x: 320, y: 50 },
-    data: { label: 'Sequencer', agentType: 'sequencer', status: 'running' },
-  },
-  {
-    id: 'shepherd',
-    type: 'agent',
-    position: { x: 540, y: 50 },
-    data: { label: 'Shepherd', agentType: 'shepherd', status: 'idle' },
-  },
-  {
-    id: 'genesis',
-    type: 'agent',
-    position: { x: 760, y: 50 },
-    data: { label: 'Genesis', agentType: 'genesis', status: 'error', description: 'Last run failed' },
-  },
+// =============================================================================
+// Layout Configuration
+// =============================================================================
 
-  // Task nodes (middle row)
-  {
-    id: 'task-1',
-    type: 'task',
-    position: { x: 100, y: 200 },
-    data: {
-      id: 'task-1',
-      title: 'Implement React Flow nodes',
-      status: 'completed',
-      agent: 'claude',
-      model: 'opus',
-      repo_path: '/home/user/repos/mycelium-v2',
-      depends_on: [],
-    },
-  },
-  {
-    id: 'task-2',
-    type: 'task',
-    position: { x: 350, y: 200 },
-    data: {
-      id: 'task-2',
-      title: 'Add SSE streaming',
-      status: 'running',
-      agent: 'codex',
-      model: 'codex-1',
-      repo_path: '/home/user/repos/mycelium-v2',
-      depends_on: ['task-1'],
-    },
-  },
-  {
-    id: 'task-3',
-    type: 'task',
-    position: { x: 600, y: 200 },
-    data: {
-      id: 'task-3',
-      title: 'Fix memory leak in scheduler',
-      status: 'pending',
-      agent: 'gemini',
-      repo_path: '/home/user/repos/mycelium-v2',
-      depends_on: ['task-1', 'task-2'],
-    },
-  },
-  {
-    id: 'task-4',
-    type: 'task',
-    position: { x: 850, y: 200 },
-    data: {
-      id: 'task-4',
-      title: 'Update documentation',
-      status: 'failed',
-      repo_path: '/home/user/repos/mycelium-v2',
-      depends_on: [],
-    },
-  },
+const NODE_WIDTH = 220
+const NODE_HEIGHT = 120
+const RANK_SEP = 100 // Vertical spacing between ranks
+const NODE_SEP = 50 // Horizontal spacing between nodes
 
-  // Repo nodes (bottom left)
-  {
-    id: 'repo-1',
+// Layout direction - TB = top to bottom, LR = left to right
+type LayoutDirection = 'TB' | 'LR'
+
+// =============================================================================
+// Dagre Layout Function
+// =============================================================================
+
+function getLayoutedElements(
+  nodes: Node[],
+  edges: Edge[],
+  direction: LayoutDirection = 'TB'
+): { nodes: Node[]; edges: Edge[] } {
+  const g = new Dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}))
+
+  g.setGraph({
+    rankdir: direction,
+    nodesep: NODE_SEP,
+    ranksep: RANK_SEP,
+    marginx: 50,
+    marginy: 50,
+  })
+
+  nodes.forEach((node) => {
+    g.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT })
+  })
+
+  edges.forEach((edge) => {
+    g.setEdge(edge.source, edge.target)
+  })
+
+  Dagre.layout(g)
+
+  const layoutedNodes = nodes.map((node) => {
+    const nodeWithPosition = g.node(node.id)
+    return {
+      ...node,
+      position: {
+        x: nodeWithPosition.x - NODE_WIDTH / 2,
+        y: nodeWithPosition.y - NODE_HEIGHT / 2,
+      },
+    }
+  })
+
+  return { nodes: layoutedNodes, edges }
+}
+
+// =============================================================================
+// Data Fetching
+// =============================================================================
+
+async function fetchTasks(): Promise<Task[]> {
+  const res = await fetch('/api/tasks')
+  if (!res.ok) throw new Error('Failed to fetch tasks')
+  return res.json()
+}
+
+async function fetchRepos(): Promise<Repo[]> {
+  const res = await fetch('/api/repos')
+  if (!res.ok) throw new Error('Failed to fetch repos')
+  return res.json()
+}
+
+async function fetchSignals(): Promise<Signal[]> {
+  const res = await fetch('/api/signals')
+  if (!res.ok) throw new Error('Failed to fetch signals')
+  return res.json()
+}
+
+async function fetchGlobalMemory(): Promise<RepoMemory> {
+  const res = await fetch('/api/memory/global')
+  if (!res.ok) throw new Error('Failed to fetch memory')
+  return res.json()
+}
+
+async function fetchStats(): Promise<Stats> {
+  const res = await fetch('/api/stats')
+  if (!res.ok) throw new Error('Failed to fetch stats')
+  return res.json()
+}
+
+// =============================================================================
+// Node Conversion Functions
+// =============================================================================
+
+function tasksToNodes(tasks: Task[]): Node[] {
+  return tasks.map((task) => ({
+    id: `task-${task.id}`,
+    type: 'task',
+    position: { x: 0, y: 0 }, // Will be set by layout
+    data: {
+      id: task.id,
+      title: task.title,
+      status: task.status === 'done' ? 'completed' : task.status,
+      agent: task.agent,
+      model: task.model,
+      repo_path: task.repo_path,
+      depends_on: task.depends_on || [],
+    },
+  }))
+}
+
+function reposToNodes(repos: Repo[]): Node[] {
+  return repos.map((repo) => ({
+    id: `repo-${repo.id}`,
     type: 'repo',
-    position: { x: 100, y: 380 },
+    position: { x: 0, y: 0 }, // Will be set by layout
     data: {
-      id: 'repo-1',
-      name: 'mycelium-v2',
-      path: '/home/user/repos/mycelium-v2',
-      mode: 'auto',
-      language: 'typescript',
-      description: 'Agent orchestration system for managing multi-agent development workflows',
+      id: repo.id,
+      name: repo.name,
+      path: repo.path,
+      mode: repo.mode,
+      language: repo.language,
+      description: repo.description,
     },
-  },
-  {
-    id: 'repo-2',
-    type: 'repo',
-    position: { x: 320, y: 380 },
-    data: {
-      id: 'repo-2',
-      name: 'void-scavenger',
-      path: '/home/user/repos/void-scavenger',
-      mode: 'align',
-      language: 'javascript',
-      description: 'Three.js time-loop sci-fi game',
-    },
-  },
+  }))
+}
 
-  // Signal node (bottom middle)
-  {
-    id: 'signal-1',
+function signalsToNodes(signals: Signal[]): Node[] {
+  return signals.map((signal) => ({
+    id: `signal-${signal.id}`,
     type: 'signal',
-    position: { x: 560, y: 380 },
+    position: { x: 0, y: 0 }, // Will be set by layout
     data: {
-      id: 'signal-1',
-      question: 'Should we merge the feature branch with experimental changes?',
-      status: 'pending',
-      options: ['Yes', 'No', 'Defer'],
-      created_at: new Date(Date.now() - 3600000).toISOString(),
+      id: signal.id,
+      question: signal.question,
+      status: signal.status,
+      options: signal.options,
+      response: signal.response,
+      created_at: signal.created_at,
+      responded_at: signal.responded_at,
     },
-  },
-  {
-    id: 'signal-2',
-    type: 'signal',
-    position: { x: 560, y: 530 },
-    data: {
-      id: 'signal-2',
-      question: 'Create new repo for shared utilities?',
-      status: 'responded',
-      options: ['Approve', 'Reject'],
-      response: 'Approve',
-      created_at: new Date(Date.now() - 86400000).toISOString(),
-      responded_at: new Date(Date.now() - 82800000).toISOString(),
-    },
-  },
+  }))
+}
 
-  // Memory node (bottom right)
-  {
-    id: 'memory-1',
-    type: 'memory',
-    position: { x: 850, y: 380 },
-    data: {
-      repo_path: '/home/user/repos/mycelium-v2',
-      patterns: [
-        { id: 'p1', content: 'Use conventional commits for all changes', tags: ['git'] },
-        { id: 'p2', content: 'Run tests before committing', tags: ['testing'] },
-        { id: 'p3', content: 'Prefer Bun over Node.js', tags: ['runtime'] },
-      ],
-      warnings: [
-        { id: 'w1', content: 'Database migrations must be reviewed', severity: 'high' },
-        { id: 'w2', content: 'Avoid force pushing to main', severity: 'medium' },
-      ],
-    },
-  },
-]
+function memoryToNodes(memory: RepoMemory | undefined): Node[] {
+  if (!memory) return []
 
-const initialEdges: Edge[] = [
-  // Agent flow
-  { id: 'e1', source: 'discovery', target: 'sequencer', animated: true },
-  { id: 'e2', source: 'sequencer', target: 'shepherd', animated: true },
-  // Task dependencies
-  { id: 'e3', source: 'task-1', target: 'task-2' },
-  { id: 'e4', source: 'task-1', target: 'task-3' },
-  { id: 'e5', source: 'task-2', target: 'task-3' },
-]
+  // Only show global memory if it has patterns or warnings
+  if (memory.patterns.length === 0 && memory.warnings.length === 0) return []
+
+  return [
+    {
+      id: 'memory-global',
+      type: 'memory',
+      position: { x: 0, y: 0 }, // Will be set by layout
+      data: {
+        repo_path: memory.repo_path || undefined,
+        patterns: memory.patterns.map((p) => ({
+          id: p.id,
+          content: p.content,
+          tags: p.tags,
+        })),
+        warnings: memory.warnings.map((w) => ({
+          id: w.id,
+          content: w.content,
+          severity: w.severity,
+        })),
+      },
+    },
+  ]
+}
+
+// =============================================================================
+// Edge Building
+// =============================================================================
+
+function buildEdgesFromTasks(tasks: Task[]): Edge[] {
+  const edges: Edge[] = []
+  const taskIds = new Set(tasks.map((t) => t.id))
+
+  tasks.forEach((task) => {
+    if (task.depends_on && task.depends_on.length > 0) {
+      task.depends_on.forEach((depId) => {
+        // Only create edge if dependency exists in our task list
+        if (taskIds.has(depId)) {
+          edges.push({
+            id: `e-${depId}-${task.id}`,
+            source: `task-${depId}`,
+            target: `task-${task.id}`,
+            animated: task.status === 'running',
+          })
+        }
+      })
+    }
+  })
+
+  return edges
+}
+
+// =============================================================================
+// SSE Event Hook
+// =============================================================================
+
+function useSSE(onEvent: (event: SSEEvent) => void) {
+  const eventSourceRef = useRef<EventSource | null>(null)
+
+  useEffect(() => {
+    // Connect to SSE endpoint
+    const eventSource = new EventSource('/api/events')
+    eventSourceRef.current = eventSource
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as SSEEvent
+        onEvent(data)
+      } catch (e) {
+        console.error('Failed to parse SSE event:', e)
+      }
+    }
+
+    eventSource.onerror = (error) => {
+      console.error('SSE connection error:', error)
+      // EventSource will automatically reconnect
+    }
+
+    return () => {
+      eventSource.close()
+    }
+  }, [onEvent])
+}
+
+// =============================================================================
+// Main App Component
+// =============================================================================
 
 export default function App() {
-  const [nodes, , onNodesChange] = useNodesState(initialNodes)
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
+  const queryClient = useQueryClient()
+
+  // Fetch data
+  const { data: tasks = [] } = useQuery<Task[]>({
+    queryKey: ['tasks'],
+    queryFn: fetchTasks,
+    refetchInterval: 30000, // Refresh every 30s as backup
+  })
+
+  const { data: repos = [] } = useQuery<Repo[]>({
+    queryKey: ['repos'],
+    queryFn: fetchRepos,
+    refetchInterval: 60000,
+  })
+
+  const { data: signals = [] } = useQuery<Signal[]>({
+    queryKey: ['signals'],
+    queryFn: fetchSignals,
+    refetchInterval: 30000,
+  })
+
+  const { data: memory } = useQuery<RepoMemory>({
+    queryKey: ['memory', 'global'],
+    queryFn: fetchGlobalMemory,
+    refetchInterval: 60000,
+  })
+
+  const { data: stats } = useQuery<Stats>({
+    queryKey: ['stats'],
+    queryFn: fetchStats,
+    refetchInterval: 5000,
+  })
+
+  // Handle SSE events
+  const handleSSEEvent = useCallback(
+    (event: SSEEvent) => {
+      // Invalidate relevant queries based on event type
+      if ('type' in event) {
+        const eventType = event.type
+
+        // Task events
+        if (eventType.startsWith('task:')) {
+          queryClient.invalidateQueries({ queryKey: ['tasks'] })
+          queryClient.invalidateQueries({ queryKey: ['stats'] })
+        }
+
+        // Signal events
+        if (eventType.startsWith('signal:')) {
+          queryClient.invalidateQueries({ queryKey: ['signals'] })
+        }
+
+        // Repo events
+        if (eventType.startsWith('repo:')) {
+          queryClient.invalidateQueries({ queryKey: ['repos'] })
+        }
+
+        // Memory events
+        if (eventType.startsWith('memory:')) {
+          queryClient.invalidateQueries({ queryKey: ['memory'] })
+        }
+      }
+    },
+    [queryClient]
+  )
+
+  useSSE(handleSSEEvent)
+
+  // Convert data to nodes
+  const rawNodes = useMemo(() => {
+    const taskNodes = tasksToNodes(tasks)
+    const repoNodes = reposToNodes(repos)
+    const signalNodes = signalsToNodes(signals)
+    const memoryNodes = memoryToNodes(memory)
+
+    return [...taskNodes, ...repoNodes, ...signalNodes, ...memoryNodes]
+  }, [tasks, repos, signals, memory])
+
+  // Build edges from task dependencies
+  const rawEdges = useMemo(() => {
+    return buildEdgesFromTasks(tasks)
+  }, [tasks])
+
+  // Apply layout
+  const { nodes: layoutedNodes, edges: layoutedEdges } = useMemo(() => {
+    if (rawNodes.length === 0) {
+      return { nodes: [], edges: [] }
+    }
+    return getLayoutedElements(rawNodes, rawEdges, 'TB')
+  }, [rawNodes, rawEdges])
+
+  // React Flow state
+  const [nodes, setNodes, onNodesChange] = useNodesState(layoutedNodes)
+  const [edges, setEdges, onEdgesChange] = useEdgesState(layoutedEdges)
+
+  // Update nodes and edges when layout changes
+  useEffect(() => {
+    setNodes(layoutedNodes)
+    setEdges(layoutedEdges)
+  }, [layoutedNodes, layoutedEdges, setNodes, setEdges])
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -196,16 +366,6 @@ export default function App() {
     },
     [setEdges]
   )
-
-  // Fetch stats
-  const { data: stats } = useQuery<Stats>({
-    queryKey: ['stats'],
-    queryFn: async (): Promise<Stats> => {
-      const res = await fetch('/api/stats')
-      return res.json() as Promise<Stats>
-    },
-    refetchInterval: 5000,
-  })
 
   return (
     <div className="flex h-screen flex-col">
@@ -235,9 +395,9 @@ export default function App() {
                   case 'repo':
                     return 'hsl(210 50% 50%)' // Blue for repos
                   case 'signal':
-                    return 'hsl(45 50% 50%)'  // Yellow for signals
+                    return 'hsl(45 50% 50%)' // Yellow for signals
                   case 'memory':
-                    return 'hsl(30 50% 50%)'  // Orange for memory
+                    return 'hsl(30 50% 50%)' // Orange for memory
                   default:
                     return 'hsl(0 0% 50%)'
                 }
