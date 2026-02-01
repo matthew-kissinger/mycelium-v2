@@ -268,6 +268,30 @@
 - ApiError class for structured error handling
 - Table formatter with auto-column widths and value truncation
 
+### Phase 4A: Discovery Prompt
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T04:00:00Z
+**Completed**: 2026-02-01T04:15:00Z
+**Validation**:
+- TypeScript compiles without errors (bun run tsc --noEmit in packages/server)
+- Prompt text matches v1 discovery.py exactly (lines 632-726, 729-908, 911-993)
+- All three prompts ported: DISCOVERY_AGENT_PROMPT, AUTONOMOUS_DISCOVERY_PROMPT, TASK_CREATOR_AGENT_PROMPT
+- Output markers and helper functions included
+- buildDiscoveryPrompt, buildTaskCreatorPrompt helpers with context injection
+
+**Files Created**:
+- `packages/server/src/prompts/discovery.ts` - Complete Discovery agent prompt port
+
+**Notes**:
+- DISCOVERY_AGENT_PROMPT: Alignment mode (sends report, awaits human reply)
+- AUTONOMOUS_DISCOVERY_PROMPT: Auto-create mode (explores, updates docs, creates tasks directly)
+- TASK_CREATOR_AGENT_PROMPT: Continuation agent for transforming human response into tasks
+- Template variables: {MYCEL_CONTEXT}, {AGENTS_SECTION}, {repo_path}, {repo_name}
+- DiscoveryContext, TaskCreatorContext interfaces for type-safe context injection
+- Success markers: DISCOVERY_SENT_MARKER, DISCOVERY_AUTO_MARKER, TASKS_CREATED_REGEX
+- Helper functions: isDiscoverySignal, extractRepoFromSignal
+
 ### Phase 4D: Genesis Prompt
 **Status**: COMPLETE
 **Agent**: claude/opus
@@ -442,4 +466,5 @@ Before marking a phase complete:
 | 2026-02-01 | 4D | claude/opus | Genesis prompt (3 prompts: manual, auto, continuation) |
 | 2026-02-01 | 4E | claude/opus | Armory prompt (exact port from v1) |
 | 2026-02-01 | 4C | claude/opus | Shepherd prompt (exact port from v1) |
+| 2026-02-01 | 4A | claude/opus | Discovery prompt (3 prompts: alignment, autonomous, task creator) |
 
