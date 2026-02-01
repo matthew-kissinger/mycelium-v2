@@ -1,0 +1,28 @@
+{
+  "name": "@mycelium/client",
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@mycelium/shared": "workspace:*",
+    "@xyflow/react": "latest",
+    "@tanstack/react-query": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "zustand": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "latest",
+    "autoprefixer": "latest",
+    "tailwindcss": "latest",
+    "vite": "latest"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "@mycelium/server",
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target bun",
+    "start": "bun run dist/index.js",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@mycelium/shared": "workspace:*",
+    "@hono/zod-validator": "latest",
+    "hono": "latest",
+    "drizzle-orm": "latest",
+    "zod": "latest",
+    "nanoid": "latest"
+  },
+  "devDependencies": {
+    "drizzle-kit": "latest"
+  }
+}

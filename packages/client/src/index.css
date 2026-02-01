@@ -1,0 +1,46 @@
+@import 'tailwindcss';
+
+@theme inline {
+  --color-background: oklch(0.145 0 0);
+  --color-foreground: oklch(0.985 0 0);
+  --color-muted: oklch(0.269 0 0);
+  --color-muted-foreground: oklch(0.708 0 0);
+  --color-border: oklch(1 0 0 / 0.1);
+  --color-primary: oklch(0.646 0.222 41.116);
+  --color-primary-foreground: oklch(0.393 0.095 152.535);
+  --color-accent: oklch(0.269 0 0);
+  --color-accent-foreground: oklch(0.985 0 0);
+  --color-destructive: oklch(0.396 0.141 25.723);
+  --color-ring: oklch(0.646 0.222 41.116);
+
+  /* React Flow colors */
+  --color-node-agent: oklch(0.5 0.15 260);
+  --color-node-task: oklch(0.5 0.15 150);
+  --color-node-input: oklch(0.5 0.15 100);
+  --color-node-output: oklch(0.5 0.15 30);
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* React Flow overrides */
+.react-flow__node {
+  border-radius: 8px;
+  border: 2px solid var(--color-border);
+  background: var(--color-muted);
+}
+
+.react-flow__edge-path {
+  stroke: var(--color-muted-foreground);
+  stroke-width: 2;
+}
+
+.react-flow__handle {
+  width: 12px;
+  height: 12px;
+  background: var(--color-primary);
+  border: 2px solid var(--color-background);
+}

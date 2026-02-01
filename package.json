@@ -1,0 +1,19 @@
+{
+  "name": "mycelium-v2",
+  "type": "module",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "dev": "bun run --filter '*' dev",
+    "dev:server": "bun run --filter server dev",
+    "dev:client": "bun run --filter client dev",
+    "build": "bun run --filter '*' build",
+    "db:generate": "bun run --filter server db:generate",
+    "db:migrate": "bun run --filter server db:migrate",
+    "db:studio": "bun run --filter server db:studio"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "latest"
+  }
+}
