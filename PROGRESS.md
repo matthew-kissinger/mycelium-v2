@@ -22,8 +22,10 @@
 | 3A | COMPLETE | claude/opus | CLI scaffold |
 | 3B-F | PENDING | - | CLI commands |
 | 4A | IN PROGRESS | claude/opus | Discovery prompt |
-| 4B-D | PENDING | - | Other system prompts |
-| 4E | IN PROGRESS | claude/opus | Armory prompt |
+| 4B | PENDING | - | Sequencer prompt |
+| 4C | PENDING | - | Shepherd prompt |
+| 4D | COMPLETE | claude/opus | Genesis prompt |
+| 4E | COMPLETE | claude/opus | Armory prompt |
 | 5A-B | PENDING | - | Scheduler |
 | 6A-E | PENDING | - | Frontend |
 | 7A-B | PENDING | - | MCP package |
@@ -266,6 +268,28 @@
 - ApiError class for structured error handling
 - Table formatter with auto-column widths and value truncation
 
+### Phase 4E: Armory Prompt
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T03:00:00Z
+**Completed**: 2026-02-01T03:15:00Z
+**Validation**:
+- TypeScript compiles without errors (bun run tsc --noEmit)
+- Prompt text matches v1 armory.py exactly (lines 67-155)
+- YAML output schema included
+- Inventory format template included
+- buildArmoryPrompt helper function with context injection
+
+**Files Created**:
+- `packages/server/src/prompts/armory.ts` - Complete Armory agent prompt port
+
+**Notes**:
+- ARMORY_AGENT_PROMPT: Main prompt template with mission, skill acquisition, MCP installation
+- ARMORY_OUTPUT_SCHEMA: Expected YAML output format (skills_added, mcps_installed, gaps_remaining)
+- INVENTORY_FORMAT: Template for current skill/MCP inventory section
+- ArmoryContext interface for type-safe context injection
+- buildArmoryPrompt function replaces {inventory} and {tasks_analyzed} placeholders
+
 ---
 
 ## Agent Harness Compatibility Matrix
@@ -390,4 +414,5 @@ Before marking a phase complete:
 | 2026-02-01 | 2A | claude/opus | Task routes (extended: context, graph, cancel, dependency resolution) |
 | 2026-02-01 | 2F | claude/opus | Notification routes (notify, align, inbox, status placeholders) |
 | 2026-02-01 | 3A | claude/opus | CLI scaffold (entry point, client, output helpers) |
+| 2026-02-01 | 4E | claude/opus | Armory prompt (exact port from v1) |
 
