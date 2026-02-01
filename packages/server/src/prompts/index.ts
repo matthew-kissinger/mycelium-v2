@@ -12,7 +12,33 @@
 export * from './sequencer';
 export * from './discovery';
 
-// Future exports (Phase 4):
-// export * from './shepherd';
-// export * from './genesis';
-// export * from './armory';
+// Re-export shepherd with renamed buildContinuationPrompt
+export {
+  SHEPHERD_SYSTEM_PROMPT,
+  SHEPHERD_OUTPUT_SCHEMA,
+  SHEPHERD_CONTINUATION_PROMPT,
+  type ShepherdTaskContext,
+  type ShepherdSignalContext,
+  type ShepherdMemoryContext,
+  buildShepherdContext,
+  buildShepherdPrompt,
+  buildContinuationPrompt as buildShepherdContinuationPrompt,
+} from './shepherd';
+
+// Re-export genesis with renamed buildContinuationPrompt
+export {
+  GENESIS_AGENT_PROMPT,
+  AUTO_GENESIS_PROMPT,
+  GENESIS_CONTINUATION_PROMPT,
+  GENESIS_MARKERS,
+  type GenesisContext,
+  type AutoGenesisContext,
+  type ContinuationContext as GenesisContinuationContext,
+  buildGenesisPrompt,
+  buildAutoGenesisPrompt,
+  buildContinuationPrompt as buildGenesisContinuationPrompt,
+  parseGenesisResult,
+  isGenesisSignal,
+} from './genesis';
+
+export * from './armory';

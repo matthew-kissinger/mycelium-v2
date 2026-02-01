@@ -1,8 +1,16 @@
 import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
+import { SchedulerConfig } from '@mycelium/shared'
 import * as queries from '../db/queries'
 import { broadcast } from '../sse'
+import {
+  getSchedulerStatus,
+  getSchedulerConfig,
+  updateSchedulerConfig,
+  startScheduler,
+  stopScheduler,
+} from '../scheduler'
 
 // =============================================================================
 // System Agent Runs Routes (/api/system-agents)
@@ -152,78 +160,68 @@ shepherdRoutes.post('/trigger', zValidator('json', TriggerRequestSchema), async 
 
 export const schedulerRoutes = new Hono()
 
-// GET /api/scheduler/status - Get scheduler status (placeholder for now)
+// GET /api/scheduler/status - Get scheduler status
 schedulerRoutes.get('/status', async (c) => {
-  // Placeholder status - actual implementation comes in Phase 5
-  // Returns a valid SchedulerStatus object with default/placeholder values
-
-  const cycles: Array<{
-    name: string
-    enabled: boolean
-    running: boolean
-    last_run?: string
-    next_run?: string
-    runs_completed: number
-    errors: number
-  }> = [
-    {
-      name: 'dispatcher',
-      enabled: true,
-      running: false,
-      runs_completed: 0,
-      errors: 0,
-    },
-    {
-      name: 'discovery',
-      enabled: true,
-      running: false,
-      runs_completed: 0,
-      errors: 0,
-    },
-    {
-      name: 'sequencer',
-      enabled: true,
-      running: false,
-      runs_completed: 0,
-      errors: 0,
-    },
-    {
-      name: 'shepherd',
-      enabled: true,
-      running: false,
-      runs_completed: 0,
-      errors: 0,
-    },
-    {
-      name: 'digest',
-      enabled: true,
-      running: false,
-      runs_completed: 0,
-      errors: 0,
-    },
-    {
-      name: 'compaction',
-      enabled: true,
-      running: false,
-      runs_completed: 0,
-      errors: 0,
-    },
-    {
-      name: 'blocked_check',
-      enabled: true,
-      running: false,
-      runs_completed: 0,
-      errors: 0,
-    },
-  ]
-
-  const status = {
-    running: false, // Scheduler not implemented yet
-    started_at: undefined,
-    cycles,
-  }
-
+  const status = getSchedulerStatus()
   return c.json(status)
+})
+
+// GET /api/scheduler/config - Get scheduler config
+schedulerRoutes.get('/config', async (c) => {
+  const config = getSchedulerConfig()
+  return c.json(config)
+})
+
+// Validation schema for config updates
+const ConfigUpdateSchema = z.object({
+  dispatcher_enabled: z.boolean().optional(),
+  dispatcher_interval_sec: z.number().int().positive().optional(),
+  max_concurrent_tasks: z.number().int().positive().optional(),
+  min_concurrent_tasks: z.number().int().positive().optional(),
+  max_concurrent_ceiling: z.number().int().positive().optional(),
+  blocked_task_timeout_sec: z.number().int().positive().optional(),
+  blocked_check_enabled: z.boolean().optional(),
+  orphan_cancel_timeout_sec: z.number().int().positive().optional(),
+  discovery_enabled: z.boolean().optional(),
+  discovery_interval_sec: z.number().int().positive().optional(),
+  discovery_repos: z.array(z.string()).optional(),
+  discovery_auto_create: z.array(z.string()).optional(),
+  digest_enabled: z.boolean().optional(),
+  digest_interval_sec: z.number().int().positive().optional(),
+  compaction_enabled: z.boolean().optional(),
+  compaction_day: z.number().int().min(0).max(6).optional(),
+  compaction_hour: z.number().int().min(0).max(23).optional(),
+  auto_prune_enabled: z.boolean().optional(),
+  auto_prune_threshold: z.number().int().positive().optional(),
+  auto_prune_keep: z.number().int().positive().optional(),
+})
+
+// POST /api/scheduler/config - Update scheduler config
+schedulerRoutes.post('/config', zValidator('json', ConfigUpdateSchema), async (c) => {
+  const updates = c.req.valid('json')
+  const config = updateSchedulerConfig(updates)
+  return c.json({
+    message: 'Scheduler config updated',
+    config,
+  })
+})
+
+// POST /api/scheduler/start - Start the scheduler
+schedulerRoutes.post('/start', async (c) => {
+  const status = startScheduler()
+  return c.json({
+    message: 'Scheduler started',
+    status,
+  })
+})
+
+// POST /api/scheduler/stop - Stop the scheduler
+schedulerRoutes.post('/stop', async (c) => {
+  const status = stopScheduler()
+  return c.json({
+    message: 'Scheduler stopped',
+    status,
+  })
 })
 
 // Default export for backwards compatibility

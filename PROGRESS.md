@@ -593,6 +593,45 @@
 - Dark theme styling matching existing components
 - Status colors: pending=yellow, responded=green, expired=gray
 
+### Phase 5A-B: Scheduler Implementation
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T10:00:00Z
+**Completed**: 2026-02-01T11:00:00Z
+**Validation**:
+- TypeScript compiles without errors (bun run tsc --noEmit)
+- Server starts without errors
+- GET /api/scheduler/status returns all cycle states
+- GET /api/scheduler/config returns configuration
+- POST /api/scheduler/start starts the scheduler
+- POST /api/scheduler/stop stops the scheduler
+
+**Files Created**:
+- `packages/server/src/scheduler/index.ts` - Main scheduler module
+- `packages/server/src/scheduler/config.ts` - Config loading/saving
+- `packages/server/src/scheduler/cycles/dispatcher.ts` - Task dispatch cycle
+- `packages/server/src/scheduler/cycles/discovery.ts` - Discovery agent cycle
+- `packages/server/src/scheduler/cycles/sequencer.ts` - Sequencer agent cycle
+- `packages/server/src/scheduler/cycles/shepherd.ts` - Shepherd evaluation cycle
+- `packages/server/src/scheduler/cycles/blocked.ts` - Blocked task detection
+- `packages/server/src/scheduler/cycles/digest.ts` - Status summary cycle
+- `packages/server/src/scheduler/cycles/compaction.ts` - Memory cleanup cycle
+
+**Files Modified**:
+- `packages/server/src/routes/system-agents.ts` - Added scheduler routes
+- `packages/server/src/prompts/index.ts` - Fixed duplicate export conflicts
+
+**Notes**:
+- Scheduler manages 7 cycles: dispatcher, discovery, sequencer, shepherd, blocked_check, digest, compaction
+- Config stored in ~/.config/mycelium-v2/scheduler.json
+- Default config: dispatcher every 60s, discovery/sequencer every 15min, digest every 6h
+- Compaction runs weekly on Monday at 11am
+- Dispatcher uses soft cap concurrency with dynamic scaling (3-10 concurrent tasks)
+- Shepherd triggered when 5+ unevaluated tasks per repo
+- Blocked check detects stale tasks (35min), needs_attention (3h), orphaned (4h auto-cancel)
+- All cycles broadcast SSE events for real-time updates
+- System agent runs tracked in database
+
 ### Phase 7A-B: MCP Package
 **Status**: COMPLETE
 **Agent**: claude/opus
@@ -770,4 +809,5 @@ Before marking a phase complete:
 | 2026-01-31 | 7A-B | claude/opus | MCP package (14 tools: stats, tasks, repos, notify, align, memory, genesis, sequence, signals) |
 | 2026-02-01 | 6D | claude/opus | Task Panel Component (task list, filters, detail view, create form, run/cancel/delete) |
 | 2026-02-01 | 6B | claude/opus | Zustand workflow store (SSE, tasks, repos, signals, auto-layout) |
+| 2026-02-01 | 5A-B | claude/opus | Scheduler implementation (7 cycles, config, API routes) |
 
