@@ -17,6 +17,8 @@ import {
 import { createSSEResponse, getClientCount, getClientInfo, shutdown as shutdownSSE } from './sse'
 import { db, schema } from './db'
 import { sql } from 'drizzle-orm'
+import { initTelegramService, getTelegramService, shutdownTelegramService } from './telegram'
+import { createUpdateHandler } from './telegram/polling'
 
 const app = new Hono()
 
@@ -26,10 +28,11 @@ app.use('*', logger())
 
 // Health check
 app.get('/api/health', (c) => {
+  const telegram = getTelegramService()
   return c.json({
     backend: true,
     scheduler: false, // TODO: implement scheduler
-    poller: false, // TODO: implement Telegram poller
+    poller: telegram?.isConnected() ?? false,
     uptime_seconds: Math.floor(process.uptime()),
     sse_clients: getClientCount(),
   })
@@ -172,22 +175,38 @@ async function initDb() {
   console.log('Database initialized')
 }
 
+// Initialize Telegram service and start polling
+async function initTelegram() {
+  const telegram = await initTelegramService()
+  if (telegram) {
+    const updateHandler = createUpdateHandler(telegram)
+    telegram.startPolling(updateHandler)
+    console.log('Telegram polling started')
+  } else {
+    console.log('Telegram not configured, skipping initialization')
+  }
+}
+
 // Start server
 const port = parseInt(process.env.PORT ?? '8000')
 
-initDb().then(() => {
+initDb().then(async () => {
   console.log(`Server running at http://localhost:${port}`)
+  // Initialize Telegram after DB is ready
+  await initTelegram()
 })
 
 // Graceful shutdown
 process.on('SIGINT', () => {
   console.log('\nShutting down...')
+  shutdownTelegramService()
   shutdownSSE()
   process.exit(0)
 })
 
 process.on('SIGTERM', () => {
   console.log('Received SIGTERM, shutting down...')
+  shutdownTelegramService()
   shutdownSSE()
   process.exit(0)
 })

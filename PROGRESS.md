@@ -38,7 +38,7 @@
 | 6E | COMPLETE | claude/opus | Signal Panel Component |
 | 7A-B | COMPLETE | claude/opus | MCP package |
 | 8A | IN PROGRESS | claude/opus | End-to-end testing |
-| 8B | IN PROGRESS | claude/opus | Telegram integration |
+| 8B | COMPLETE | claude/opus | Telegram integration |
 | 8C | COMPLETE | claude/opus | Build and publishing setup |
 
 ---
@@ -717,6 +717,46 @@
 - Client uses vite build with tsc -b for type checking
 - CI workflow runs on push/PR to master branch
 
+### Phase 8B: Telegram Integration
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-01-31T22:00:00Z
+**Completed**: 2026-01-31T22:30:00Z
+**Validation**:
+- TypeScript compiles without errors (bun run tsc --noEmit in packages/server)
+- Server starts with Telegram polling when configured (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID)
+- Server starts without errors when Telegram is not configured
+- GET /api/status returns connection status
+- POST /api/notify sends messages via Telegram
+- POST /api/align sends signals via Telegram with inline keyboard buttons
+- GET /api/inbox returns messages from Telegram inbox
+- GET /api/inbox/:message_id/download downloads files from messages
+
+**Files Created**:
+- `packages/server/src/telegram/index.ts` - Main Telegram service with TelegramClient class
+- `packages/server/src/telegram/polling.ts` - Update handler for messages, callbacks, commands
+- `packages/server/src/telegram/messages.ts` - Message formatting helpers for tasks, signals, reports
+
+**Files Modified**:
+- `packages/server/src/routes/notify.ts` - Integrated Telegram for notify, align, inbox, status endpoints
+- `packages/server/src/index.ts` - Added Telegram initialization and graceful shutdown
+
+**Features**:
+- TelegramService interface with send methods (message, photo, document, buttons)
+- Long-polling for updates with automatic reconnection
+- Callback query handling for inline keyboard button presses
+- Command handling (/start, /ping, /status, /pending, /tasks)
+- Signal response routing (button press or text reply)
+- In-memory inbox for received messages
+- File download from Telegram messages
+- Message formatting with HTML parse mode
+- Task update formatters (created, started, completed, failed)
+- Discovery report, Shepherd report, and Digest summary formatters
+
+**Configuration**:
+- Environment variables: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+- Config file: ~/.config/mycelium-v2/telegram.json
+
 ---
 
 ## Agent Harness Compatibility Matrix
@@ -856,4 +896,5 @@ Before marking a phase complete:
 | 2026-02-01 | 6B | claude/opus | Zustand workflow store (SSE, tasks, repos, signals, auto-layout) |
 | 2026-02-01 | 5A-B | claude/opus | Scheduler implementation (7 cycles, config, API routes) |
 | 2026-01-31 | 8C | claude/opus | Build and publishing setup (package.json, tsconfig, CI workflow) |
+| 2026-01-31 | 8B | claude/opus | Telegram integration (service, polling, messages, routes) |
 
