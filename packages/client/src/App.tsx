@@ -12,7 +12,6 @@ import {
   type Edge,
 } from '@xyflow/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import Dagre from '@dagrejs/dagre'
 import { nodeTypes } from './nodes'
 import { Sidebar } from './components/Sidebar'
 import { Header } from './components/Header'
@@ -31,50 +30,76 @@ import type {
 
 const NODE_WIDTH = 220
 const NODE_HEIGHT = 120
-const RANK_SEP = 100 // Vertical spacing between ranks
-const NODE_SEP = 50 // Horizontal spacing between nodes
-
-// Layout direction - TB = top to bottom, LR = left to right
-type LayoutDirection = 'TB' | 'LR'
+const HORIZONTAL_GAP = 50
+const VERTICAL_GAP = 80
 
 // =============================================================================
-// Dagre Layout Function
+// Simple Grid Layout (no dagre dependency)
 // =============================================================================
 
 function getLayoutedElements(
   nodes: Node[],
-  edges: Edge[],
-  direction: LayoutDirection = 'TB'
+  edges: Edge[]
 ): { nodes: Node[]; edges: Edge[] } {
-  const g = new Dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}))
+  if (nodes.length === 0) return { nodes: [], edges }
 
-  g.setGraph({
-    rankdir: direction,
-    nodesep: NODE_SEP,
-    ranksep: RANK_SEP,
-    marginx: 50,
-    marginy: 50,
-  })
-
+  // Group nodes by type
+  const nodesByType: Record<string, Node[]> = {}
   nodes.forEach((node) => {
-    g.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT })
+    const type = node.type || 'default'
+    if (!nodesByType[type]) nodesByType[type] = []
+    nodesByType[type].push(node)
   })
 
-  edges.forEach((edge) => {
-    g.setEdge(edge.source, edge.target)
-  })
+  // Define row order for node types
+  const typeOrder = ['agent', 'task', 'repo', 'signal', 'memory']
+  const layoutedNodes: Node[] = []
+  let currentY = 50
 
-  Dagre.layout(g)
+  typeOrder.forEach((type) => {
+    const typeNodes = nodesByType[type] || []
+    if (typeNodes.length === 0) return
 
-  const layoutedNodes = nodes.map((node) => {
-    const nodeWithPosition = g.node(node.id)
-    return {
-      ...node,
-      position: {
-        x: nodeWithPosition.x - NODE_WIDTH / 2,
-        y: nodeWithPosition.y - NODE_HEIGHT / 2,
-      },
+    // Calculate row width and starting X
+    const rowWidth = typeNodes.length * (NODE_WIDTH + HORIZONTAL_GAP) - HORIZONTAL_GAP
+    let startX = 50
+
+    // Center the row
+    if (typeNodes.length > 1) {
+      startX = Math.max(50, (1200 - rowWidth) / 2)
     }
+
+    typeNodes.forEach((node, index) => {
+      layoutedNodes.push({
+        ...node,
+        position: {
+          x: startX + index * (NODE_WIDTH + HORIZONTAL_GAP),
+          y: currentY,
+        },
+      })
+    })
+
+    currentY += NODE_HEIGHT + VERTICAL_GAP
+  })
+
+  // Handle any remaining node types not in typeOrder
+  Object.entries(nodesByType).forEach(([type, typeNodes]) => {
+    if (typeOrder.includes(type)) return
+
+    const rowWidth = typeNodes.length * (NODE_WIDTH + HORIZONTAL_GAP) - HORIZONTAL_GAP
+    let startX = Math.max(50, (1200 - rowWidth) / 2)
+
+    typeNodes.forEach((node, index) => {
+      layoutedNodes.push({
+        ...node,
+        position: {
+          x: startX + index * (NODE_WIDTH + HORIZONTAL_GAP),
+          y: currentY,
+        },
+      })
+    })
+
+    currentY += NODE_HEIGHT + VERTICAL_GAP
   })
 
   return { nodes: layoutedNodes, edges }
@@ -347,7 +372,7 @@ export default function App() {
     if (rawNodes.length === 0) {
       return { nodes: [], edges: [] }
     }
-    return getLayoutedElements(rawNodes, rawEdges, 'TB')
+    return getLayoutedElements(rawNodes, rawEdges)
   }, [rawNodes, rawEdges])
 
   // React Flow state
