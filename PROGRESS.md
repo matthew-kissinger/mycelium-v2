@@ -30,9 +30,9 @@
 | 4C | COMPLETE | claude/opus | Shepherd prompt |
 | 4D | COMPLETE | claude/opus | Genesis prompt |
 | 4E | COMPLETE | claude/opus | Armory prompt |
-| 5A-B | IN PROGRESS | claude/opus | Scheduler |
+| 5A-B | COMPLETE | claude/opus | Scheduler |
 | 6A | COMPLETE | claude/opus | React Flow scaffold (Phase 0) |
-| 6B | IN PROGRESS | claude/opus | Zustand workflow store |
+| 6B | COMPLETE | claude/opus | Zustand workflow store |
 | 6C | COMPLETE | claude/opus | LiveLogs component |
 | 6D | COMPLETE | claude/opus | Task Panel Component |
 | 6E | COMPLETE | claude/opus | Signal Panel Component |
@@ -509,6 +509,34 @@
 - Tasks without branches handling documented
 - Critical output requirements: YAML block mandatory
 
+### Phase 6B: Zustand Workflow Store
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T12:00:00Z
+**Completed**: 2026-02-01T12:30:00Z
+**Validation**:
+- TypeScript compiles without errors (bun run tsc --noEmit for stores/)
+- Store can be used in components
+- SSE connection management with reconnection logic
+
+**Files Created**:
+- `packages/client/src/stores/workflow.ts` - Complete workflow store implementation
+- `packages/client/src/stores/index.ts` - Store exports
+
+**Notes**:
+- Entity state: tasks (array), repos (Map), signals (Map)
+- React Flow integration: nodes, edges with task-to-node conversion
+- SSE connection: connect(), disconnect(), handleEvent() with exponential backoff reconnection
+- Task actions: setTasks, addTask, updateTask, removeTask, selectTask, setTaskFilter
+- Repo actions: setRepos, updateRepo, removeRepo
+- Signal actions: setSignals, updateSignal, removeSignal
+- Layout: autoLayout() with dagre-like topological sort, syncNodesFromTasks()
+- Selectors: getFilteredTasks, getTaskById, getStatusCounts, getPendingTasks, getRunningTasks, getPendingSignals
+- SSE events handled: task:*, signal:*, repo:*, system:heartbeat
+- ConnectionStatus tracking: connected, clientId, reconnectAttempts, lastConnected, lastError
+- TaskNodeData and AgentNodeData interfaces with Record<string, unknown> extension for React Flow compatibility
+- Edge generation from task dependencies with animation for running tasks
+
 ### Phase 6D: Task Panel Component
 **Status**: COMPLETE
 **Agent**: claude/opus
@@ -741,4 +769,5 @@ Before marking a phase complete:
 | 2026-01-31 | 6C | claude/opus | LiveLogs component (real-time task output, filter, auto-scroll, toggle) |
 | 2026-01-31 | 7A-B | claude/opus | MCP package (14 tools: stats, tasks, repos, notify, align, memory, genesis, sequence, signals) |
 | 2026-02-01 | 6D | claude/opus | Task Panel Component (task list, filters, detail view, create form, run/cancel/delete) |
+| 2026-02-01 | 6B | claude/opus | Zustand workflow store (SSE, tasks, repos, signals, auto-layout) |
 
