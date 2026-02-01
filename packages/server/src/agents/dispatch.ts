@@ -32,7 +32,7 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
   const startTime = Date.now()
 
   // Build command args based on agent type
-  const args = buildAgentArgs(agent, prompt, model)
+  const args = buildAgentArgs(agent, prompt, model, cwd)
 
   let proc: Subprocess<'ignore', 'pipe', 'pipe'>
   let output = ''
@@ -115,8 +115,15 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
 /**
  * Build CLI arguments for each agent type.
  * Each agent has different CLI patterns.
+ *
+ * IMPORTANT: These must match the actual CLI interfaces:
+ * - Claude: claude -p "prompt" --model <model> --dangerously-skip-permissions
+ * - Codex: codex -q "prompt" --model <model> --full-auto
+ * - Gemini: gemini -p "prompt" --model <model>
+ * - Cline: cline --yolo --mode act --output-format json [--model <model>] --task "prompt"
+ * - Cursor: agent --print --output-format json --approve-mcps [--model <model>] --workspace <cwd> "prompt"
  */
-function buildAgentArgs(agent: AgentType, prompt: string, model?: string): string[] {
+function buildAgentArgs(agent: AgentType, prompt: string, model?: string, cwd?: string): string[] {
   switch (agent) {
     case 'claude':
       // claude -p "prompt" --model sonnet --dangerously-skip-permissions
@@ -142,12 +149,25 @@ function buildAgentArgs(agent: AgentType, prompt: string, model?: string): strin
       ]
 
     case 'cline':
-      // cline --task "prompt"
-      return ['--task', prompt]
+      // cline --yolo --mode act --output-format json [--model <model>] --task "prompt"
+      return [
+        '--yolo',
+        '--mode', 'act',
+        '--output-format', 'json',
+        ...(model ? ['--model', model] : []),
+        '--task', prompt,
+      ]
 
     case 'cursor':
-      // cursor --prompt "prompt"
-      return ['--prompt', prompt]
+      // agent --print --output-format json --approve-mcps [--model <model>] --workspace <cwd> "prompt"
+      return [
+        '--print',
+        '--output-format', 'json',
+        '--approve-mcps',
+        ...(model ? ['--model', model] : []),
+        ...(cwd ? ['--workspace', cwd] : []),
+        prompt,
+      ]
 
     default:
       return [prompt]

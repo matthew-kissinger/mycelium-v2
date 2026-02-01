@@ -12,6 +12,7 @@ export const AgentConfig = z.object({
 export type AgentConfig = z.infer<typeof AgentConfig>
 
 // Default agent configurations
+// IMPORTANT: Cursor uses 'agent' CLI command, not 'cursor'
 export const DEFAULT_AGENT_CONFIGS: Record<string, AgentConfig> = {
   claude: {
     type: 'claude',
@@ -43,7 +44,7 @@ export const DEFAULT_AGENT_CONFIGS: Record<string, AgentConfig> = {
   },
   cursor: {
     type: 'cursor',
-    command: 'cursor',
+    command: 'agent',  // Cursor CLI is 'agent', not 'cursor'
     timeout_seconds: 600,
     max_turns: 30,
     supports_streaming: false,

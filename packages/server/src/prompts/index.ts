@@ -42,3 +42,6 @@ export {
 } from './genesis';
 
 export * from './armory';
+
+// Context injection utilities
+export * from './context';
