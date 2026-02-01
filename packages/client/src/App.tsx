@@ -4,10 +4,6 @@ import {
   Background,
   Controls,
   MiniMap,
-  useNodesState,
-  useEdgesState,
-  addEdge,
-  type Connection,
   type Node,
   type Edge,
 } from '@xyflow/react'
@@ -34,7 +30,7 @@ const HORIZONTAL_GAP = 50
 const VERTICAL_GAP = 80
 
 // =============================================================================
-// Simple Grid Layout (no dagre dependency)
+// Simple Grid Layout
 // =============================================================================
 
 function getLayoutedElements(
@@ -52,7 +48,7 @@ function getLayoutedElements(
   })
 
   // Define row order for node types
-  const typeOrder = ['agent', 'task', 'repo', 'signal', 'memory']
+  const typeOrder = ['task', 'repo', 'signal', 'memory']
   const layoutedNodes: Node[] = []
   let currentY = 50
 
@@ -68,26 +64,6 @@ function getLayoutedElements(
     if (typeNodes.length > 1) {
       startX = Math.max(50, (1200 - rowWidth) / 2)
     }
-
-    typeNodes.forEach((node, index) => {
-      layoutedNodes.push({
-        ...node,
-        position: {
-          x: startX + index * (NODE_WIDTH + HORIZONTAL_GAP),
-          y: currentY,
-        },
-      })
-    })
-
-    currentY += NODE_HEIGHT + VERTICAL_GAP
-  })
-
-  // Handle any remaining node types not in typeOrder
-  Object.entries(nodesByType).forEach(([type, typeNodes]) => {
-    if (typeOrder.includes(type)) return
-
-    const rowWidth = typeNodes.length * (NODE_WIDTH + HORIZONTAL_GAP) - HORIZONTAL_GAP
-    let startX = Math.max(50, (1200 - rowWidth) / 2)
 
     typeNodes.forEach((node, index) => {
       layoutedNodes.push({
@@ -147,7 +123,7 @@ function tasksToNodes(tasks: Task[]): Node[] {
   return tasks.map((task) => ({
     id: `task-${task.id}`,
     type: 'task',
-    position: { x: 0, y: 0 }, // Will be set by layout
+    position: { x: 0, y: 0 },
     data: {
       id: task.id,
       title: task.title,
@@ -164,7 +140,7 @@ function reposToNodes(repos: Repo[]): Node[] {
   return repos.map((repo) => ({
     id: `repo-${repo.id}`,
     type: 'repo',
-    position: { x: 0, y: 0 }, // Will be set by layout
+    position: { x: 0, y: 0 },
     data: {
       id: repo.id,
       name: repo.name,
@@ -180,7 +156,7 @@ function signalsToNodes(signals: Signal[]): Node[] {
   return signals.map((signal) => ({
     id: `signal-${signal.id}`,
     type: 'signal',
-    position: { x: 0, y: 0 }, // Will be set by layout
+    position: { x: 0, y: 0 },
     data: {
       id: signal.id,
       question: signal.question,
@@ -195,15 +171,13 @@ function signalsToNodes(signals: Signal[]): Node[] {
 
 function memoryToNodes(memory: RepoMemory | undefined): Node[] {
   if (!memory) return []
-
-  // Only show global memory if it has patterns or warnings
   if (memory.patterns.length === 0 && memory.warnings.length === 0) return []
 
   return [
     {
       id: 'memory-global',
       type: 'memory',
-      position: { x: 0, y: 0 }, // Will be set by layout
+      position: { x: 0, y: 0 },
       data: {
         repo_path: memory.repo_path || undefined,
         patterns: memory.patterns.map((p) => ({
@@ -232,7 +206,6 @@ function buildEdgesFromTasks(tasks: Task[]): Edge[] {
   tasks.forEach((task) => {
     if (task.depends_on && task.depends_on.length > 0) {
       task.depends_on.forEach((depId) => {
-        // Only create edge if dependency exists in our task list
         if (taskIds.has(depId)) {
           edges.push({
             id: `e-${depId}-${task.id}`,
@@ -254,16 +227,17 @@ function buildEdgesFromTasks(tasks: Task[]): Edge[] {
 
 function useSSE(onEvent: (event: SSEEvent) => void) {
   const eventSourceRef = useRef<EventSource | null>(null)
+  const onEventRef = useRef(onEvent)
+  onEventRef.current = onEvent
 
   useEffect(() => {
-    // Connect to SSE endpoint
     const eventSource = new EventSource('/api/events')
     eventSourceRef.current = eventSource
 
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data) as SSEEvent
-        onEvent(data)
+        onEventRef.current(data)
       } catch (e) {
         console.error('Failed to parse SSE event:', e)
       }
@@ -271,13 +245,12 @@ function useSSE(onEvent: (event: SSEEvent) => void) {
 
     eventSource.onerror = (error) => {
       console.error('SSE connection error:', error)
-      // EventSource will automatically reconnect
     }
 
     return () => {
       eventSource.close()
     }
-  }, [onEvent])
+  }, [])
 }
 
 // =============================================================================
@@ -291,7 +264,7 @@ export default function App() {
   const { data: tasks = [] } = useQuery<Task[]>({
     queryKey: ['tasks'],
     queryFn: fetchTasks,
-    refetchInterval: 30000, // Refresh every 30s as backup
+    refetchInterval: 30000,
   })
 
   const { data: repos = [] } = useQuery<Repo[]>({
@@ -321,27 +294,18 @@ export default function App() {
   // Handle SSE events
   const handleSSEEvent = useCallback(
     (event: SSEEvent) => {
-      // Invalidate relevant queries based on event type
       if ('type' in event) {
         const eventType = event.type
-
-        // Task events
         if (eventType.startsWith('task:')) {
           queryClient.invalidateQueries({ queryKey: ['tasks'] })
           queryClient.invalidateQueries({ queryKey: ['stats'] })
         }
-
-        // Signal events
         if (eventType.startsWith('signal:')) {
           queryClient.invalidateQueries({ queryKey: ['signals'] })
         }
-
-        // Repo events
         if (eventType.startsWith('repo:')) {
           queryClient.invalidateQueries({ queryKey: ['repos'] })
         }
-
-        // Memory events
         if (eventType.startsWith('memory:')) {
           queryClient.invalidateQueries({ queryKey: ['memory'] })
         }
@@ -352,45 +316,18 @@ export default function App() {
 
   useSSE(handleSSEEvent)
 
-  // Convert data to nodes
-  const rawNodes = useMemo(() => {
+  // Build nodes and edges - memoized to prevent unnecessary recalculations
+  const { nodes, edges } = useMemo(() => {
     const taskNodes = tasksToNodes(tasks)
     const repoNodes = reposToNodes(repos)
     const signalNodes = signalsToNodes(signals)
     const memoryNodes = memoryToNodes(memory)
 
-    return [...taskNodes, ...repoNodes, ...signalNodes, ...memoryNodes]
+    const allNodes = [...taskNodes, ...repoNodes, ...signalNodes, ...memoryNodes]
+    const allEdges = buildEdgesFromTasks(tasks)
+
+    return getLayoutedElements(allNodes, allEdges)
   }, [tasks, repos, signals, memory])
-
-  // Build edges from task dependencies
-  const rawEdges = useMemo(() => {
-    return buildEdgesFromTasks(tasks)
-  }, [tasks])
-
-  // Apply layout
-  const { nodes: layoutedNodes, edges: layoutedEdges } = useMemo(() => {
-    if (rawNodes.length === 0) {
-      return { nodes: [], edges: [] }
-    }
-    return getLayoutedElements(rawNodes, rawEdges)
-  }, [rawNodes, rawEdges])
-
-  // React Flow state
-  const [nodes, setNodes, onNodesChange] = useNodesState(layoutedNodes)
-  const [edges, setEdges, onEdgesChange] = useEdgesState(layoutedEdges)
-
-  // Update nodes and edges when layout changes
-  useEffect(() => {
-    setNodes(layoutedNodes)
-    setEdges(layoutedEdges)
-  }, [layoutedNodes, layoutedEdges, setNodes, setEdges])
-
-  const onConnect = useCallback(
-    (connection: Connection) => {
-      setEdges((eds) => addEdge(connection, eds))
-    },
-    [setEdges]
-  )
 
   return (
     <div className="flex h-screen flex-col">
@@ -401,9 +338,6 @@ export default function App() {
           <ReactFlow
             nodes={nodes}
             edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
             nodeTypes={nodeTypes}
             fitView
             proOptions={{ hideAttribution: true }}
@@ -414,15 +348,15 @@ export default function App() {
               nodeColor={(node) => {
                 switch (node.type) {
                   case 'agent':
-                    return 'hsl(260 50% 50%)' // Purple for agents
+                    return 'hsl(260 50% 50%)'
                   case 'task':
-                    return 'hsl(150 50% 50%)' // Green for tasks
+                    return 'hsl(150 50% 50%)'
                   case 'repo':
-                    return 'hsl(210 50% 50%)' // Blue for repos
+                    return 'hsl(210 50% 50%)'
                   case 'signal':
-                    return 'hsl(45 50% 50%)' // Yellow for signals
+                    return 'hsl(45 50% 50%)'
                   case 'memory':
-                    return 'hsl(30 50% 50%)' // Orange for memory
+                    return 'hsl(30 50% 50%)'
                   default:
                     return 'hsl(0 0% 50%)'
                 }
