@@ -88,7 +88,8 @@ function getLayoutedElements(
 async function fetchTasks(): Promise<Task[]> {
   const res = await fetch('/api/tasks')
   if (!res.ok) throw new Error('Failed to fetch tasks')
-  return res.json()
+  const data = await res.json()
+  return data.tasks || []
 }
 
 async function fetchRepos(): Promise<Repo[]> {
@@ -106,7 +107,12 @@ async function fetchSignals(): Promise<Signal[]> {
 async function fetchGlobalMemory(): Promise<RepoMemory> {
   const res = await fetch('/api/memory/global')
   if (!res.ok) throw new Error('Failed to fetch memory')
-  return res.json()
+  const data = await res.json()
+  return {
+    repo_path: 'global',
+    patterns: data.patterns || [],
+    warnings: data.warnings || [],
+  }
 }
 
 async function fetchStats(): Promise<Stats> {
