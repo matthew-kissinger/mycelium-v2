@@ -9,12 +9,14 @@
   },
   "dependencies": {
     "@mycelium/shared": "workspace:*",
-    "@xyflow/react": "latest",
     "@tanstack/react-query": "latest",
+    "@xyflow/react": "latest",
+    "clsx": "^2.1.1",
     "react": "latest",
     "react-dom": "latest",
-    "zustand": "latest",
-    "zod": "latest"
+    "tailwind-merge": "^3.4.0",
+    "zod": "latest",
+    "zustand": "latest"
   },
   "devDependencies": {
     "@tailwindcss/vite": "latest",

@@ -36,7 +36,7 @@
 | 6C | COMPLETE | claude/opus | LiveLogs component |
 | 6D | IN PROGRESS | claude/opus | Task Panel Component |
 | 6E | COMPLETE | claude/opus | Signal Panel Component |
-| 7A-B | IN PROGRESS | claude/opus | MCP package |
+| 7A-B | COMPLETE | claude/opus | MCP package |
 | 8A-C | PENDING | - | Integration |
 
 ---
@@ -668,4 +668,5 @@ Before marking a phase complete:
 | 2026-02-01 | 3F | claude/opus | Runner CLI commands (runner, runner start/stop/config, config show/set) |
 | 2026-02-01 | 6E | claude/opus | Signal Panel Component (pending/responded signals, quick response, SSE updates) |
 | 2026-01-31 | 6C | claude/opus | LiveLogs component (real-time task output, filter, auto-scroll, toggle) |
+| 2026-01-31 | 7A-B | claude/opus | MCP package (14 tools: stats, tasks, repos, notify, align, memory, genesis, sequence, signals) |
 
