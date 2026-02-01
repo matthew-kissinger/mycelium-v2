@@ -10,7 +10,7 @@ claude --version && echo "Claude: OK" || echo "Claude: NEEDS AUTH"
 codex --version && echo "Codex: OK" || echo "Codex: NEEDS AUTH"
 gemini --version && echo "Gemini: OK" || echo "Gemini: NEEDS AUTH"
 cline --version && echo "Cline: OK" || echo "Cline: NEEDS AUTH"
-cursor --version && echo "Cursor: OK" || echo "Cursor: NEEDS AUTH"
+agent --version && echo "Cursor: OK" || echo "Cursor: NEEDS AUTH"  # Cursor Agent CLI
 ```
 
 ## Harness Configurations
@@ -80,14 +80,22 @@ cursor --version && echo "Cursor: OK" || echo "Cursor: NEEDS AUTH"
 }
 ```
 
-### Cursor
+### Cursor (Agent CLI)
 ```typescript
 {
   name: 'cursor',
-  command: 'cursor',
-  buildArgs: (prompt) => ['--prompt', prompt],
+  command: 'agent',  // NOT 'cursor' - uses Cursor Agent CLI
+  buildArgs: (prompt, model, cwd) => [
+    '--print',           // Non-interactive mode
+    '--force',           // Auto-approve commands
+    '--workspace', cwd,  // Set working directory
+    ...(model ? ['--model', model] : []),
+    prompt               // Positional prompt argument
+  ],
   defaultTimeout: 600,  // 10 min - hard internal limit
-  supportsStreaming: false
+  supportsStreaming: true,  // Supports --stream-partial-output
+  models: ['gpt-5', 'sonnet-4', 'sonnet-4-thinking'],
+  defaultModel: 'sonnet-4'
 }
 ```
 
