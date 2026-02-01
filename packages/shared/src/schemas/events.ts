@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { Task, TaskStatus } from './task'
 import { Signal, SignalStatus } from './signal'
+import { Repo } from './repo'
 import { SystemAgentRun, SystemAgentType, SystemAgentStatus } from './system-agent'
 
 // =============================================================================
@@ -17,17 +18,33 @@ export const SSEEventType = z.enum([
   'task:failed',
   'task:cancelled',
   'task:output',
+  'task:deleted',
 
   // Signal events
   'signal:created',
   'signal:responded',
   'signal:expired',
 
+  // Repo events
+  'repo:added',
+  'repo:updated',
+  'repo:removed',
+
+  // Memory events
+  'memory:pattern_created',
+  'memory:warning_created',
+  'memory:pattern_deleted',
+  'memory:warning_deleted',
+
   // System agent events
   'agent:started',
   'agent:completed',
   'agent:failed',
   'agent:blocked',
+  'system:agent_started',
+
+  // Notification events
+  'notification:sent',
 
   // Scheduler events
   'scheduler:started',
@@ -102,6 +119,13 @@ export const TaskOutputEvent = z.object({
 })
 export type TaskOutputEvent = z.infer<typeof TaskOutputEvent>
 
+export const TaskDeletedEvent = z.object({
+  type: z.literal('task:deleted'),
+  task_id: z.string().uuid(),
+  timestamp: z.string().datetime(),
+})
+export type TaskDeletedEvent = z.infer<typeof TaskDeletedEvent>
+
 // Union of all task events
 export const TaskEvent = z.discriminatedUnion('type', [
   TaskCreatedEvent,
@@ -111,6 +135,7 @@ export const TaskEvent = z.discriminatedUnion('type', [
   TaskFailedEvent,
   TaskCancelledEvent,
   TaskOutputEvent,
+  TaskDeletedEvent,
 ])
 export type TaskEvent = z.infer<typeof TaskEvent>
 
@@ -147,6 +172,86 @@ export const SignalEvent = z.discriminatedUnion('type', [
   SignalExpiredEvent,
 ])
 export type SignalEvent = z.infer<typeof SignalEvent>
+
+// =============================================================================
+// Repo Events
+// =============================================================================
+
+export const RepoAddedEvent = z.object({
+  type: z.literal('repo:added'),
+  repo: Repo,
+  timestamp: z.string().datetime(),
+})
+export type RepoAddedEvent = z.infer<typeof RepoAddedEvent>
+
+export const RepoUpdatedEvent = z.object({
+  type: z.literal('repo:updated'),
+  repo: Repo,
+  timestamp: z.string().datetime(),
+})
+export type RepoUpdatedEvent = z.infer<typeof RepoUpdatedEvent>
+
+export const RepoRemovedEvent = z.object({
+  type: z.literal('repo:removed'),
+  repo_id: z.string().uuid(),
+  path: z.string(),
+  timestamp: z.string().datetime(),
+})
+export type RepoRemovedEvent = z.infer<typeof RepoRemovedEvent>
+
+// Union of all repo events
+export const RepoEvent = z.discriminatedUnion('type', [
+  RepoAddedEvent,
+  RepoUpdatedEvent,
+  RepoRemovedEvent,
+])
+export type RepoEvent = z.infer<typeof RepoEvent>
+
+// =============================================================================
+// Memory Events
+// =============================================================================
+
+export const MemoryPatternCreatedEvent = z.object({
+  type: z.literal('memory:pattern_created'),
+  pattern_id: z.string().uuid(),
+  content: z.string(),
+  repo_path: z.string().optional(),
+  timestamp: z.string().datetime(),
+})
+export type MemoryPatternCreatedEvent = z.infer<typeof MemoryPatternCreatedEvent>
+
+export const MemoryWarningCreatedEvent = z.object({
+  type: z.literal('memory:warning_created'),
+  warning_id: z.string().uuid(),
+  content: z.string(),
+  severity: z.enum(['low', 'medium', 'high']),
+  repo_path: z.string().optional(),
+  timestamp: z.string().datetime(),
+})
+export type MemoryWarningCreatedEvent = z.infer<typeof MemoryWarningCreatedEvent>
+
+export const MemoryPatternDeletedEvent = z.object({
+  type: z.literal('memory:pattern_deleted'),
+  pattern_id: z.string().uuid(),
+  timestamp: z.string().datetime(),
+})
+export type MemoryPatternDeletedEvent = z.infer<typeof MemoryPatternDeletedEvent>
+
+export const MemoryWarningDeletedEvent = z.object({
+  type: z.literal('memory:warning_deleted'),
+  warning_id: z.string().uuid(),
+  timestamp: z.string().datetime(),
+})
+export type MemoryWarningDeletedEvent = z.infer<typeof MemoryWarningDeletedEvent>
+
+// Union of all memory events
+export const MemoryEvent = z.discriminatedUnion('type', [
+  MemoryPatternCreatedEvent,
+  MemoryWarningCreatedEvent,
+  MemoryPatternDeletedEvent,
+  MemoryWarningDeletedEvent,
+])
+export type MemoryEvent = z.infer<typeof MemoryEvent>
 
 // =============================================================================
 // System Agent Events
@@ -188,14 +293,43 @@ export const AgentBlockedEvent = z.object({
 })
 export type AgentBlockedEvent = z.infer<typeof AgentBlockedEvent>
 
+// Alternative system:agent_started event (used by some routes)
+export const SystemAgentStartedEvent = z.object({
+  type: z.literal('system:agent_started'),
+  run_id: z.string().uuid(),
+  agent_type: SystemAgentType,
+  repo_path: z.string().optional(),
+  timestamp: z.string().datetime(),
+})
+export type SystemAgentStartedEvent = z.infer<typeof SystemAgentStartedEvent>
+
 // Union of all agent events
 export const SystemAgentEvent = z.discriminatedUnion('type', [
   AgentStartedEvent,
   AgentCompletedEvent,
   AgentFailedEvent,
   AgentBlockedEvent,
+  SystemAgentStartedEvent,
 ])
 export type SystemAgentEvent = z.infer<typeof SystemAgentEvent>
+
+// =============================================================================
+// Notification Events
+// =============================================================================
+
+export const NotificationSentEvent = z.object({
+  type: z.literal('notification:sent'),
+  message: z.string(),
+  message_id: z.number().optional(),
+  timestamp: z.string().datetime(),
+})
+export type NotificationSentEvent = z.infer<typeof NotificationSentEvent>
+
+// Union of all notification events
+export const NotificationEvent = z.discriminatedUnion('type', [
+  NotificationSentEvent,
+])
+export type NotificationEvent = z.infer<typeof NotificationEvent>
 
 // =============================================================================
 // Scheduler Events
@@ -261,7 +395,10 @@ export type SystemEvent = z.infer<typeof SystemEvent>
 export const SSEEvent = z.union([
   TaskEvent,
   SignalEvent,
+  RepoEvent,
+  MemoryEvent,
   SystemAgentEvent,
+  NotificationEvent,
   SchedulerEvent,
   SystemEvent,
 ])
