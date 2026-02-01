@@ -10,7 +10,7 @@ import {
   InboxMessage,
 } from '@mycelium/shared'
 import { getTelegramService, loadConfig } from '../telegram'
-import { getInboxMessages } from '../telegram/polling'
+import { getInboxMessages } from '../telegram/poller'
 import { formatSignalQuestion, formatNotification } from '../telegram/messages'
 
 const app = new Hono()
@@ -115,6 +115,8 @@ app.post('/align', zValidator('json', SignalCreateRequest), async (c) => {
   })
 
   // Send via Telegram if connected
+  let telegramMessageId: number | null = null
+
   if (telegram && telegram.isConnected()) {
     const formattedQuestion = formatSignalQuestion({
       id,
@@ -126,10 +128,17 @@ app.post('/align', zValidator('json', SignalCreateRequest), async (c) => {
 
     if (data.options && data.options.length > 0) {
       // Send with inline keyboard buttons
-      await telegram.sendButtons(formattedQuestion, data.options, 2)
+      telegramMessageId = await telegram.sendButtons(formattedQuestion, data.options, 2)
     } else {
       // Send as plain message
-      await telegram.sendMessage(formattedQuestion)
+      telegramMessageId = await telegram.sendMessage(formattedQuestion)
+    }
+
+    // Update signal with telegram_message_id for reply matching
+    if (telegramMessageId !== null) {
+      await db.update(schema.signals).set({
+        telegram_message_id: telegramMessageId,
+      }).where(eq(schema.signals.id, id))
     }
   } else {
     // Fall back to logging

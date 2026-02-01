@@ -64,7 +64,7 @@
     },
     "packages/server": {
       "name": "@mycelium/server",
-      "version": "0.0.1",
+      "version": "0.1.0",
       "dependencies": {
         "@hono/zod-validator": "latest",
         "@mycelium/shared": "workspace:*",
@@ -79,9 +79,12 @@
     },
     "packages/shared": {
       "name": "@mycelium/shared",
-      "version": "0.0.1",
+      "version": "0.1.0",
       "dependencies": {
         "zod": "latest",
+      },
+      "devDependencies": {
+        "typescript": "latest",
       },
     },
   },

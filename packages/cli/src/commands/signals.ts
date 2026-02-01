@@ -368,4 +368,115 @@ export function registerSignalCommands(program: Command): void {
         }
       }
     })
+
+  // mycel reply <msg_id> "text"
+  program
+    .command('reply <message_id> <text>')
+    .description('Reply to a specific message (threading)')
+    .action(async (messageId: string, text: string) => {
+      try {
+        const client = getClient()
+        const msgIdNum = parseInt(messageId, 10)
+
+        if (isNaN(msgIdNum)) {
+          error('Message ID must be a number')
+          process.exit(1)
+        }
+
+        const response = await client.post<NotifyResponse>('/api/telegram/reply', {
+          message_id: msgIdNum,
+          text,
+        })
+
+        if (response.success) {
+          success('Reply sent')
+          if (response.message_id) {
+            info(`Reply ID: ${response.message_id}`)
+          }
+        } else {
+          error(`Failed to send reply: ${response.error ?? 'unknown error'}`)
+        }
+      } catch (err) {
+        if (err instanceof ApiError) {
+          error(`Failed to send reply: ${err.status} ${err.statusText}`)
+        } else {
+          throw err
+        }
+      }
+    })
+
+  // mycel show <file> [caption]
+  program
+    .command('show <file> [caption]')
+    .description('Share image or file via Telegram')
+    .action(async (file: string, caption?: string) => {
+      try {
+        const client = getClient()
+
+        // Determine if image or document based on extension
+        const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp']
+        const isImage = imageExtensions.some(ext => file.toLowerCase().endsWith(ext))
+
+        const response = await client.post<NotifyResponse>('/api/telegram/send-file', {
+          file_path: file,
+          caption: caption ?? null,
+          as_photo: isImage,
+        })
+
+        if (response.success) {
+          success(`${isImage ? 'Photo' : 'File'} sent`)
+          if (response.message_id) {
+            info(`Message ID: ${response.message_id}`)
+          }
+        } else {
+          error(`Failed to send file: ${response.error ?? 'unknown error'}`)
+        }
+      } catch (err) {
+        if (err instanceof ApiError) {
+          error(`Failed to send file: ${err.status} ${err.statusText}`)
+        } else {
+          throw err
+        }
+      }
+    })
+
+  // mycel download <msg_id> [path]
+  program
+    .command('download <message_id> [output_path]')
+    .description('Download a file from Telegram by message ID')
+    .action(async (messageId: string, outputPath?: string) => {
+      try {
+        const client = getClient()
+        const msgIdNum = parseInt(messageId, 10)
+
+        if (isNaN(msgIdNum)) {
+          error('Message ID must be a number')
+          process.exit(1)
+        }
+
+        interface DownloadResponse {
+          success: boolean
+          file_path?: string
+          local_path?: string
+          error?: string
+        }
+
+        const response = await client.post<DownloadResponse>('/api/telegram/download', {
+          message_id: msgIdNum,
+          output_path: outputPath,
+        })
+
+        if (response.success && response.local_path) {
+          success(`Downloaded: ${response.local_path}`)
+        } else {
+          error(`Failed to download: ${response.error ?? 'unknown error'}`)
+        }
+      } catch (err) {
+        if (err instanceof ApiError) {
+          error(`Failed to download: ${err.status} ${err.statusText}`)
+        } else {
+          throw err
+        }
+      }
+    })
 }

@@ -154,6 +154,107 @@ shepherdRoutes.post('/trigger', zValidator('json', TriggerRequestSchema), async 
   }, 201)
 })
 
+// GET /api/shepherd/status - Get shepherd batch status
+shepherdRoutes.get('/status', async (c) => {
+  // Get unevaluated tasks count per repo
+  const unevaluatedTasks = await queries.getUnevaluatedTasks(undefined, 1000)
+
+  // Group by repo
+  const repoStats: Record<string, { unevaluated: number; last_evaluation?: string }> = {}
+
+  for (const task of unevaluatedTasks) {
+    const repo = task.repo_path
+    if (!repoStats[repo]) {
+      repoStats[repo] = { unevaluated: 0 }
+    }
+    repoStats[repo].unevaluated++
+  }
+
+  // Get recent shepherd runs
+  const recentRuns = await queries.getRuns({ agent_type: 'shepherd', limit: 10 })
+
+  // Get recent evaluations per repo
+  const evaluations = await queries.getShepherdEvaluations({ limit: 50 })
+  for (const eval_ of evaluations) {
+    if (!repoStats[eval_.repo_path]) {
+      repoStats[eval_.repo_path] = { unevaluated: 0 }
+    }
+    if (!repoStats[eval_.repo_path].last_evaluation) {
+      repoStats[eval_.repo_path].last_evaluation = eval_.evaluated_at
+    }
+  }
+
+  // Determine which repos are ready for evaluation (batch_size threshold = 5)
+  const batchSize = 5
+  const readyRepos = Object.entries(repoStats)
+    .filter(([_, stats]) => stats.unevaluated >= batchSize)
+    .map(([path, stats]) => ({ path, ...stats }))
+
+  return c.json({
+    batch_size: batchSize,
+    repos: repoStats,
+    ready_repos: readyRepos,
+    recent_runs: recentRuns.map(queries.parseRun),
+    total_unevaluated: unevaluatedTasks.length,
+  })
+})
+
+// GET /api/shepherd/evaluations - List shepherd evaluations
+shepherdRoutes.get('/evaluations', async (c) => {
+  const repo_path = c.req.query('repo_path')
+  const limit = parseInt(c.req.query('limit') ?? '50')
+  const offset = parseInt(c.req.query('offset') ?? '0')
+
+  const evaluations = await queries.getShepherdEvaluations({
+    repo_path: repo_path ?? undefined,
+    limit: limit + offset,
+  })
+
+  // Apply offset
+  const paginatedEvaluations = evaluations.slice(offset, offset + limit)
+
+  return c.json({
+    evaluations: paginatedEvaluations.map(queries.parseShepherdEvaluation),
+    total: evaluations.length,
+  })
+})
+
+// POST /api/shepherd/reset-counter - Reset evaluation counter for tasks
+shepherdRoutes.post('/reset-counter', async (c) => {
+  let repo_path: string | undefined
+  try {
+    const body = await c.req.json()
+    repo_path = body.repo_path
+  } catch {
+    // No body, reset all
+  }
+
+  const { db } = await import('../db')
+  const { schema } = await import('../db')
+  const { eq } = await import('drizzle-orm')
+
+  // Reset shepherd_evaluated_at for done tasks
+  if (repo_path) {
+    // Reset for specific repo
+    await db.update(schema.tasks)
+      .set({ shepherd_evaluated_at: null })
+      .where(eq(schema.tasks.repo_path, repo_path))
+
+    return c.json({
+      message: `Shepherd evaluation counter reset for repo: ${repo_path}`,
+      repo_path,
+    })
+  } else {
+    // Reset all
+    await db.update(schema.tasks)
+      .set({ shepherd_evaluated_at: null })
+
+    return c.json({
+      message: 'Shepherd evaluation counter reset for all tasks',
+    })
+  }
+})
+
 // =============================================================================
 // Scheduler Routes (/api/scheduler)
 // =============================================================================

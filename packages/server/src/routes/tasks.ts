@@ -12,13 +12,14 @@ import {
   TaskUpdateRequest,
   TaskRunRequest,
 } from '@mycelium/shared'
-import { dispatch } from '../agents'
+import { dispatch, killProcess, clearDependencies } from '../agents'
 import { broadcast } from '../sse'
 import * as queries from '../db/queries'
 
 const app = new Hono()
 
-// Track running task processes for cancellation
+// Track abort controllers for task cancellation
+// Note: Process management is now handled by the registry
 const runningTasks = new Map<string, AbortController>()
 
 // =============================================================================
@@ -372,7 +373,11 @@ app.post('/:id/cancel', async (c) => {
     return c.json({ error: `Task is ${task.status}, not running` }, 400)
   }
 
-  // Try to abort the running process
+  // Kill the running process via registry
+  // This handles graceful termination + force kill + Cline zombie cleanup
+  const killed = await killProcess(id)
+
+  // Also abort the controller if it exists
   const controller = runningTasks.get(id)
   if (controller) {
     controller.abort()
@@ -387,9 +392,17 @@ app.post('/:id/cancel', async (c) => {
     error: 'Task cancelled by user',
   })
 
+  // Clear dependencies on cancelled task so dependents aren't blocked
+  const unblocked = await clearDependencies([id])
+
   broadcast('task:cancelled', { id, status: 'cancelled' })
 
-  return c.json({ message: 'Task cancelled', id })
+  return c.json({
+    message: 'Task cancelled',
+    id,
+    process_killed: killed,
+    tasks_unblocked: unblocked,
+  })
 })
 
 // =============================================================================
@@ -412,6 +425,7 @@ async function executeTask(task: {
       prompt: task.prompt!,
       cwd: task.repo_path,
       model: task.model ?? undefined,
+      taskId: task.id,  // Register process for cleanup
       onOutput: (chunk) => {
         broadcast('task:output', { id: task.id, chunk })
       },
@@ -492,6 +506,119 @@ function parseTask(row: typeof schema.tasks.$inferSelect | Record<string, unknow
     error_details: task.error_details ? JSON.parse(task.error_details as string) : null,
   }
 }
+
+// =============================================================================
+// POST /api/tasks/:id/merge - Merge task branch to main
+// =============================================================================
+app.post('/:id/merge', async (c) => {
+  const id = c.req.param('id')
+  const task = await queries.getTask(id)
+
+  if (!task) {
+    return c.json({ error: 'Task not found' }, 404)
+  }
+
+  if (task.status !== 'done') {
+    return c.json({ error: `Task is ${task.status}, must be done to merge` }, 400)
+  }
+
+  // Parse result to get branch name if available
+  const parsedResult = task.parsed_result ? JSON.parse(task.parsed_result) : null
+  const branchName = parsedResult?.branch_name ?? `task/${id.slice(0, 8)}`
+
+  // TODO: Actually perform git merge using dispatch
+  // For now, return a placeholder response indicating the merge request was received
+  broadcast('task:updated', { id, action: 'merge_requested', branch: branchName })
+
+  return c.json({
+    message: 'Merge requested',
+    task_id: id,
+    branch: branchName,
+    status: 'pending',
+  })
+})
+
+// =============================================================================
+// POST /api/tasks/:id/clone - Clone task (create copy with same settings)
+// =============================================================================
+app.post('/:id/clone', async (c) => {
+  const id = c.req.param('id')
+  const task = await queries.getTask(id)
+
+  if (!task) {
+    return c.json({ error: 'Task not found' }, 404)
+  }
+
+  // Create a new task with same settings
+  const newId = crypto.randomUUID()
+  const now = new Date().toISOString()
+
+  const clonedTask = {
+    id: newId,
+    title: `${task.title} (copy)`,
+    status: 'pending',
+    agent: task.agent,
+    model: task.model,
+    repo_path: task.repo_path,
+    prompt: task.prompt,
+    depends_on: '[]', // Reset dependencies for clone
+    sequenced: false,
+    created_at: now,
+  }
+
+  await db.insert(schema.tasks).values(clonedTask)
+
+  const result = parseTask(clonedTask)
+  broadcast('task:created', result)
+
+  return c.json({
+    message: 'Task cloned',
+    original_id: id,
+    task: result,
+  }, 201)
+})
+
+// =============================================================================
+// GET /api/tasks/:id/sessions - Get fruiting sessions for task
+// =============================================================================
+app.get('/:id/sessions', async (c) => {
+  const id = c.req.param('id')
+  const task = await queries.getTask(id)
+
+  if (!task) {
+    return c.json({ error: 'Task not found' }, 404)
+  }
+
+  // Get system agent runs related to this task
+  // Sessions could be discovery runs, shepherd evaluations, etc.
+  const runs = await queries.getRuns({ limit: 100 })
+
+  // Filter runs that reference this task in their context
+  const taskSessions = runs.filter((run) => {
+    if (!run.context) return false
+    try {
+      const ctx = JSON.parse(run.context)
+      return ctx.task_id === id || (ctx.tasks && ctx.tasks.includes(id))
+    } catch {
+      return false
+    }
+  })
+
+  // Also get shepherd evaluations that include this task
+  const allEvaluations = await queries.getShepherdEvaluations({ limit: 100 })
+  const taskEvaluations = allEvaluations.filter((eval_) => {
+    const tasksEvaluated = JSON.parse(eval_.tasks_evaluated ?? '[]')
+    return tasksEvaluated.includes(id)
+  })
+
+  return c.json({
+    task_id: id,
+    sessions: taskSessions.map(queries.parseRun),
+    evaluations: taskEvaluations.map(queries.parseShepherdEvaluation),
+    total_sessions: taskSessions.length,
+    total_evaluations: taskEvaluations.length,
+  })
+})
 
 // =============================================================================
 // Helper: Resolve short IDs to full UUIDs

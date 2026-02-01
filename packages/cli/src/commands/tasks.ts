@@ -554,6 +554,79 @@ export function registerTaskCommands(program: Command): void {
     })
 
   // --------------------------------------------------------------------------
+  // mycel task merge <id>
+  // --------------------------------------------------------------------------
+  taskCmd
+    .command('merge <id>')
+    .description('Merge a completed task branch')
+    .option('--json', 'Output as JSON')
+    .action(async (id: string, options) => {
+      try {
+        const client = getClient()
+        const taskId = await resolveTaskId(id)
+
+        const response = await client.post<{ message: string; merged: boolean; pr_url?: string }>(
+          `/api/tasks/${taskId}/merge`
+        )
+
+        if (options.json) {
+          json(response)
+          return
+        }
+
+        if (response.merged) {
+          success(`Task ${shortId(taskId)} merged`)
+          if (response.pr_url) {
+            console.log(`  PR: ${response.pr_url}`)
+          }
+        } else {
+          info(response.message)
+        }
+      } catch (err) {
+        if (err instanceof ApiError) {
+          const body = err.body as { error?: string } | undefined
+          error(`Failed to merge task: ${body?.error ?? err.message}`)
+        } else {
+          error(`Failed to merge task: ${err}`)
+        }
+        process.exit(1)
+      }
+    })
+
+  // --------------------------------------------------------------------------
+  // mycel task clone <id>
+  // --------------------------------------------------------------------------
+  taskCmd
+    .command('clone <id>')
+    .description('Clone a task with same configuration')
+    .option('--json', 'Output as JSON')
+    .action(async (id: string, options) => {
+      try {
+        const client = getClient()
+        const taskId = await resolveTaskId(id)
+
+        const response = await client.post<TaskResponse>(`/api/tasks/${taskId}/clone`)
+
+        if (options.json) {
+          json(response.task)
+          return
+        }
+
+        success(`Cloned task ${shortId(taskId)} -> ${shortId(response.task.id)}`)
+        console.log(`  Title: ${response.task.title}`)
+        console.log(`  Repo:  ${response.task.repo_path}`)
+      } catch (err) {
+        if (err instanceof ApiError) {
+          const body = err.body as { error?: string } | undefined
+          error(`Failed to clone task: ${body?.error ?? err.message}`)
+        } else {
+          error(`Failed to clone task: ${err}`)
+        }
+        process.exit(1)
+      }
+    })
+
+  // --------------------------------------------------------------------------
   // mycel task prune [--keep N] [--dry-run]
   // --------------------------------------------------------------------------
   taskCmd
