@@ -364,6 +364,36 @@
 - ArmoryContext interface for type-safe context injection
 - buildArmoryPrompt function replaces {inventory} and {tasks_analyzed} placeholders
 
+### Phase 4C: Shepherd Prompt
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T04:00:00Z
+**Completed**: 2026-02-01T04:15:00Z
+**Validation**:
+- TypeScript compiles without errors (no shepherd-specific errors)
+- Prompt text matches v1 shepherd.py exactly (lines 139-335, 843-885)
+- All prompts ported: SHEPHERD_SYSTEM_PROMPT, SHEPHERD_CONTINUATION_PROMPT
+- YAML output schema documented
+- Helper functions for context building included
+
+**Files Created**:
+- `packages/server/src/prompts/shepherd.ts` - Complete Shepherd agent prompt port
+
+**Notes**:
+- SHEPHERD_SYSTEM_PROMPT: Main prompt with {MYCEL_CONTEXT} placeholder for injection
+- SHEPHERD_OUTPUT_SCHEMA: Expected YAML output format (human_report, branch_evaluations, global_patterns, global_warnings, agent_feedback)
+- SHEPHERD_CONTINUATION_PROMPT: Human response handling after alignment questions
+- ShepherdTaskContext, ShepherdSignalContext, ShepherdMemoryContext interfaces for type-safe context
+- buildShepherdContext function assembles repo memory, tasks, and signals
+- buildShepherdPrompt function injects mycel context and shepherd context
+- buildContinuationPrompt function for signal response handling
+- Memory system documentation: patterns -> .mycel/memory.json, warnings -> same
+- Decision criteria: MERGE/REJECT/DEFER with specific guidelines
+- Pattern extraction guidelines with good/bad examples
+- Playwright MCP screenshot instructions included
+- Tasks without branches handling documented
+- Critical output requirements: YAML block mandatory
+
 ---
 
 ## Agent Harness Compatibility Matrix
