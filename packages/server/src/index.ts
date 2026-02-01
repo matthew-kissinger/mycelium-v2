@@ -4,7 +4,7 @@ import { logger } from 'hono/logger'
 import tasksRoutes from './routes/tasks'
 import reposRoutes from './routes/repos'
 import statsRoutes from './routes/stats'
-import { createSSEResponse, getClientCount } from './sse'
+import { createSSEResponse, getClientCount, getClientInfo, shutdown as shutdownSSE } from './sse'
 import { db, schema } from './db'
 import { sql } from 'drizzle-orm'
 
@@ -26,8 +26,22 @@ app.get('/api/health', (c) => {
 })
 
 // SSE endpoint for real-time updates
+// Query param: topics - comma-separated list of topics to subscribe to
+// Examples:
+//   /api/events (subscribe to all)
+//   /api/events?topics=task:* (all task events)
+//   /api/events?topics=task:123,signal:* (specific task + all signals)
 app.get('/api/events', (c) => {
-  return createSSEResponse()
+  const topics = c.req.query('topics') ?? null
+  return createSSEResponse(topics)
+})
+
+// SSE clients endpoint for debugging/monitoring
+app.get('/api/events/clients', (c) => {
+  return c.json({
+    count: getClientCount(),
+    clients: getClientInfo(),
+  })
 })
 
 // API routes
@@ -117,6 +131,22 @@ async function initDb() {
       started_at TEXT NOT NULL,
       completed_at TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS shepherd_evaluations (
+      id TEXT PRIMARY KEY,
+      repo_path TEXT NOT NULL,
+      evaluated_at TEXT NOT NULL,
+      tasks_evaluated TEXT NOT NULL,
+      health TEXT NOT NULL,
+      headline TEXT NOT NULL,
+      concerns TEXT,
+      wins TEXT,
+      recommendation TEXT,
+      global_patterns TEXT,
+      global_warnings TEXT,
+      branch_evaluations TEXT,
+      raw_response TEXT
+    );
   `)
 
   console.log('Database initialized')
@@ -127,6 +157,19 @@ const port = parseInt(process.env.PORT ?? '8000')
 
 initDb().then(() => {
   console.log(`Server running at http://localhost:${port}`)
+})
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('\nShutting down...')
+  shutdownSSE()
+  process.exit(0)
+})
+
+process.on('SIGTERM', () => {
+  console.log('Received SIGTERM, shutting down...')
+  shutdownSSE()
+  process.exit(0)
 })
 
 export default {

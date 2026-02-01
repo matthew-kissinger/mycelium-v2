@@ -92,3 +92,20 @@ export const system_agent_runs = sqliteTable('system_agent_runs', {
   started_at: text('started_at').notNull(),
   completed_at: text('completed_at'),
 })
+
+// Shepherd evaluations
+export const shepherd_evaluations = sqliteTable('shepherd_evaluations', {
+  id: text('id').primaryKey(),
+  repo_path: text('repo_path').notNull(),
+  evaluated_at: text('evaluated_at').notNull(),
+  tasks_evaluated: text('tasks_evaluated').notNull(), // JSON array of task IDs
+  health: text('health').notNull(), // 'healthy' | 'warning' | 'critical'
+  headline: text('headline').notNull(),
+  concerns: text('concerns'), // JSON array of strings
+  wins: text('wins'), // JSON array of strings
+  recommendation: text('recommendation'),
+  global_patterns: text('global_patterns'), // JSON array
+  global_warnings: text('global_warnings'), // JSON array
+  branch_evaluations: text('branch_evaluations'), // JSON array of {branch, action, reason}
+  raw_response: text('raw_response'),
+})

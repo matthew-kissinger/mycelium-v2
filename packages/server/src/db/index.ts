@@ -24,3 +24,6 @@ export const db = drizzle(sqlite, { schema })
 // Export schema for use elsewhere
 export { schema }
 export type DB = typeof db
+
+// Export query functions
+export * from './queries'
