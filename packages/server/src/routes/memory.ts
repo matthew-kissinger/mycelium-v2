@@ -122,4 +122,139 @@ app.post('/compact', zValidator('json', MemoryCompactRequest), async (c) => {
   })
 })
 
+// =============================================================================
+// Agent Stats Endpoints
+// =============================================================================
+
+// GET /api/memory/agent-stats - Get all agent performance stats
+app.get('/agent-stats', async (c) => {
+  const stats = await calculateAgentStats()
+  return c.json(stats)
+})
+
+// GET /api/memory/agent-stats/:agent - Get stats for specific agent
+app.get('/agent-stats/:agent', async (c) => {
+  const agent = c.req.param('agent')
+  const stats = await calculateAgentStats(agent)
+
+  if (!stats.agents[agent]) {
+    return c.json({
+      error: `No stats found for agent: ${agent}`,
+      available_agents: Object.keys(stats.agents),
+    }, 404)
+  }
+
+  return c.json({
+    agent,
+    stats: stats.agents[agent],
+    period: stats.period,
+  })
+})
+
+// POST /api/memory/agent-stats/backfill - Rebuild stats from completed tasks
+app.post('/agent-stats/backfill', async (c) => {
+  // Get all completed tasks
+  const { db } = await import('../db')
+  const { schema } = await import('../db')
+  const { eq, or } = await import('drizzle-orm')
+
+  const completedTasks = await db.select().from(schema.tasks)
+    .where(or(eq(schema.tasks.status, 'done'), eq(schema.tasks.status, 'failed')))
+
+  const stats = await calculateAgentStats()
+
+  return c.json({
+    message: 'Agent stats rebuilt from task history',
+    tasks_processed: completedTasks.length,
+    stats,
+  })
+})
+
+// =============================================================================
+// Helper: Calculate agent performance stats
+// =============================================================================
+async function calculateAgentStats(filterAgent?: string) {
+  const { db } = await import('../db')
+  const { schema } = await import('../db')
+  const { or, eq, and } = await import('drizzle-orm')
+
+  // Get all completed tasks (done + failed)
+  const completedTasks = await db.select().from(schema.tasks)
+    .where(or(eq(schema.tasks.status, 'done'), eq(schema.tasks.status, 'failed')))
+
+  // Group by agent
+  const agentStats: Record<string, {
+    total_tasks: number
+    successful: number
+    failed: number
+    success_rate: number
+    total_cost_usd: number
+    avg_cost_usd: number
+    total_duration_seconds: number
+    avg_duration_seconds: number
+    models_used: Record<string, number>
+  }> = {}
+
+  for (const task of completedTasks) {
+    const agent = task.agent ?? 'unknown'
+
+    if (filterAgent && agent !== filterAgent) {
+      continue
+    }
+
+    if (!agentStats[agent]) {
+      agentStats[agent] = {
+        total_tasks: 0,
+        successful: 0,
+        failed: 0,
+        success_rate: 0,
+        total_cost_usd: 0,
+        avg_cost_usd: 0,
+        total_duration_seconds: 0,
+        avg_duration_seconds: 0,
+        models_used: {},
+      }
+    }
+
+    const s = agentStats[agent]
+    s.total_tasks++
+
+    if (task.status === 'done') {
+      s.successful++
+    } else {
+      s.failed++
+    }
+
+    s.total_cost_usd += task.cost_usd ?? 0
+    s.total_duration_seconds += task.duration_seconds ?? 0
+
+    // Track model usage
+    const model = task.model ?? 'default'
+    s.models_used[model] = (s.models_used[model] ?? 0) + 1
+  }
+
+  // Calculate averages
+  for (const agent of Object.keys(agentStats)) {
+    const s = agentStats[agent]
+    s.success_rate = s.total_tasks > 0 ? s.successful / s.total_tasks : 0
+    s.avg_cost_usd = s.total_tasks > 0 ? s.total_cost_usd / s.total_tasks : 0
+    s.avg_duration_seconds = s.total_tasks > 0 ? s.total_duration_seconds / s.total_tasks : 0
+  }
+
+  // Find date range
+  const timestamps = completedTasks
+    .map((t) => t.completed_at)
+    .filter(Boolean)
+    .sort()
+
+  return {
+    agents: agentStats,
+    period: {
+      start: timestamps[0] ?? null,
+      end: timestamps[timestamps.length - 1] ?? null,
+      total_tasks: completedTasks.length,
+    },
+  }
+}
+
 export default app

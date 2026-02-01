@@ -14,6 +14,16 @@ export const tasks = sqliteTable('tasks', {
   depends_on: text('depends_on').default('[]'),
   sequenced: integer('sequenced', { mode: 'boolean' }).default(false),
 
+  // Git/GitHub
+  branch_name: text('branch_name'),
+  github_url: text('github_url'),
+
+  // Context
+  spec_context: text('spec_context'), // Orchestrator metadata JSON
+  retry_context: text('retry_context'), // Previous error context for retries
+  user_input: text('user_input'), // Original user request
+  enrich_with_opus: integer('enrich_with_opus', { mode: 'boolean' }).default(false),
+
   // Results
   result: text('result'),
   parsed_result: text('parsed_result'), // JSON
@@ -55,6 +65,7 @@ export const signals = sqliteTable('signals', {
   response: text('response'),
   task_id: text('task_id'),
   repo_path: text('repo_path'),
+  telegram_message_id: integer('telegram_message_id'), // Message ID in Telegram (for reply matching)
   created_at: text('created_at').notNull(),
   responded_at: text('responded_at'),
 })
@@ -108,4 +119,29 @@ export const shepherd_evaluations = sqliteTable('shepherd_evaluations', {
   global_warnings: text('global_warnings'), // JSON array
   branch_evaluations: text('branch_evaluations'), // JSON array of {branch, action, reason}
   raw_response: text('raw_response'),
+})
+
+// Agent stats (performance tracking per agent)
+export const agent_stats = sqliteTable('agent_stats', {
+  agent_id: text('agent_id').primaryKey(),
+  total_tasks: integer('total_tasks').default(0),
+  successful: integer('successful').default(0),
+  failed: integer('failed').default(0),
+  success_rate: real('success_rate').default(0),
+  total_cost: real('total_cost').default(0),
+  best_for: text('best_for'), // JSON array
+  avoid_for: text('avoid_for'), // JSON array
+  updated_at: text('updated_at'),
+})
+
+// Fruiting sessions (task execution context trace)
+export const fruiting_sessions = sqliteTable('fruiting_sessions', {
+  id: text('id').primaryKey(),
+  task_id: text('task_id').notNull(),
+  repo_path: text('repo_path').notNull(),
+  agent: text('agent'),
+  model: text('model'),
+  context_trace: text('context_trace'), // JSON
+  full_prompt: text('full_prompt'),
+  created_at: text('created_at').notNull(),
 })

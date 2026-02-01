@@ -1,5 +1,6 @@
 import { spawn, type Subprocess } from 'bun'
 import { DEFAULT_AGENT_CONFIGS, type AgentType, type AgentExecuteResult } from '@mycelium/shared'
+import { registerProcess, unregisterProcess } from './registry'
 
 export interface DispatchOptions {
   agent: AgentType
@@ -7,6 +8,7 @@ export interface DispatchOptions {
   cwd: string
   model?: string
   timeout?: number
+  taskId?: string  // Required for process registry tracking
   onOutput?: (chunk: string) => void
 }
 
@@ -14,9 +16,11 @@ export interface DispatchOptions {
  * Dispatch a task to a CLI agent.
  * This is a "dumb pipe" - it spawns the CLI and streams output.
  * All intelligence is in the agent, not here.
+ *
+ * Registers process with the registry for cleanup on cancel/shutdown.
  */
 export async function dispatch(options: DispatchOptions): Promise<AgentExecuteResult> {
-  const { agent, prompt, cwd, model, timeout, onOutput } = options
+  const { agent, prompt, cwd, model, timeout, taskId, onOutput } = options
   const config = DEFAULT_AGENT_CONFIGS[agent]
 
   if (!config) {
@@ -46,6 +50,11 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
       stderr: 'pipe',
       stdin: 'ignore',
     })
+
+    // Register process for cleanup on cancel/shutdown
+    if (taskId) {
+      registerProcess(taskId, proc, agent, cwd)
+    }
 
     // Stream stdout
     const stdoutReader = proc.stdout.getReader()
@@ -84,6 +93,9 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
 
     if (result === 'timeout') {
       proc.kill()
+      if (taskId) {
+        unregisterProcess(taskId)
+      }
       return {
         success: false,
         output: output + '\n[TIMEOUT]',
@@ -95,6 +107,11 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
     const exitCode = await proc.exited
     const duration = (Date.now() - startTime) / 1000
 
+    // Unregister process on completion
+    if (taskId) {
+      unregisterProcess(taskId)
+    }
+
     return {
       success: exitCode === 0,
       output: output || stderr,
@@ -103,6 +120,10 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
       cost_usd: parseCostFromOutput(output),
     }
   } catch (error) {
+    // Unregister process on error
+    if (taskId) {
+      unregisterProcess(taskId)
+    }
     return {
       success: false,
       output: error instanceof Error ? error.message : String(error),

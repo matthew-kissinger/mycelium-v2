@@ -13,6 +13,10 @@ import { registerSignalCommands } from './commands/signals.ts'
 import { registerMemoryCommands } from './commands/memory.ts'
 import { registerRepoCommands } from './commands/repos.ts'
 import { registerRunnerCommands } from './commands/runner.ts'
+import { registerSequenceCommands } from './commands/sequence.ts'
+import { registerGenesisCommands } from './commands/genesis.ts'
+import { registerSessionCommands } from './commands/sessions.ts'
+import { registerVersionCommand } from './commands/version.ts'
 
 const VERSION = '0.1.0'
 const DEFAULT_API_URL = 'http://localhost:8000'
@@ -37,10 +41,14 @@ program
 
 // Register command modules
 registerTaskCommands(program)     // stats, tasks, task <subcommand>
-registerSignalCommands(program)   // align, signals, check, notify, inbox, status
+registerSignalCommands(program)   // align, signals, check, notify, inbox, status, reply, show, download
 registerMemoryCommands(program)   // memory, memory add, compact
 registerRepoCommands(program)     // repos, repos add/remove/health/discover/describe/paths
 registerRunnerCommands(program)   // runner, runner start/stop/config, config show/set
+registerSequenceCommands(program) // sequence [repo_path] [--dry-run]
+registerGenesisCommands(program)  // genesis, genesis create/auto/config
+registerSessionCommands(program)  // sessions, session <id>, trace <task_id>
+registerVersionCommand(program)   // version [--deps] [--outdated]
 
 // Parse and execute
 program.parse()

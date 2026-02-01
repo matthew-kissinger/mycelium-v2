@@ -7,6 +7,11 @@ import statsRoutes from './routes/stats'
 import memoryRoutes from './routes/memory'
 import signalsRoutes from './routes/signals'
 import notifyRoutes from './routes/notify'
+import queueRoutes from './routes/queue'
+import orchestrateRoutes from './routes/orchestrate'
+import hooksRoutes from './routes/hooks'
+import exportRoutes from './routes/export'
+import configRoutes from './routes/config'
 import {
   systemAgentsRoutes,
   discoveryRoutes,
@@ -15,10 +20,11 @@ import {
   schedulerRoutes,
 } from './routes/system-agents'
 import { createSSEResponse, getClientCount, getClientInfo, shutdown as shutdownSSE } from './sse'
+import { shutdownRegistry, getRunningProcessCount } from './agents'
 import { db, schema } from './db'
 import { sql } from 'drizzle-orm'
 import { initTelegramService, getTelegramService, shutdownTelegramService } from './telegram'
-import { createUpdateHandler } from './telegram/polling'
+import { startPoller, stopPoller, isPollerRunning } from './telegram/poller'
 
 const app = new Hono()
 
@@ -32,9 +38,11 @@ app.get('/api/health', (c) => {
   return c.json({
     backend: true,
     scheduler: false, // TODO: implement scheduler
-    poller: telegram?.isConnected() ?? false,
+    poller: isPollerRunning(),
+    telegram_connected: telegram?.isConnected() ?? false,
     uptime_seconds: Math.floor(process.uptime()),
     sse_clients: getClientCount(),
+    running_agents: getRunningProcessCount(),
   })
 })
 
@@ -71,6 +79,13 @@ app.route('/api/discovery', discoveryRoutes)
 app.route('/api/sequencer', sequencerRoutes)
 app.route('/api/shepherd', shepherdRoutes)
 app.route('/api/scheduler', schedulerRoutes)
+
+// New routes
+app.route('/api/queue', queueRoutes)
+app.route('/api/orchestrate', orchestrateRoutes)
+app.route('/api/hooks', hooksRoutes)
+app.route('/api/export', exportRoutes)
+app.route('/api/config', configRoutes)
 
 // Initialize database tables
 async function initDb() {
@@ -120,6 +135,7 @@ async function initDb() {
       response TEXT,
       task_id TEXT,
       repo_path TEXT,
+      telegram_message_id INTEGER,
       created_at TEXT NOT NULL,
       responded_at TEXT
     );
@@ -179,9 +195,8 @@ async function initDb() {
 async function initTelegram() {
   const telegram = await initTelegramService()
   if (telegram) {
-    const updateHandler = createUpdateHandler(telegram)
-    telegram.startPolling(updateHandler)
-    console.log('Telegram polling started')
+    startPoller(telegram)
+    console.log('Telegram poller started with continuation agent support')
   } else {
     console.log('Telegram not configured, skipping initialization')
   }
@@ -197,19 +212,28 @@ initDb().then(async () => {
 })
 
 // Graceful shutdown
-process.on('SIGINT', () => {
-  console.log('\nShutting down...')
-  shutdownTelegramService()
-  shutdownSSE()
-  process.exit(0)
-})
+async function gracefulShutdown(signal: string) {
+  console.log(`\n[SHUTDOWN] Received ${signal}, shutting down...`)
 
-process.on('SIGTERM', () => {
-  console.log('Received SIGTERM, shutting down...')
+  // Kill all running agent processes and mark tasks as cancelled
+  await shutdownRegistry()
+
+  // Stop Telegram poller
+  const telegram = getTelegramService()
+  if (telegram) {
+    stopPoller(telegram)
+  }
   shutdownTelegramService()
+
+  // Close SSE connections
   shutdownSSE()
+
+  console.log('[SHUTDOWN] Complete')
   process.exit(0)
-})
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'))
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
 
 export default {
   port,
