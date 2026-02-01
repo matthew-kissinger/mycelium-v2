@@ -534,6 +534,46 @@
 - Dark theme styling matching existing components
 - Status colors: pending=yellow, responded=green, expired=gray
 
+### Phase 7A-B: MCP Package
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-01-31T20:45:00Z
+**Completed**: 2026-01-31T21:00:00Z
+**Validation**:
+- TypeScript compiles without errors (bun run tsc --noEmit)
+- `bun install` succeeds
+- JSON-RPC tools/list returns all 14 tools
+- MCP server starts on stdio transport
+
+**Files Created**:
+- `packages/mcp/package.json` - Package config with @modelcontextprotocol/sdk
+- `packages/mcp/tsconfig.json` - TypeScript config extending root
+- `packages/mcp/src/index.ts` - MCP server entry point
+- `packages/mcp/src/tools/index.ts` - Tool definitions and handlers
+
+**Tools Implemented**:
+1. `mycel_stats` - Get task statistics
+2. `mycel_tasks` - List tasks with filtering
+3. `mycel_task_create` - Create new task
+4. `mycel_task_run` - Run pending task
+5. `mycel_task_info` - Get task details
+6. `mycel_repos` - List network repos
+7. `mycel_repos_health` - Get repo health scores
+8. `mycel_notify` - Send Telegram notification
+9. `mycel_align` - Create alignment signal
+10. `mycel_memory` - Get memory patterns/warnings
+11. `mycel_memory_add` - Add pattern or warning
+12. `mycel_genesis` - Create new repository
+13. `mycel_sequence` - Run Sequencer agent
+14. `mycel_signals` - List alignment signals
+
+**Notes**:
+- Uses @modelcontextprotocol/sdk for MCP protocol
+- StdioServerTransport for Claude Code integration
+- MYCEL_API_URL env var for custom backend URL
+- All tools return JSON-formatted results
+- Error handling wraps all API calls
+
 ---
 
 ## Agent Harness Compatibility Matrix
