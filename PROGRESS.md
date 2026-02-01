@@ -19,8 +19,11 @@
 | 2D | COMPLETE | claude/opus | Repo routes |
 | 2E | COMPLETE | claude/opus | System agent routes |
 | 2F | COMPLETE | claude/opus | Notification routes |
-| 3A-F | PENDING | - | CLI package |
-| 4A-E | PENDING | - | System prompts |
+| 3A | COMPLETE | claude/opus | CLI scaffold |
+| 3B-F | PENDING | - | CLI commands |
+| 4A | IN PROGRESS | claude/opus | Discovery prompt |
+| 4B-D | PENDING | - | Other system prompts |
+| 4E | IN PROGRESS | claude/opus | Armory prompt |
 | 5A-B | PENDING | - | Scheduler |
 | 6A-E | PENDING | - | Frontend |
 | 7A-B | PENDING | - | MCP package |
@@ -237,6 +240,32 @@
 - /api/status returns connection status (will check Telegram bot when integrated)
 - Broadcasts signal:created SSE event when alignment signal is created
 
+### Phase 3A: CLI Scaffold
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T02:00:00Z
+**Completed**: 2026-02-01T02:15:00Z
+**Validation**:
+- `bun install` succeeds in packages/cli
+- `bun run packages/cli/src/index.ts --help` shows help with all options
+- `bun run packages/cli/src/index.ts --version` outputs 0.1.0
+- `bun run tsc --noEmit` passes in packages/cli
+- `--api-url` option accepts custom URLs
+
+**Files Created**:
+- `packages/cli/package.json` - Package config with commander dependency
+- `packages/cli/tsconfig.json` - TypeScript config extending root
+- `packages/cli/src/index.ts` - Entry point with Commander.js, placeholder commands
+- `packages/cli/src/client.ts` - API client wrapper with get/post/patch/delete methods
+- `packages/cli/src/output.ts` - Output formatting helpers (table, json, success, error, info)
+
+**Notes**:
+- Global `--api-url` option defaults to http://localhost:8000 or MYCEL_API_URL env
+- Client uses `setGlobalClient` / `getClient` pattern for command access
+- Placeholder commands registered for stats, tasks, repos, signals, memory, notify
+- ApiError class for structured error handling
+- Table formatter with auto-column widths and value truncation
+
 ---
 
 ## Agent Harness Compatibility Matrix
@@ -360,4 +389,5 @@ Before marking a phase complete:
 | 2026-02-01 | 2E | claude/opus | System agent routes (runs, triggers, scheduler status) |
 | 2026-02-01 | 2A | claude/opus | Task routes (extended: context, graph, cancel, dependency resolution) |
 | 2026-02-01 | 2F | claude/opus | Notification routes (notify, align, inbox, status placeholders) |
+| 2026-02-01 | 3A | claude/opus | CLI scaffold (entry point, client, output helpers) |
 
