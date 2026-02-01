@@ -34,7 +34,7 @@
 | 6A | COMPLETE | claude/opus | React Flow scaffold (Phase 0) |
 | 6B | IN PROGRESS | claude/opus | Zustand workflow store |
 | 6C | COMPLETE | claude/opus | LiveLogs component |
-| 6D | IN PROGRESS | claude/opus | Task Panel Component |
+| 6D | COMPLETE | claude/opus | Task Panel Component |
 | 6E | COMPLETE | claude/opus | Signal Panel Component |
 | 7A-B | COMPLETE | claude/opus | MCP package |
 | 8A-C | PENDING | - | Integration |
@@ -509,6 +509,37 @@
 - Tasks without branches handling documented
 - Critical output requirements: YAML block mandatory
 
+### Phase 6D: Task Panel Component
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T11:00:00Z
+**Completed**: 2026-02-01T11:30:00Z
+**Validation**:
+- TypeScript compiles without errors (TaskPanel.tsx)
+- Task list with status filtering (all, pending, running, done, failed)
+- Task detail view with full metadata display
+- Create task form with repo dropdown and agent selection
+- Run, cancel, and delete actions with mutations
+- SSE subscription for real-time updates
+
+**Files Created**:
+- `packages/client/src/components/TaskPanel.tsx` - Complete task panel component
+
+**Files Modified**:
+- `packages/client/src/stores/workflow.ts` - Extended with task state management
+
+**Notes**:
+- Uses TanStack Query for data fetching with 10s polling fallback
+- SSE subscription to task:* events for real-time updates (created, updated, started, completed, failed, cancelled, deleted)
+- TaskListItem component shows status indicator, title, agent, and repo
+- TaskDetail component shows full metadata: ID, timestamps, duration, cost, dependencies
+- TaskCreateForm modal with title, repo dropdown, agent select, model input, prompt textarea
+- Mutations for run/cancel/delete with error handling
+- Status colors: pending=gray, running=blue (pulsing), done=green, failed=red, cancelled=yellow
+- formatRelativeTime and formatDuration helper functions
+- Syncs task data to Zustand workflow store for cross-component access
+- Dark theme styling consistent with existing components
+
 ### Phase 6E: Signal Panel Component
 **Status**: COMPLETE
 **Agent**: claude/opus
@@ -709,4 +740,5 @@ Before marking a phase complete:
 | 2026-02-01 | 6E | claude/opus | Signal Panel Component (pending/responded signals, quick response, SSE updates) |
 | 2026-01-31 | 6C | claude/opus | LiveLogs component (real-time task output, filter, auto-scroll, toggle) |
 | 2026-01-31 | 7A-B | claude/opus | MCP package (14 tools: stats, tasks, repos, notify, align, memory, genesis, sequence, signals) |
+| 2026-02-01 | 6D | claude/opus | Task Panel Component (task list, filters, detail view, create form, run/cancel/delete) |
 
