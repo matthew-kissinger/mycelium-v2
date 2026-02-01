@@ -10,9 +10,9 @@
 | Phase | Status | Agent | Notes |
 |-------|--------|-------|-------|
 | 0 | COMPLETE | initial | Scaffolding done |
-| 1A | PENDING | - | Database layer |
-| 1B | PENDING | - | Shared schemas |
-| 1C | PENDING | - | SSE infrastructure |
+| 1A | COMPLETE | claude/opus | Database layer |
+| 1B | COMPLETE | claude/opus | Shared schemas |
+| 1C | COMPLETE | claude/opus | SSE infrastructure |
 | 2A-F | PENDING | - | API routes |
 | 3A-F | PENDING | - | CLI package |
 | 4A-E | PENDING | - | System prompts |
@@ -29,6 +29,57 @@
 **Status**: COMPLETE
 **Completed**: 2026-01-31
 **Notes**: Initial scaffold with Bun + Hono + React Flow
+
+### Phase 1A: Complete Database Layer
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-01-31T12:00:00Z
+**Completed**: 2026-01-31T20:00:00Z
+**Validation**: Database tables created and CRUD functions working
+
+### Phase 1B: Complete Shared Schemas
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-01-31T20:30:00Z
+**Completed**: 2026-01-31T21:00:00Z
+**Validation**:
+- TypeScript compiles without errors (bun run tsc --noEmit)
+- All schemas export correctly from packages/shared
+
+**Files Created**:
+- `packages/shared/src/schemas/shepherd.ts` - Shepherd evaluation schemas
+- `packages/shared/src/schemas/system-agent.ts` - System agent run tracking
+- `packages/shared/src/schemas/scheduler.ts` - Scheduler configuration
+- `packages/shared/src/schemas/api.ts` - All API request/response schemas
+- `packages/shared/src/schemas/events.ts` - SSE event schemas
+
+**Notes**:
+- ShepherdEvaluation with BranchEvaluation, HumanReport, MergeDecision enum
+- SystemAgentRun with SystemAgentType, SystemAgentStatus enums
+- SchedulerConfig with all cycle intervals and thresholds
+- Complete API schemas for tasks, signals, memory, repos, system agents, notifications
+- Discriminated union types for all SSE events (TaskEvent, SignalEvent, SystemAgentEvent, etc.)
+
+### Phase 1C: SSE Infrastructure
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-01-31T18:00:00Z
+**Completed**: 2026-01-31T18:30:00Z
+**Validation**:
+- Server starts without errors
+- SSE endpoint accepts topics query param: `/api/events?topics=task:*,signal:*`
+- Clients receive `connected` event with clientId and subscribed topics
+- Heartbeat sends every 30 seconds to all clients
+- Topic filtering works (task:*, signal:*, system:*, repo:*, specific IDs)
+- Backpressure handling removes disconnected clients
+- `/api/events/clients` endpoint shows connected clients
+- Graceful shutdown cleans up SSE connections
+
+**Notes**:
+- Added SSETopic types to shared package
+- Topic patterns: `*` (all), `task:*` (category), `task:123` (specific)
+- Client management: subscribe/unsubscribe/disconnect functions
+- Heartbeat starts on first client, stops when no clients
 
 ---
 
@@ -144,4 +195,7 @@ Before marking a phase complete:
 | Date | Phase | Agent | Summary |
 |------|-------|-------|---------|
 | 2026-01-31 | 0 | initial | Scaffold complete |
+| 2026-01-31 | 1A | claude/opus | Database layer with all tables and CRUD |
+| 2026-01-31 | 1B | claude/opus | Shared schemas (shepherd, system-agent, scheduler, api, events) |
+| 2026-01-31 | 1C | claude/opus | SSE infrastructure with topics, heartbeat, client management |
 

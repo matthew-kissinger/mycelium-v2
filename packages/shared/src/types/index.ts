@@ -33,38 +33,107 @@ export type {
   RepoMemory,
 } from '../schemas/memory'
 
-// API response types
+// Shepherd types
+export type {
+  ShepherdHealth,
+  MergeDecision,
+  BranchEvaluation,
+  HumanReport,
+  ShepherdEvaluation,
+  ShepherdConfig,
+} from '../schemas/shepherd'
+
+// System agent types
+export type {
+  SystemAgentType,
+  SystemAgentStatus,
+  SystemAgentRun,
+  SystemAgentRunCreate,
+  SystemAgentRunUpdate,
+  SystemAgentConfig,
+} from '../schemas/system-agent'
+
+// Scheduler types
+export type {
+  SchedulerConfig,
+  CycleState,
+  SchedulerStatus,
+} from '../schemas/scheduler'
+
+// API request/response types
+export type {
+  ApiError,
+  TaskListParams,
+  TaskCreateRequest,
+  TaskUpdateRequest,
+  TaskRunRequest,
+  TaskGraphNode,
+  TaskGraphResponse,
+  SignalListParams,
+  SignalCreateRequest,
+  SignalRespondRequest,
+  MemoryPatternCreateRequest,
+  MemoryWarningCreateRequest,
+  MemoryWriteRequest,
+  MemoryCompactRequest,
+  RepoCreateRequest,
+  RepoUpdateRequest,
+  RepoDiscoverRequest,
+  RepoHealthItem,
+  RepoHealthResponse,
+  SystemAgentRunListParams,
+  SystemAgentTriggerRequest,
+  NotifyRequest,
+  NotifyResponse,
+  InboxMessage,
+  InboxListParams,
+  StatsResponse,
+  HealthResponse,
+} from '../schemas/api'
+
+// SSE event types
+export type {
+  SSEEventType,
+  TaskCreatedEvent,
+  TaskUpdatedEvent,
+  TaskStartedEvent,
+  TaskCompletedEvent,
+  TaskFailedEvent,
+  TaskCancelledEvent,
+  TaskOutputEvent,
+  TaskEvent,
+  SignalCreatedEvent,
+  SignalRespondedEvent,
+  SignalExpiredEvent,
+  SignalEvent,
+  AgentStartedEvent,
+  AgentCompletedEvent,
+  AgentFailedEvent,
+  AgentBlockedEvent,
+  SystemAgentEvent,
+  SchedulerStartedEvent,
+  SchedulerStoppedEvent,
+  SchedulerCycleEvent,
+  SchedulerEvent,
+  HeartbeatEvent,
+  SystemErrorEvent,
+  SystemEvent,
+  SSEEvent,
+  SSEMessage,
+} from '../schemas/events'
+
+// API response wrapper (generic)
 export interface ApiResponse<T> {
   data?: T
   error?: string
   message?: string
 }
 
-// Stats response
-export interface Stats {
-  total_tasks: number
-  pending: number
-  running: number
-  done: number
-  failed: number
-  total_cost_usd: number
-}
-
-// Health response
-export interface Health {
-  backend: boolean
-  scheduler: boolean
-  poller: boolean
-  uptime_seconds: number
-}
-
-// SSE event types
-export type SSEEventType =
-  | 'task:created'
-  | 'task:updated'
-  | 'task:started'
-  | 'task:completed'
-  | 'task:failed'
-  | 'task:output'
-  | 'signal:created'
-  | 'signal:responded'
+// SSE topic patterns for subscriptions
+// - task:* (all task events)
+// - task:{id} (specific task)
+// - signal:* (all signals)
+// - system:* (system agent events)
+// - repo:* (all repo events)
+// - repo:{path} (specific repo events)
+export type SSETopic = string
