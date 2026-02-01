@@ -10,10 +10,10 @@ export function SignalPanel() {
   // Fetch signals
   const { data: signals = [], isLoading } = useQuery<Signal[]>({
     queryKey: ['signals', showPendingOnly],
-    queryFn: async () => {
+    queryFn: async (): Promise<Signal[]> => {
       const endpoint = showPendingOnly ? '/api/signals/pending' : '/api/signals'
       const res = await fetch(endpoint)
-      return res.json()
+      return res.json() as Promise<Signal[]>
     },
     refetchInterval: 10000, // Poll every 10 seconds as fallback
   })

@@ -17,10 +17,11 @@ export function TaskPanel() {
   // Fetch tasks
   const { data: tasks = [], isLoading } = useQuery<Task[]>({
     queryKey: ['tasks', taskFilter],
-    queryFn: async () => {
+    queryFn: async (): Promise<Task[]> => {
       const params = taskFilter !== 'all' ? `?status=${taskFilter}` : ''
       const res = await fetch(`/api/tasks${params}`)
-      return res.json()
+      const response = await res.json() as { tasks: Task[] }
+      return response.tasks
     },
     refetchInterval: 10000, // Poll every 10 seconds as fallback
   })
@@ -464,9 +465,9 @@ function TaskCreateForm({
   // Fetch repos for dropdown
   const { data: repos = [] } = useQuery<Repo[]>({
     queryKey: ['repos'],
-    queryFn: async () => {
+    queryFn: async (): Promise<Repo[]> => {
       const res = await fetch('/api/repos')
-      return res.json()
+      return res.json() as Promise<Repo[]>
     },
   })
 

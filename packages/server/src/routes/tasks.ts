@@ -35,14 +35,17 @@ app.get('/', async (c) => {
   const tasks = await queries.getTasks({
     status: status ?? undefined,
     repo_path: repo_path ?? undefined,
-    limit,
+    limit: 1000, // Get all for total count, then paginate
     sequenced: sequenced !== undefined ? sequenced === 'true' : undefined,
   })
 
-  // Apply offset manually (could be optimized in queries.ts)
+  // Apply offset and limit for pagination
   const paginatedTasks = tasks.slice(offset, offset + limit)
 
-  return c.json(paginatedTasks.map(parseTask))
+  return c.json({
+    tasks: paginatedTasks.map(parseTask),
+    total: tasks.length,
+  })
 })
 
 // =============================================================================
@@ -96,7 +99,7 @@ app.get('/:id', async (c) => {
     return c.json({ error: 'Task not found' }, 404)
   }
 
-  return c.json(parseTask(task))
+  return c.json({ task: parseTask(task) })
 })
 
 // =============================================================================
@@ -206,7 +209,7 @@ app.post('/', zValidator('json', TaskCreate), async (c) => {
   const result = parseTask(task)
   broadcast('task:created', result)
 
-  return c.json(result, 201)
+  return c.json({ task: result }, 201)
 })
 
 // =============================================================================
@@ -246,7 +249,7 @@ app.patch('/:id', zValidator('json', TaskUpdate), async (c) => {
   const result = parseTask(updated!)
   broadcast('task:updated', result)
 
-  return c.json(result)
+  return c.json({ task: result })
 })
 
 // =============================================================================

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useWorkflowStore } from '../stores/workflow'
 import { cn } from '../lib/utils'
 
@@ -22,8 +22,9 @@ export function LiveLogs() {
   useEffect(() => {
     const eventSource = new EventSource('/api/events?topics=task:output')
 
-    eventSource.addEventListener('task:output', (e) => {
-      const data = JSON.parse(e.data)
+    const handleTaskOutput = (e: Event) => {
+      const messageEvent = e as MessageEvent
+      const data = JSON.parse(messageEvent.data as string)
       setLogs((prev) => [
         ...prev.slice(-500), // Keep last 500 entries
         {
@@ -34,7 +35,9 @@ export function LiveLogs() {
           type: data.stream || 'stdout',
         },
       ])
-    })
+    }
+
+    eventSource.addEventListener('task:output', handleTaskOutput)
 
     return () => eventSource.close()
   }, [])
@@ -79,14 +82,14 @@ export function LiveLogs() {
               type="text"
               placeholder="Filter..."
               value={filter}
-              onChange={(e) => setFilter(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFilter(e.target.value)}
               className="px-2 py-1 text-sm border border-border rounded bg-muted"
             />
             <label className="flex items-center gap-1 text-sm text-muted-foreground">
               <input
                 type="checkbox"
                 checked={autoScroll}
-                onChange={(e) => setAutoScroll(e.target.checked)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAutoScroll(e.target.checked)}
                 className="rounded"
               />
               Auto-scroll

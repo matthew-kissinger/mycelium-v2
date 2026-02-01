@@ -11,9 +11,9 @@ interface Repo {
 export function Sidebar() {
   const { data: repos } = useQuery<Repo[]>({
     queryKey: ['repos'],
-    queryFn: async () => {
+    queryFn: async (): Promise<Repo[]> => {
       const res = await fetch('/api/repos')
-      return res.json()
+      return res.json() as Promise<Repo[]>
     },
   })
 

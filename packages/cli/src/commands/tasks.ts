@@ -366,7 +366,7 @@ export function registerTaskCommands(program: Command): void {
         if (task.completed_at) {
           console.log(`Completed:  ${task.completed_at}`)
         }
-        if (task.duration_seconds !== undefined) {
+        if (task.duration_seconds !== undefined && task.duration_seconds !== null) {
           console.log(`Duration:   ${task.duration_seconds}s`)
         }
         if (task.cost_usd > 0) {

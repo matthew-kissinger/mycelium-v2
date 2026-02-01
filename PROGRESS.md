@@ -37,7 +37,7 @@
 | 6D | COMPLETE | claude/opus | Task Panel Component |
 | 6E | COMPLETE | claude/opus | Signal Panel Component |
 | 7A-B | COMPLETE | claude/opus | MCP package |
-| 8A | IN PROGRESS | claude/opus | End-to-end testing |
+| 8A | COMPLETE | claude/opus | End-to-end testing |
 | 8B | COMPLETE | claude/opus | Telegram integration |
 | 8C | COMPLETE | claude/opus | Build and publishing setup |
 
@@ -674,6 +674,50 @@
 - All tools return JSON-formatted results
 - Error handling wraps all API calls
 
+### Phase 8A: End-to-End Testing
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T02:00:00Z
+**Completed**: 2026-02-01T02:15:00Z
+**Validation**:
+- Server starts and health endpoint responds
+- Task lifecycle: create, list, get, update, delete all working
+- Task context and graph endpoints functional
+- Discovery, Sequencer, Shepherd triggers working
+- System agent runs tracked in database
+- Signal flow: create, respond, list working
+- Memory system: patterns, warnings, compact working
+- Scheduler start/stop working with all 7 cycles
+- SSE events broadcasting correctly
+- CLI commands: stats, tasks, repos, memory, signals, runner all working
+- Frontend renders with proper stats from API
+
+**Issues Found and Fixed**:
+1. **Task API response format mismatch**: CLI expected `{ tasks: Task[], total: number }` but API returned bare array. Fixed by wrapping response in task routes.
+2. **Single task response format**: CLI expected `{ task: Task }` but API returned bare task object. Fixed by wrapping GET/POST/PATCH responses.
+3. **Duration display bug**: Task info showed "Duration: nulls" for null values. Fixed conditional check.
+4. **TypeScript type annotations**: Fixed useQuery return type annotations in client components for proper type inference.
+
+**Files Modified**:
+- `packages/server/src/routes/tasks.ts` - Fixed response format to match CLI expectations
+- `packages/cli/src/commands/tasks.ts` - Fixed duration null check
+- `packages/client/src/App.tsx` - Fixed Stats query type
+- `packages/client/src/components/Sidebar.tsx` - Fixed Repo query type
+- `packages/client/src/components/LiveLogs.tsx` - Fixed event handler types
+- `packages/client/src/components/SignalPanel.tsx` - Fixed Signal query type
+- `packages/client/src/components/TaskPanel.tsx` - Fixed Task query type
+
+**Test Results**:
+- All 7 test workflows passed
+- Server health: OK
+- Task CRUD: OK
+- System agents: OK
+- Signals: OK
+- Memory: OK
+- SSE: OK
+- CLI: OK
+- Frontend: OK (loads, displays stats, repo list)
+
 ### Phase 8C: Build and Publishing Setup
 **Status**: COMPLETE
 **Agent**: claude/opus
@@ -897,4 +941,5 @@ Before marking a phase complete:
 | 2026-02-01 | 5A-B | claude/opus | Scheduler implementation (7 cycles, config, API routes) |
 | 2026-01-31 | 8C | claude/opus | Build and publishing setup (package.json, tsconfig, CI workflow) |
 | 2026-01-31 | 8B | claude/opus | Telegram integration (service, polling, messages, routes) |
+| 2026-02-01 | 8A | claude/opus | End-to-end testing (7 workflows, API fixes, type corrections) |
 
