@@ -635,5 +635,6 @@ Before marking a phase complete:
 | 2026-02-01 | 4A | claude/opus | Discovery prompt (3 prompts: alignment, autonomous, task creator) |
 | 2026-02-01 | 3E | claude/opus | Network (Repos) CLI commands (list, add, remove, health, discover, describe, paths) |
 | 2026-02-01 | 3D | claude/opus | Memory CLI commands (memory, memory add, compact) |
+| 2026-02-01 | 3C | claude/opus | Signal CLI commands (align, signals, check, notify, inbox, status) |
 | 2026-02-01 | 3F | claude/opus | Runner CLI commands (runner, runner start/stop/config, config show/set) |
 
