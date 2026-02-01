@@ -1,11 +1,12 @@
 {
   "name": "@mycelium/server",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "type": "module",
+  "main": "./src/index.ts",
   "scripts": {
-    "dev": "bun run --watch src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target bun",
     "start": "bun run dist/index.js",
+    "dev": "bun run --watch src/index.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio"

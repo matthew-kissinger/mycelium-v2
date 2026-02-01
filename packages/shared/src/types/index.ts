@@ -88,6 +88,7 @@ export type {
   InboxMessage,
   InboxListParams,
   StatsResponse,
+  StatsResponse as Stats,
   HealthResponse,
 } from '../schemas/api'
 

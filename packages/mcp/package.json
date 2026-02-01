@@ -2,14 +2,15 @@
   "name": "@mycelium/mcp",
   "version": "0.1.0",
   "type": "module",
-  "main": "src/index.ts",
   "bin": {
     "mycelium-mcp": "./dist/index.js"
   },
   "scripts": {
     "build": "bun build src/index.ts --outdir dist --target bun",
-    "dev": "bun run src/index.ts"
+    "dev": "bun run src/index.ts",
+    "prepublishOnly": "bun run build"
   },
+  "files": ["dist"],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@mycelium/shared": "workspace:*"

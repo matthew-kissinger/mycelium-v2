@@ -37,7 +37,9 @@
 | 6D | COMPLETE | claude/opus | Task Panel Component |
 | 6E | COMPLETE | claude/opus | Signal Panel Component |
 | 7A-B | COMPLETE | claude/opus | MCP package |
-| 8A-C | PENDING | - | Integration |
+| 8A | IN PROGRESS | claude/opus | End-to-end testing |
+| 8B | IN PROGRESS | claude/opus | Telegram integration |
+| 8C | COMPLETE | claude/opus | Build and publishing setup |
 
 ---
 
@@ -672,6 +674,49 @@
 - All tools return JSON-formatted results
 - Error handling wraps all API calls
 
+### Phase 8C: Build and Publishing Setup
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-01-31T21:00:00Z
+**Completed**: 2026-01-31T21:10:00Z
+**Validation**:
+- `bun run clean` removes all dist directories
+- `bun run build` builds all packages in order (shared -> server -> cli -> mcp -> client)
+- `bun run typecheck` runs TypeScript type checking
+- CLI binary works: `./packages/cli/dist/index.js --version` outputs 0.1.0
+- MCP binary works: responds to JSON-RPC tools/list with all 14 tools
+- All dist directories created with correct outputs
+
+**Files Modified**:
+- `package.json` - Added build scripts (build:*, clean, typecheck), ordered build chain
+- `packages/shared/package.json` - Added build script, prepublishOnly, files array, dist exports
+- `packages/server/package.json` - Updated version, added start script
+- `packages/cli/package.json` - Added minify flag, prepublishOnly, files array
+- `packages/mcp/package.json` - Added prepublishOnly, files array
+- `packages/shared/tsconfig.json` - Standalone config with declaration, declarationMap, outDir
+- `packages/shared/src/types/index.ts` - Added Stats type alias for client compatibility
+
+**Files Created**:
+- `.github/workflows/ci.yml` - GitHub Actions CI workflow (bun install, typecheck, build)
+- `packages/client/src/vite-env.d.ts` - Vite type declarations for CSS imports
+
+**Build Outputs**:
+| Package | Output | Size |
+|---------|--------|------|
+| @mycelium/shared | dist/ (js + d.ts) | ~1 KB |
+| @mycelium/server | dist/index.js | 0.87 MB |
+| @mycelium/cli | dist/index.js (minified) | 65 KB |
+| @mycelium/mcp | dist/index.js | 0.48 MB |
+| @mycelium/client | dist/ (HTML + assets) | 420 KB JS, 42 KB CSS |
+
+**Notes**:
+- Build order enforced: shared must build first (provides types for other packages)
+- Shared package uses tsc for declaration generation, others use bun build
+- CLI and MCP use --target bun for optimal runtime
+- CLI uses --minify for smaller bundle size
+- Client uses vite build with tsc -b for type checking
+- CI workflow runs on push/PR to master branch
+
 ---
 
 ## Agent Harness Compatibility Matrix
@@ -810,4 +855,5 @@ Before marking a phase complete:
 | 2026-02-01 | 6D | claude/opus | Task Panel Component (task list, filters, detail view, create form, run/cancel/delete) |
 | 2026-02-01 | 6B | claude/opus | Zustand workflow store (SSE, tasks, repos, signals, auto-layout) |
 | 2026-02-01 | 5A-B | claude/opus | Scheduler implementation (7 cycles, config, API routes) |
+| 2026-01-31 | 8C | claude/opus | Build and publishing setup (package.json, tsconfig, CI workflow) |
 

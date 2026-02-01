@@ -187,7 +187,7 @@ const initialEdges: Edge[] = [
 ]
 
 export default function App() {
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
+  const [nodes, , onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
 
   const onConnect = useCallback(
@@ -200,9 +200,9 @@ export default function App() {
   // Fetch stats
   const { data: stats } = useQuery<Stats>({
     queryKey: ['stats'],
-    queryFn: async () => {
+    queryFn: async (): Promise<Stats> => {
       const res = await fetch('/api/stats')
-      return res.json()
+      return res.json() as Promise<Stats>
     },
     refetchInterval: 5000,
   })

@@ -6,9 +6,11 @@
     "mycel": "./dist/index.js"
   },
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target bun",
-    "dev": "bun run src/index.ts"
+    "build": "bun build src/index.ts --outdir dist --target bun --minify",
+    "dev": "bun run src/index.ts",
+    "prepublishOnly": "bun run build"
   },
+  "files": ["dist"],
   "dependencies": {
     "commander": "^12.1.0",
     "@mycelium/shared": "workspace:*"
