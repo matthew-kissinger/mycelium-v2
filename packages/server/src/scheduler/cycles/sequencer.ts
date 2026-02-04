@@ -12,6 +12,7 @@ import { SchedulerConfig } from '@mycelium/shared'
 import * as queries from '../../db/queries'
 import { dispatch } from '../../agents/dispatch'
 import { broadcast } from '../../sse'
+import { registerActiveRun, unregisterActiveRun } from '../active-runs'
 import {
   buildSequencerPrompt,
   parseSequencerResponse,
@@ -54,8 +55,9 @@ export async function runSequencerCycle(config: SchedulerConfig): Promise<void> 
 
 /**
  * Run Sequencer for a specific repo's tasks.
+ * Exported for manual triggering via API.
  */
-async function runSequencerForRepo(
+export async function runSequencerForRepo(
   repoPath: string,
   tasks: Awaited<ReturnType<typeof queries.getUnsequencedTasks>>
 ): Promise<void> {
@@ -67,6 +69,14 @@ async function runSequencerForRepo(
     agent_type: 'sequencer',
     repo_path: repoPath,
     context: { task_count: tasks.length },
+  })
+
+  // Register active run
+  registerActiveRun({
+    run_id: run.id,
+    agent_type: 'sequencer',
+    repo_path: repoPath,
+    started_at: new Date().toISOString(),
   })
 
   // Broadcast event
@@ -125,6 +135,9 @@ async function runSequencerForRepo(
     // Add context to prompt
     const prompt = `${basePrompt}\n\n${mycelContext}`
 
+    // Collect session log entries
+    const sessionLog: Array<{ chunk: string; stream: string; timestamp: string }> = []
+
     // Dispatch to agent
     const result = await dispatch({
       agent: 'claude',
@@ -132,7 +145,29 @@ async function runSequencerForRepo(
       cwd: repoPath,
       model: 'sonnet',
       timeout: 300, // 5 min timeout
+      onOutput: (chunk, stream = 'stdout') => {
+        sessionLog.push({ chunk, stream, timestamp: new Date().toISOString() })
+        broadcast('agent:output', {
+          type: 'agent:output',
+          run_id: run.id,
+          agent_type: 'sequencer',
+          chunk,
+          stream,
+          timestamp: new Date().toISOString(),
+        })
+      },
     })
+
+    // Record fruiting session for system agent run
+    queries.createFruitingSession({
+      task_id: run.id,
+      repo_path: repoPath,
+      agent: 'claude',
+      model: 'sonnet',
+      context_trace: { agent_type: 'sequencer', task_count: tasks.length },
+      full_prompt: prompt,
+      session_log: sessionLog,
+    }).catch((e) => console.error('[Sequencer] Failed to record fruiting session:', e))
 
     if (!result.success) {
       await queries.failRun(run.id, result.output.slice(0, 500))
@@ -209,6 +244,8 @@ async function runSequencerForRepo(
       error: errorMsg,
       timestamp: new Date().toISOString(),
     })
+  } finally {
+    unregisterActiveRun(run.id)
   }
 }
 

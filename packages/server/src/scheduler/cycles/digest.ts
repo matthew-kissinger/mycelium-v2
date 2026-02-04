@@ -9,6 +9,8 @@
 
 import { SchedulerConfig } from '@mycelium/shared'
 import * as queries from '../../db/queries'
+import { getTelegramService } from '../../telegram'
+import { formatDigestSummary } from '../../telegram/messages'
 
 // Track last digest time
 let lastDigestTime: Date | null = null
@@ -60,9 +62,30 @@ export async function runDigestCycle(config: SchedulerConfig): Promise<void> {
 
   console.log('[Digest] Summary:', message.split('\n')[0])
 
-  // TODO: Send notification via Telegram
-  // For now, just log
-  console.log('[Digest] Would send notification:', message)
+  // Collect active repos from recent tasks
+  const allRecentTasks = [...recentDone, ...recentFailed]
+  const activeRepoSet = new Set<string>()
+  for (const t of allRecentTasks) {
+    if (t.repo_path) activeRepoSet.add(t.repo_path)
+  }
+
+  // Get pending signals count
+  const pendingSignals = await queries.getPendingSignals(100)
+
+  // Send via Telegram
+  const telegram = getTelegramService()
+  if (telegram?.isConnected()) {
+    const formatted = formatDigestSummary({
+      period: `${periodHours}h`,
+      total_tasks: recentDone.length + recentFailed.length,
+      completed_tasks: recentDone.length,
+      failed_tasks: recentFailed.length,
+      total_cost_usd: periodCost,
+      active_repos: Array.from(activeRepoSet),
+      pending_signals: pendingSignals.length,
+    })
+    telegram.sendMessage(formatted).catch((e) => console.error('[Digest] Telegram notify error:', e))
+  }
 
   // Update last digest time
   lastDigestTime = new Date()

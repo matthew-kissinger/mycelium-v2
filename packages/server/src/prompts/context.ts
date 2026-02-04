@@ -85,6 +85,8 @@ mycel align "${agentPrefix}: BLOCKING - About to [describe action]. This will [e
 Use async align only. These agents propose work and exit - continuation handles responses.
 
 ### Notifications
+**The system automatically notifies on task completion and failure.** You do NOT need to send a completion notification.
+Use \`mycel notify\` only for mid-task progress updates or important findings:
 \`\`\`bash
 # Plain text (auto HTML-escaped)
 mycel notify "${agentPrefix}: Status update"
@@ -108,12 +110,37 @@ mycel notify "${agentPrefix}: Status update"
 ### If Task Completes Successfully
 1. Commit your changes with descriptive message
 2. Provide summary of what was done
-3. Notify: \`mycel notify "${agentPrefix}: Completed - [summary]"\`
+(System sends completion notification automatically - no need to call mycel notify)
 
 ### If You're Blocked or Need Human Input
 1. Send alignment question with full context
 2. Continue with safe work if possible
-3. If fully blocked, notify and exit cleanly`
+3. If fully blocked, notify and exit cleanly
+
+## Hub Environment Awareness
+
+You are running on a shared automation hub. Be mindful of system resources:
+
+### Reserved Ports
+- **8765** - Mycelium orchestration server (NEVER use)
+- **5765** - Mycelium frontend dev server
+- **3000** - Often used by other services
+
+### Rules for Dev Servers
+1. **Don't start long-running servers** - If you need to test, use high ports (9000+) and kill when done
+2. **No background processes** - Your task should not leave processes running after completion
+3. **Clean up** - If you start something, stop it before exiting
+
+### If You Need a Server for Testing
+\`\`\`bash
+# Use high port, run in foreground briefly, then kill
+python3 -m http.server 9123 &
+SERVER_PID=$!
+# ... do your test ...
+kill $SERVER_PID
+\`\`\`
+
+**Why this matters:** Other agents and the orchestration system share this machine. A server you leave running can block critical infrastructure.`
 }
 
 // =============================================================================
@@ -148,53 +175,60 @@ export function getAvailableAgents(): Record<string, AgentInfo> {
     },
   }
 
-  // Codex
+  // Codex (OpenAI)
   agents.codex = {
     command: 'codex',
     available: true,
-    models: ['gpt-5.2-codex', 'gpt-4o'],
+    models: ['gpt-5.2-codex', 'gpt-5.2-codex-high', 'gpt-5.2-codex-fast'],
     defaultModel: 'gpt-5.2-codex',
     strengths: {
-      'gpt-5.2-codex': 'Code generation, pattern-based work',
-      'gpt-4o': 'Multimodal, general purpose',
+      'gpt-5.2-codex': 'Balanced code generation, most tasks',
+      'gpt-5.2-codex-high': 'Higher quality, complex refactors',
+      'gpt-5.2-codex-fast': 'Quick edits, low latency',
     },
   }
 
-  // Gemini
+  // Gemini (Google)
   agents.gemini = {
     command: 'gemini',
     available: true,
-    models: ['gemini-3-flash-preview', 'gemini-3-pro'],
-    defaultModel: 'gemini-3-flash-preview',
+    models: ['gemini-3-pro-preview', 'gemini-3-flash-preview', 'flash'],
+    defaultModel: 'flash',
     strengths: {
+      'gemini-3-pro-preview': 'Deep research, complex analysis',
       'gemini-3-flash-preview': 'Fast iteration, most tasks',
-      'gemini-3-pro': 'Deep research (limited credits)',
+      'flash': 'Alias for default flash model',
     },
   }
 
-  // Cline
+  // Cline (OpenRouter - model switched dynamically via cline auth)
   agents.cline = {
     command: 'cline',
     available: true,
-    models: ['kimi-k2', 'glm-4.7', 'claude-sonnet'],
-    defaultModel: 'kimi-k2',
+    models: ['kimi-k2.5', 'deepseek-v3.2', 'qwen3-coder', 'glm-4.7', 'glm-4.7-flash', 'devstral'],
+    defaultModel: 'kimi-k2.5',
     strengths: {
-      'kimi-k2': 'Strong reasoning, code generation',
-      'glm-4.7': 'General tasks, Chinese support',
-      'claude-sonnet': 'Fallback to Claude via Cline',
+      'kimi-k2.5': 'Top open-source coder, strong reasoning, 262K context (Jan 2026, $0.45/$2.50)',
+      'deepseek-v3.2': 'Near-GPT-5 quality at 1/50th cost, 164K context ($0.25/$0.38)',
+      'qwen3-coder': '480B MoE optimized for agentic coding, 262K context ($0.22/$0.95)',
+      'glm-4.7': 'Strong function-calling, 203K context ($0.40/$1.50)',
+      'glm-4.7-flash': 'Fast GLM variant for simple tasks ($0.07/$0.40)',
+      'devstral': 'Mistral coding model, ultra-cheap, 262K context ($0.05/$0.22)',
     },
   }
 
-  // Cursor
+  // Cursor (supports --model flag)
   agents.cursor = {
     command: 'agent',
     available: true,
-    models: ['composer-1', 'gpt-4o', 'claude-sonnet'],
+    models: ['composer-1', 'opus-4.5-thinking', 'sonnet-4.5', 'gpt-5.2-codex', 'gemini-3-flash'],
     defaultModel: 'composer-1',
     strengths: {
-      'composer-1': 'Multi-file composition, large refactors',
-      'gpt-4o': 'General purpose with vision',
-      'claude-sonnet': 'Balanced, reliable',
+      'composer-1': 'Multi-file composition, large refactors (default)',
+      'opus-4.5-thinking': 'Complex design, architecture, deep reasoning',
+      'sonnet-4.5': 'Balanced feature work',
+      'gpt-5.2-codex': 'Code generation, mechanical tasks',
+      'gemini-3-flash': 'Fast iteration, simple features',
     },
   }
 
@@ -228,10 +262,17 @@ export function buildAgentsSection(): string {
     lines.push('')
   }
 
-  lines.push('**Choose based on task complexity:**')
-  lines.push('- Simple fixes, docs, single-file: use haiku/flash/mini models')
-  lines.push('- Feature work, multi-file: use sonnet/standard models')
-  lines.push('- Architecture, complex reasoning: use opus/pro models')
+  lines.push('**Model selection guidance:**')
+  lines.push('- Simple fixes, docs, single-file: claude/haiku, gemini/flash, cline/glm-4.7-flash, cline/devstral')
+  lines.push('- Feature work, multi-file: claude/sonnet, codex/gpt-5.2-codex, cline/kimi-k2.5, cursor/composer-1')
+  lines.push('- Architecture, complex reasoning: claude/opus, cursor/opus-4.5-thinking, gemini/gemini-3-pro-preview')
+  lines.push('- Bulk mechanical work: codex/gpt-5.2-codex-fast, cursor/gpt-5.2-codex, cline/deepseek-v3.2')
+  lines.push('- Cost-sensitive tasks: cline/deepseek-v3.2 ($0.25/$0.38), cline/devstral ($0.05/$0.22), cline/qwen3-coder ($0.22/$0.95)')
+  lines.push('')
+  lines.push('**Notes:**')
+  lines.push('- Cline switches models dynamically via OpenRouter (specify any listed model)')
+  lines.push('- Cursor supports per-task model selection via --model flag')
+  lines.push('- Use at least 2-3 different agents across tasks for diversity')
 
   return lines.join('\n')
 }
@@ -437,37 +478,28 @@ export function buildSkillsSection(
 // MCP Servers - Available MCP tools
 // =============================================================================
 
+import { getMcpServers } from '../config/inventory'
+
 /**
- * List MCP servers configured for Claude.
+ * List MCP servers from all agent configs.
+ * Re-exports from inventory for backwards compatibility.
  */
 export function listMcpServers(): Array<{ name: string; command: string }> {
-  const mcpConfigPath = join(homedir(), '.claude', 'mcp.json')
-  if (!existsSync(mcpConfigPath)) return []
-
-  try {
-    const config = JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
-    const servers = config.mcpServers || {}
-
-    return Object.entries(servers).map(([name, config]: [string, any]) => ({
-      name,
-      command: config.command,
-    }))
-  } catch {
-    return []
-  }
+  return getMcpServers().map(s => ({ name: s.name, command: s.command }))
 }
 
 /**
  * Build MCP servers section for prompts.
+ * Uses lightweight listing (like v1) - just tells agents what's available.
  */
 export function buildMcpSection(): string {
-  const servers = listMcpServers()
+  const servers = getMcpServers()
   if (servers.length === 0) return ''
 
   const lines: string[] = [
     '## Available MCP Servers',
     '',
-    'The following MCP tools are available:',
+    'MCP tools are available (prefixed with `mcp__<server>__`):',
     '',
   ]
 

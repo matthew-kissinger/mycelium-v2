@@ -1,10 +1,12 @@
 import { z } from 'zod'
 
 // Default intervals in seconds
-export const DEFAULT_DISPATCHER_INTERVAL = 900 // 15 minutes
-export const DEFAULT_DISCOVERY_INTERVAL = 600 // 10 minutes
+export const DEFAULT_DISPATCHER_INTERVAL = 60 // 1 minute
+export const DEFAULT_DISCOVERY_INTERVAL = 900 // 15 minutes
+export const DEFAULT_SEQUENCER_INTERVAL = 900 // 15 minutes
 export const DEFAULT_DIGEST_INTERVAL = 21600 // 6 hours
-export const DEFAULT_COMPACTION_DAY = 0 // Monday
+export const DEFAULT_HEALTH_CHECK_INTERVAL = 60 // 1 minute
+export const DEFAULT_COMPACTION_DAY = 1 // Monday
 export const DEFAULT_COMPACTION_HOUR = 11 // 11am local time
 
 // Scheduler configuration
@@ -27,6 +29,19 @@ export const SchedulerConfig = z.object({
   discovery_repos: z.array(z.string()).default([]),
   discovery_auto_create: z.array(z.string()).default([]),
 
+  // Sequencer cycle
+  sequencer_enabled: z.boolean().default(true),
+  sequencer_interval_sec: z.number().int().positive().default(DEFAULT_SEQUENCER_INTERVAL),
+
+  // Shepherd cycle (interval-based, checks for repos with batch_size+ unevaluated tasks)
+  shepherd_enabled: z.boolean().default(true),
+  shepherd_interval_sec: z.number().int().positive().default(900), // 15 minutes
+  shepherd_batch_size: z.number().int().positive().default(5), // Tasks needed before evaluation
+
+  // Armory cycle (triggered after N completed tasks network-wide)
+  armory_enabled: z.boolean().default(true),
+  armory_batch_size: z.number().int().positive().default(10), // Tasks needed before armory review
+
   // Digest cycle
   digest_enabled: z.boolean().default(true),
   digest_interval_sec: z.number().int().positive().default(DEFAULT_DIGEST_INTERVAL),
@@ -35,6 +50,10 @@ export const SchedulerConfig = z.object({
   compaction_enabled: z.boolean().default(true),
   compaction_day: z.number().int().min(0).max(6).default(DEFAULT_COMPACTION_DAY),
   compaction_hour: z.number().int().min(0).max(23).default(DEFAULT_COMPACTION_HOUR),
+
+  // Health check cycle (device monitoring)
+  health_check_enabled: z.boolean().default(true),
+  health_check_interval_sec: z.number().int().positive().default(60),
 
   // Auto-prune
   auto_prune_enabled: z.boolean().default(true),
@@ -55,10 +74,20 @@ export const CycleState = z.object({
 })
 export type CycleState = z.infer<typeof CycleState>
 
+// Active system agent run info
+export const ActiveRunInfo = z.object({
+  run_id: z.string(),
+  agent_type: z.string(),
+  repo_path: z.string().optional(),
+  started_at: z.string(),
+})
+export type ActiveRunInfo = z.infer<typeof ActiveRunInfo>
+
 // Scheduler status (all cycle states)
 export const SchedulerStatus = z.object({
   running: z.boolean(),
   started_at: z.string().datetime().optional(),
+  active_runs: z.array(ActiveRunInfo).optional(),
   cycles: z.array(CycleState),
 })
 export type SchedulerStatus = z.infer<typeof SchedulerStatus>

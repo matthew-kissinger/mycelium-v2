@@ -102,12 +102,16 @@ export function formatTaskCompleted(task: TaskInfo): string {
   const cost = task.cost_usd
     ? `$${task.cost_usd.toFixed(4)}`
     : 'N/A'
+  const agentStr = task.agent
+    ? (task.model ? `${task.agent}/${task.model}` : task.agent)
+    : null
 
   return (
     `\u2705 <b>Task Completed</b>\n\n` +
     `<b>ID:</b> <code>${shortId}</code>\n` +
     `<b>Title:</b> ${escapeHtml(task.title)}\n` +
     `<b>Repo:</b> ${escapeHtml(repoName)}\n` +
+    (agentStr ? `<b>Agent:</b> ${escapeHtml(agentStr)}\n` : '') +
     `<b>Duration:</b> ${duration}\n` +
     `<b>Cost:</b> ${cost}`
   )
@@ -116,6 +120,12 @@ export function formatTaskCompleted(task: TaskInfo): string {
 export function formatTaskFailed(task: TaskInfo): string {
   const shortId = task.id.slice(0, 8)
   const repoName = task.repo_path?.split('/').pop() ?? 'unknown'
+  const duration = task.duration_seconds
+    ? formatDuration(task.duration_seconds)
+    : null
+  const agentStr = task.agent
+    ? (task.model ? `${task.agent}/${task.model}` : task.agent)
+    : null
   const errorPreview = task.error
     ? task.error.slice(0, 200) + (task.error.length > 200 ? '...' : '')
     : 'Unknown error'
@@ -124,8 +134,38 @@ export function formatTaskFailed(task: TaskInfo): string {
     `\u274c <b>Task Failed</b>\n\n` +
     `<b>ID:</b> <code>${shortId}</code>\n` +
     `<b>Title:</b> ${escapeHtml(task.title)}\n` +
-    `<b>Repo:</b> ${escapeHtml(repoName)}\n\n` +
-    `<b>Error:</b>\n<pre>${escapeHtml(errorPreview)}</pre>`
+    `<b>Repo:</b> ${escapeHtml(repoName)}\n` +
+    (agentStr ? `<b>Agent:</b> ${escapeHtml(agentStr)}\n` : '') +
+    (duration ? `<b>Duration:</b> ${duration}\n` : '') +
+    `\n<b>Error:</b>\n<pre>${escapeHtml(errorPreview)}</pre>`
+  )
+}
+
+export interface TaskRetryInfo {
+  id: string
+  title: string
+  repo_path?: string
+  failed_agent: string
+  failed_model: string
+  error: string
+  retry_agent: string
+  retry_model: string
+  attempt: number
+}
+
+export function formatTaskRetrying(info: TaskRetryInfo): string {
+  const shortId = info.id.slice(0, 8)
+  const repoName = info.repo_path?.split('/').pop() ?? 'unknown'
+  const errorPreview = info.error.slice(0, 200) + (info.error.length > 200 ? '...' : '')
+
+  return (
+    `\u{1f504} <b>Task Retrying</b>\n\n` +
+    `<b>ID:</b> <code>${shortId}</code>\n` +
+    `<b>Title:</b> ${escapeHtml(info.title)}\n` +
+    `<b>Repo:</b> ${escapeHtml(repoName)}\n` +
+    `<b>Failed:</b> ${escapeHtml(info.failed_agent)}/${escapeHtml(info.failed_model)}\n` +
+    `<b>Retrying:</b> ${escapeHtml(info.retry_agent)}/${escapeHtml(info.retry_model)} (attempt ${info.attempt + 1})\n` +
+    `\n<b>Error:</b>\n<pre>${escapeHtml(errorPreview)}</pre>`
   )
 }
 

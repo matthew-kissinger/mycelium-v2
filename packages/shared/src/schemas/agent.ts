@@ -31,21 +31,21 @@ export const DEFAULT_AGENT_CONFIGS: Record<string, AgentConfig> = {
   gemini: {
     type: 'gemini',
     command: 'gemini',
-    timeout_seconds: 900,
+    timeout_seconds: 1800,
     max_turns: 30,
     supports_streaming: true,
   },
   cline: {
     type: 'cline',
     command: 'cline',
-    timeout_seconds: 600,
+    timeout_seconds: 1800,
     max_turns: 30,
     supports_streaming: false,
   },
   cursor: {
     type: 'cursor',
     command: 'agent',  // Cursor CLI is 'agent', not 'cursor'
-    timeout_seconds: 600,
+    timeout_seconds: 1800,
     max_turns: 30,
     supports_streaming: false,
   },

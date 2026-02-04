@@ -12,6 +12,7 @@ import { SchedulerConfig } from '@mycelium/shared'
 import * as queries from '../../db/queries'
 import { dispatch } from '../../agents/dispatch'
 import { broadcast } from '../../sse'
+import { registerActiveRun, unregisterActiveRun } from '../active-runs'
 import {
   buildDiscoveryPrompt,
   DiscoveryContext,
@@ -37,10 +38,20 @@ async function buildContext(
   // Get pending tasks for this repo
   const pendingTasks = await queries.getTasksByRepo(repo.path, { status: 'pending', limit: 20 })
 
-  // Get recent completed/failed tasks
+  // Get recent completed tasks
   const doneTasks = await queries.getTasksByRepo(repo.path, { status: 'done', limit: 10 })
-  const failedTasks = await queries.getTasksByRepo(repo.path, { status: 'failed', limit: 5 })
-  const recentTasks = [...doneTasks, ...failedTasks]
+  const recentTasks = doneTasks
+    .sort((a, b) => {
+      const aTime = a.completed_at ?? a.created_at
+      const bTime = b.completed_at ?? b.created_at
+      return bTime.localeCompare(aTime)
+    })
+    .slice(0, 10)
+
+  // Get failed and cancelled tasks separately (for retry consideration)
+  const failedRaw = await queries.getTasksByRepo(repo.path, { status: 'failed', limit: 10 })
+  const cancelledRaw = await queries.getTasksByRepo(repo.path, { status: 'cancelled', limit: 10 })
+  const failedTasks = [...failedRaw, ...cancelledRaw]
     .sort((a, b) => {
       const aTime = a.completed_at ?? a.created_at
       const bTime = b.completed_at ?? b.created_at
@@ -66,6 +77,13 @@ async function buildContext(
       status: t.status,
       result: t.result?.slice(0, 200) ?? undefined,
     })),
+    failedTasks: failedTasks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      agent: t.agent ?? undefined,
+      model: t.model ?? undefined,
+      error: t.error?.slice(0, 300) ?? undefined,
+    })),
     patterns: patterns.map((p) => p.content),
     warnings: warnings.map((w) => w.content),
     agentsAvailable: ['claude', 'codex', 'gemini', 'cursor', 'cline'],
@@ -75,15 +93,17 @@ async function buildContext(
 
 /**
  * Run Discovery for a single repo.
+ * Exported for manual triggering via API.
  */
-async function runDiscoveryForRepo(
+export async function runDiscoveryForRepo(
   repo: Awaited<ReturnType<typeof queries.getRepo>>,
   config: SchedulerConfig
 ): Promise<void> {
   if (!repo) return
 
   const repoPath = repo.path
-  const isAuto = config.discovery_auto_create.includes(repoPath)
+  // Use repo's mode field, fallback to config for backwards compatibility
+  const isAuto = repo.mode === 'auto' || config.discovery_auto_create.includes(repoPath)
 
   console.log(`[Discovery] Starting for ${repo.name} (${isAuto ? 'auto' : 'align'} mode)`)
 
@@ -92,6 +112,14 @@ async function runDiscoveryForRepo(
     agent_type: 'discovery',
     repo_path: repoPath,
     context: { mode: isAuto ? 'auto' : 'align' },
+  })
+
+  // Register active run
+  registerActiveRun({
+    run_id: run.id,
+    agent_type: 'discovery',
+    repo_path: repoPath,
+    started_at: new Date().toISOString(),
   })
 
   // Broadcast event
@@ -129,19 +157,41 @@ async function runDiscoveryForRepo(
     // Use claude/opus for auto mode (more autonomous), claude/sonnet for align mode
     const model = isAuto ? 'opus' : 'sonnet'
 
+    // Collect session log entries
+    const sessionLog: Array<{ chunk: string; stream: string; timestamp: string }> = []
+
     const result = await dispatch({
       agent: 'claude',
       prompt,
       cwd: repoPath,
       model,
       timeout: 1800, // 30 min timeout
-      onOutput: (chunk) => {
-        // Log progress (don't broadcast for system agents)
+      onOutput: (chunk, stream = 'stdout') => {
+        sessionLog.push({ chunk, stream, timestamp: new Date().toISOString() })
+        broadcast('agent:output', {
+          type: 'agent:output',
+          run_id: run.id,
+          agent_type: 'discovery',
+          chunk,
+          stream,
+          timestamp: new Date().toISOString(),
+        })
         if (chunk.includes('[DISCOVERY')) {
           console.log(`[Discovery] ${repo.name}: Sending report...`)
         }
       },
     })
+
+    // Record fruiting session for system agent run
+    queries.createFruitingSession({
+      task_id: run.id,
+      repo_path: repoPath,
+      agent: 'claude',
+      model,
+      context_trace: { agent_type: 'discovery', mode: isAuto ? 'auto' : 'align' },
+      full_prompt: prompt,
+      session_log: sessionLog,
+    }).catch((e) => console.error('[Discovery] Failed to record fruiting session:', e))
 
     // Check for success markers
     const hasAlignMarker = result.output.includes(DISCOVERY_SENT_MARKER)
@@ -194,12 +244,51 @@ async function runDiscoveryForRepo(
       error: errorMsg,
       timestamp: new Date().toISOString(),
     })
+  } finally {
+    unregisterActiveRun(run.id)
   }
 }
 
 /**
+ * Select a repo using weighted random selection.
+ * Higher weight = more likely to be selected.
+ * @param repos Array of repos with weights
+ * @returns Selected repo or null if none available
+ */
+function selectWeightedRepo(repos: Awaited<ReturnType<typeof queries.getRepos>>): Awaited<ReturnType<typeof queries.getRepos>>[0] | null {
+  if (repos.length === 0) return null
+
+  // Calculate total weight
+  let totalWeight = 0
+  for (const repo of repos) {
+    const weight = repo.weight ?? 50
+    totalWeight += weight
+  }
+
+  if (totalWeight === 0) {
+    // All repos have zero weight, select randomly
+    return repos[Math.floor(Math.random() * repos.length)]
+  }
+
+  // Select random value in range [0, totalWeight)
+  const randomValue = Math.random() * totalWeight
+
+  // Find the repo corresponding to this random value
+  let cumulative = 0
+  for (const repo of repos) {
+    cumulative += repo.weight ?? 50
+    if (randomValue < cumulative) {
+      return repo
+    }
+  }
+
+  // Fallback (shouldn't happen)
+  return repos[repos.length - 1]
+}
+
+/**
  * Run the Discovery cycle.
- * Spawns Discovery agent for all registered repos.
+ * Selects one repo using weighted random selection and runs Discovery agent.
  */
 export async function runDiscoveryCycle(config: SchedulerConfig): Promise<void> {
   console.log('[Discovery] Starting cycle...')
@@ -218,13 +307,25 @@ export async function runDiscoveryCycle(config: SchedulerConfig): Promise<void> 
     ? repos.filter((r) => config.discovery_repos.includes(r.path))
     : repos
 
-  console.log(`[Discovery] Running for ${targetRepos.length} repos`)
+  if (targetRepos.length === 0) {
+    console.log('[Discovery] No target repos after filtering')
+    return
+  }
 
-  // Run discovery for each repo (in parallel, fire and forget)
-  for (const repo of targetRepos) {
-    // Don't await - run in background
-    runDiscoveryForRepo(repo, config).catch((error) => {
-      console.error(`[Discovery] Background error for ${repo.name}:`, error)
-    })
+  // Select one repo using weighted random selection
+  const selectedRepo = selectWeightedRepo(targetRepos)
+
+  if (!selectedRepo) {
+    console.log('[Discovery] No repo selected')
+    return
+  }
+
+  console.log(`[Discovery] Selected repo: ${selectedRepo.name} (weight: ${selectedRepo.weight ?? 50})`)
+
+  // Run discovery for the selected repo
+  try {
+    await runDiscoveryForRepo(selectedRepo, config)
+  } catch (error) {
+    console.error(`[Discovery] Error for ${selectedRepo.name}:`, error)
   }
 }

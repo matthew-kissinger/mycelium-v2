@@ -12,6 +12,7 @@ export const Repo = z.object({
   description: z.string().optional(),
   language: z.string().optional(),
   mode: RepoMode.default('align'),
+  weight: z.number().int().min(0).max(100).default(50), // Allocation weight for discovery selection
   created_at: z.string().datetime(),
   last_scanned_at: z.string().datetime().optional(),
 })
@@ -22,5 +23,6 @@ export const RepoCreate = z.object({
   path: z.string().min(1),
   description: z.string().optional(),
   mode: RepoMode.optional(),
+  weight: z.number().int().min(0).max(100).optional(),
 })
 export type RepoCreate = z.infer<typeof RepoCreate>

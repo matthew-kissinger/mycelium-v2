@@ -2,13 +2,17 @@
  * Configuration Management
  *
  * Load and save configuration files for various system components:
- * - Scheduler config: ~/.config/mycelium-v2/scheduler.json
- * - Genesis config: ~/.config/mycelium-v2/genesis.json
- * - Hooks config: ~/.config/mycelium-v2/hooks.json
+ * - Scheduler config: <config_dir>/scheduler.json
+ * - Genesis config: <config_dir>/genesis.json
+ * - Hooks config: <config_dir>/hooks.json
+ *
+ * Config directory is platform-dependent:
+ * - Linux/NixOS: ~/.config/mycelium-v2
+ * - macOS: ~/Library/Application Support/mycelium-v2
+ * - Windows: %APPDATA%/mycelium-v2
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
-import { homedir } from 'os'
 import { join } from 'path'
 import {
   SchedulerConfig,
@@ -17,6 +21,9 @@ import {
   DEFAULT_GENESIS_CONFIG,
   DEFAULT_HOOKS_CONFIG,
 } from '@mycelium/shared'
+
+// Import platform utilities
+import { getConfigDir as getPlatformConfigDir, ensureDir } from '../platform'
 
 // Re-export scheduler config functions (already implemented in scheduler/config.ts)
 export {
@@ -27,19 +34,42 @@ export {
   DEFAULT_CONFIG as DEFAULT_SCHEDULER_CONFIG,
 } from '../scheduler/config'
 
+// Re-export agents config functions
+export {
+  loadAgentsConfig,
+  saveAgentsConfig,
+  getAgentConfig,
+  updateAgentConfig,
+  getAgentsConfigPath,
+  getEnabledAgents,
+  isAgentEnabled,
+  DEFAULT_AGENTS_CONFIG,
+  type AgentConfigExtended,
+  type AgentsConfig,
+} from './agents'
+
+// Re-export prompts config functions
+export {
+  listPrompts,
+  getPrompt,
+  getEffectivePrompt,
+  saveCustomPrompt,
+  deleteCustomPrompt,
+  getPromptsConfigPath,
+  type PromptInfo,
+} from './prompts'
+
 // =============================================================================
-// Config Directory
+// Config Directory (cross-platform)
 // =============================================================================
 
-const CONFIG_DIR = join(homedir(), '.config', 'mycelium-v2')
+const CONFIG_DIR = getPlatformConfigDir()
 
 /**
  * Ensure config directory exists.
  */
 function ensureConfigDir(): void {
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true })
-  }
+  ensureDir(CONFIG_DIR)
 }
 
 // =============================================================================

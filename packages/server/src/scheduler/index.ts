@@ -5,7 +5,7 @@
  * - Dispatcher: Run ready tasks (every 60s)
  * - Discovery: Scan repos for work (every 15min)
  * - Sequencer: Wire task dependencies (every 15min)
- * - Shepherd: Evaluate completed batches (on task complete)
+ * - Shepherd: Evaluate completed batches (every 15min)
  * - Blocked Check: Detect stuck tasks (every 15min)
  * - Digest: Send status summaries (every 6h)
  * - Compaction: Clean memory (weekly Monday 11am)
@@ -23,6 +23,8 @@ import { runShepherdCycle } from './cycles/shepherd'
 import { runBlockedCheckCycle } from './cycles/blocked'
 import { runDigestCycle } from './cycles/digest'
 import { runCompactionCycle } from './cycles/compaction'
+import { runArmoryCycle, shouldRunArmory } from './cycles/armory'
+import { runHealthCheckCycle } from './cycles/health'
 
 // Cycle names
 export type CycleName =
@@ -30,14 +32,27 @@ export type CycleName =
   | 'discovery'
   | 'sequencer'
   | 'shepherd'
+  | 'armory'
   | 'digest'
   | 'compaction'
   | 'blocked_check'
+  | 'health_check'
 
 // Internal cycle state (extends public CycleState with interval ref)
 interface InternalCycleState extends CycleState {
   intervalRef?: ReturnType<typeof setInterval>
 }
+
+// Re-export active run tracking (separate module to avoid circular imports)
+export {
+  type ActiveRun,
+  registerActiveRun,
+  unregisterActiveRun,
+  getActiveRuns,
+  isShepherdRunningForRepo,
+} from './active-runs'
+
+import { getActiveRuns, isShepherdRunningForRepo } from './active-runs'
 
 // Scheduler instance
 let schedulerState: {
@@ -58,9 +73,11 @@ export function getSchedulerStatus(): SchedulerStatus {
       { name: 'discovery', enabled: true, running: false, runs_completed: 0, errors: 0 },
       { name: 'sequencer', enabled: true, running: false, runs_completed: 0, errors: 0 },
       { name: 'shepherd', enabled: true, running: false, runs_completed: 0, errors: 0 },
+      { name: 'armory', enabled: true, running: false, runs_completed: 0, errors: 0 },
       { name: 'digest', enabled: true, running: false, runs_completed: 0, errors: 0 },
       { name: 'compaction', enabled: true, running: false, runs_completed: 0, errors: 0 },
       { name: 'blocked_check', enabled: true, running: false, runs_completed: 0, errors: 0 },
+      { name: 'health_check', enabled: true, running: false, runs_completed: 0, errors: 0 },
     ]
 
     return {
@@ -73,6 +90,7 @@ export function getSchedulerStatus(): SchedulerStatus {
   return {
     running: schedulerState.running,
     started_at: schedulerState.startedAt,
+    active_runs: getActiveRuns(),
     cycles: Array.from(schedulerState.cycles.values()).map((state) => ({
       name: state.name,
       enabled: state.enabled,
@@ -134,19 +152,28 @@ function initializeScheduler(config: SchedulerConfig): void {
     errors: 0,
   })
 
-  // Sequencer cycle (uses discovery interval)
+  // Sequencer cycle
   cycles.set('sequencer', {
     name: 'sequencer',
-    enabled: true, // Always enabled when scheduler runs
+    enabled: config.sequencer_enabled,
     running: false,
     runs_completed: 0,
     errors: 0,
   })
 
-  // Shepherd cycle (triggered by task completion, not interval)
+  // Shepherd cycle (interval-based, checks for repos with unevaluated tasks)
   cycles.set('shepherd', {
     name: 'shepherd',
-    enabled: true,
+    enabled: config.shepherd_enabled,
+    running: false,
+    runs_completed: 0,
+    errors: 0,
+  })
+
+  // Armory cycle (triggered by task completion batch, not interval)
+  cycles.set('armory', {
+    name: 'armory',
+    enabled: config.armory_enabled,
     running: false,
     runs_completed: 0,
     errors: 0,
@@ -174,6 +201,15 @@ function initializeScheduler(config: SchedulerConfig): void {
   cycles.set('blocked_check', {
     name: 'blocked_check',
     enabled: config.blocked_check_enabled,
+    running: false,
+    runs_completed: 0,
+    errors: 0,
+  })
+
+  // Health check cycle (device monitoring)
+  cycles.set('health_check', {
+    name: 'health_check',
+    enabled: config.health_check_enabled,
     running: false,
     runs_completed: 0,
     errors: 0,
@@ -256,14 +292,14 @@ function startCycles(): void {
     console.log(`[Scheduler] Discovery cycle started (every ${config.discovery_interval_sec}s)`)
   }
 
-  // Sequencer cycle (same interval as discovery)
+  // Sequencer cycle
   const sequencerState = schedulerState.cycles.get('sequencer')!
   if (sequencerState.enabled) {
     sequencerState.intervalRef = setInterval(
       () => runCycle('sequencer', () => runSequencerCycle(config)),
-      config.discovery_interval_sec * 1000
+      config.sequencer_interval_sec * 1000
     )
-    console.log(`[Scheduler] Sequencer cycle started (every ${config.discovery_interval_sec}s)`)
+    console.log(`[Scheduler] Sequencer cycle started (every ${config.sequencer_interval_sec}s)`)
   }
 
   // Blocked check cycle (every 15 min)
@@ -296,8 +332,40 @@ function startCycles(): void {
     console.log('[Scheduler] Compaction cycle started (checks hourly)')
   }
 
-  // Note: Shepherd cycle is triggered by task completion, not interval
-  // It will be called from the dispatcher when tasks complete
+  // Armory cycle - check every hour if batch threshold met
+  const armoryState = schedulerState.cycles.get('armory')!
+  if (armoryState.enabled) {
+    armoryState.intervalRef = setInterval(
+      async () => {
+        // Only run if batch threshold is met
+        if (await shouldRunArmory(config)) {
+          await runCycle('armory', () => runArmoryCycle(config))
+        }
+      },
+      60 * 60 * 1000 // Check every hour
+    )
+    console.log('[Scheduler] Armory cycle started (checks hourly)')
+  }
+
+  // Shepherd cycle (interval-based, checks for repos with batch_size+ unevaluated tasks)
+  const shepherdState = schedulerState.cycles.get('shepherd')!
+  if (shepherdState.enabled) {
+    shepherdState.intervalRef = setInterval(
+      () => runCycle('shepherd', () => runShepherdCycle(config)),
+      config.shepherd_interval_sec * 1000
+    )
+    console.log(`[Scheduler] Shepherd cycle started (every ${config.shepherd_interval_sec}s)`)
+  }
+
+  // Health check cycle (device monitoring)
+  const healthCheckState = schedulerState.cycles.get('health_check')!
+  if (healthCheckState.enabled) {
+    healthCheckState.intervalRef = setInterval(
+      () => runCycle('health_check', () => runHealthCheckCycle(config)),
+      config.health_check_interval_sec * 1000
+    )
+    console.log(`[Scheduler] Health check cycle started (every ${config.health_check_interval_sec}s)`)
+  }
 }
 
 /**
@@ -377,7 +445,8 @@ export function stopScheduler(): SchedulerStatus {
 
 /**
  * Trigger Shepherd evaluation for a repo.
- * Called when a task completes.
+ * Allows per-repo concurrency - multiple repos can evaluate simultaneously,
+ * but the same repo won't run twice.
  */
 export async function triggerShepherdForRepo(repoPath: string): Promise<void> {
   if (!schedulerState) return
@@ -385,8 +454,31 @@ export async function triggerShepherdForRepo(repoPath: string): Promise<void> {
   const state = schedulerState.cycles.get('shepherd')
   if (!state || !state.enabled) return
 
-  // Run shepherd cycle for specific repo
-  await runCycle('shepherd', () => runShepherdCycle(schedulerState!.config, repoPath))
+  // Check if shepherd is already running for this repo
+  if (isShepherdRunningForRepo(repoPath)) {
+    console.log(`[Scheduler] Shepherd already running for ${repoPath}, skipping`)
+    return
+  }
+
+  // Run shepherd directly (bypass runCycle's global lock for per-repo concurrency)
+  const startTime = new Date()
+  try {
+    broadcast('scheduler:cycle', {
+      type: 'scheduler:cycle',
+      cycle: 'shepherd',
+      timestamp: startTime.toISOString(),
+    })
+
+    await runShepherdCycle(schedulerState!.config, repoPath)
+
+    state.runs_completed++
+    state.last_run = startTime.toISOString()
+    console.log(`[Scheduler] shepherd cycle completed`)
+  } catch (error) {
+    state.errors++
+    state.last_run = startTime.toISOString()
+    console.error(`[Scheduler] shepherd cycle failed:`, error)
+  }
 }
 
 /**
@@ -404,6 +496,8 @@ export { runDispatcherCycle } from './cycles/dispatcher'
 export { runDiscoveryCycle } from './cycles/discovery'
 export { runSequencerCycle } from './cycles/sequencer'
 export { runShepherdCycle } from './cycles/shepherd'
+export { runArmoryCycle } from './cycles/armory'
 export { runBlockedCheckCycle } from './cycles/blocked'
 export { runDigestCycle } from './cycles/digest'
 export { runCompactionCycle } from './cycles/compaction'
+export { runHealthCheckCycle } from './cycles/health'

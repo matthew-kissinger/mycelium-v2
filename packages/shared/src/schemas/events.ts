@@ -41,6 +41,7 @@ export const SSEEventType = z.enum([
   'agent:completed',
   'agent:failed',
   'agent:blocked',
+  'agent:output',
   'system:agent_started',
 
   // Notification events
@@ -115,6 +116,7 @@ export const TaskOutputEvent = z.object({
   type: z.literal('task:output'),
   task_id: z.string().uuid(),
   chunk: z.string(),
+  stream: z.enum(['stdout', 'stderr']).optional(),
   timestamp: z.string().datetime(),
 })
 export type TaskOutputEvent = z.infer<typeof TaskOutputEvent>
@@ -293,6 +295,16 @@ export const AgentBlockedEvent = z.object({
 })
 export type AgentBlockedEvent = z.infer<typeof AgentBlockedEvent>
 
+export const AgentOutputEvent = z.object({
+  type: z.literal('agent:output'),
+  run_id: z.string().uuid(),
+  agent_type: SystemAgentType,
+  chunk: z.string(),
+  stream: z.enum(['stdout', 'stderr']).optional(),
+  timestamp: z.string().datetime(),
+})
+export type AgentOutputEvent = z.infer<typeof AgentOutputEvent>
+
 // Alternative system:agent_started event (used by some routes)
 export const SystemAgentStartedEvent = z.object({
   type: z.literal('system:agent_started'),
@@ -309,6 +321,7 @@ export const SystemAgentEvent = z.discriminatedUnion('type', [
   AgentCompletedEvent,
   AgentFailedEvent,
   AgentBlockedEvent,
+  AgentOutputEvent,
   SystemAgentStartedEvent,
 ])
 export type SystemAgentEvent = z.infer<typeof SystemAgentEvent>

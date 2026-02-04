@@ -12,6 +12,9 @@ import orchestrateRoutes from './routes/orchestrate'
 import hooksRoutes from './routes/hooks'
 import exportRoutes from './routes/export'
 import configRoutes from './routes/config'
+import promptsRoutes from './routes/prompts'
+import inventoryRoutes from './routes/inventory'
+import devicesRoutes from './routes/devices'
 import {
   systemAgentsRoutes,
   discoveryRoutes,
@@ -19,6 +22,8 @@ import {
   shepherdRoutes,
   schedulerRoutes,
 } from './routes/system-agents'
+import { getSchedulerStatus } from './scheduler'
+import { getRuns, parseRun } from './db/queries'
 import { createSSEResponse, getClientCount, getClientInfo, shutdown as shutdownSSE } from './sse'
 import { shutdownRegistry, getRunningProcessCount } from './agents'
 import { db, schema } from './db'
@@ -33,11 +38,21 @@ app.use('*', cors())
 app.use('*', logger())
 
 // Health check
-app.get('/api/health', (c) => {
+app.get('/api/health', async (c) => {
   const telegram = getTelegramService()
+  const schedulerStatus = getSchedulerStatus()
+  const runningSystemAgents = await getRuns({ status: 'running' })
+
   return c.json({
     backend: true,
-    scheduler: false, // TODO: implement scheduler
+    scheduler: schedulerStatus.running,
+    scheduler_cycles: schedulerStatus.cycles.filter(cy => cy.running).map(cy => cy.name),
+    running_system_agents: runningSystemAgents.map(r => ({
+      id: r.id,
+      agent_type: r.agent_type,
+      repo_path: r.repo_path,
+      started_at: r.started_at,
+    })),
     poller: isPollerRunning(),
     telegram_connected: telegram?.isConnected() ?? false,
     uptime_seconds: Math.floor(process.uptime()),
@@ -86,6 +101,9 @@ app.route('/api/orchestrate', orchestrateRoutes)
 app.route('/api/hooks', hooksRoutes)
 app.route('/api/export', exportRoutes)
 app.route('/api/config', configRoutes)
+app.route('/api/prompts', promptsRoutes)
+app.route('/api/inventory', inventoryRoutes)
+app.route('/api/devices', devicesRoutes)
 
 // Initialize database tables
 async function initDb() {
@@ -123,6 +141,7 @@ async function initDb() {
       description TEXT,
       language TEXT,
       mode TEXT NOT NULL DEFAULT 'align',
+      weight INTEGER DEFAULT 50,
       created_at TEXT NOT NULL,
       last_scanned_at TEXT
     );
@@ -186,7 +205,32 @@ async function initDb() {
       branch_evaluations TEXT,
       raw_response TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS devices (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      type TEXT NOT NULL,
+      host TEXT NOT NULL,
+      port INTEGER,
+      protocol TEXT DEFAULT 'http',
+      status TEXT DEFAULT 'unknown',
+      last_seen TEXT,
+      last_error TEXT,
+      response_time_ms INTEGER,
+      config TEXT,
+      description TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT
+    );
   `)
+
+  // Migrations for existing databases
+  try {
+    // Add weight column to repos if it doesn't exist
+    sqlite.exec(`ALTER TABLE repos ADD COLUMN weight INTEGER DEFAULT 50;`)
+  } catch {
+    // Column already exists
+  }
 
   console.log('Database initialized')
 }
@@ -203,12 +247,21 @@ async function initTelegram() {
 }
 
 // Start server
-const port = parseInt(process.env.PORT ?? '8000')
+// Use 8765 to avoid conflicts with agents starting dev servers on common ports (8000, 3000)
+const port = parseInt(process.env.PORT ?? '8765')
 
 initDb().then(async () => {
   console.log(`Server running at http://localhost:${port}`)
+
   // Initialize Telegram after DB is ready
   await initTelegram()
+
+  // Auto-start scheduler if configured via environment
+  if (process.env.SCHEDULER_AUTO_START === 'true') {
+    const { startScheduler } = await import('./scheduler')
+    const status = startScheduler()
+    console.log(`[Scheduler] Auto-started (${status.cycles.length} cycles)`)
+  }
 })
 
 // Graceful shutdown
@@ -237,5 +290,6 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
 
 export default {
   port,
+  hostname: '0.0.0.0',  // Bind to all interfaces for local network access
   fetch: app.fetch,
 }

@@ -5,7 +5,7 @@
 
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 
-const API_URL = process.env.MYCEL_API_URL ?? 'http://localhost:8000'
+const API_URL = process.env.MYCEL_API_URL ?? 'http://localhost:8765'
 
 /**
  * All available MCP tools for mycelium.

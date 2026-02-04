@@ -46,6 +46,9 @@ export const Task = z.object({
   error: z.string().optional(),
   error_details: ErrorDetails.optional(),
 
+  // Execution config
+  timeout_seconds: z.number().optional(),
+
   // Metrics
   cost_usd: z.number().default(0),
   duration_seconds: z.number().optional(),
@@ -69,6 +72,7 @@ export const TaskCreate = z.object({
   agent: AgentType.optional(),
   model: z.string().optional(),
   depends_on: z.array(z.string()).default([]),
+  timeout_seconds: z.number().optional(),
 })
 export type TaskCreate = z.infer<typeof TaskCreate>
 

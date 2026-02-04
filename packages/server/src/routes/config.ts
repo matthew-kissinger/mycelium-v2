@@ -27,6 +27,12 @@ import {
   getHooksConfigPath,
   getConfigDir,
   listConfigFiles,
+  loadAgentsConfig,
+  saveAgentsConfig,
+  getAgentConfig,
+  updateAgentConfig,
+  getAgentsConfigPath,
+  getEnabledAgents,
 } from '../config'
 
 const app = new Hono()
@@ -44,6 +50,7 @@ app.get('/', async (c) => {
       scheduler: '/api/config/scheduler',
       genesis: '/api/config/genesis',
       hooks: '/api/config/hooks',
+      agents: '/api/config/agents',
     },
   })
 })
@@ -63,6 +70,7 @@ app.get('/scheduler', async (c) => {
 
 // Validation schema for scheduler config updates
 const SchedulerConfigUpdateSchema = z.object({
+  // Dispatcher
   dispatcher_enabled: z.boolean().optional(),
   dispatcher_interval_sec: z.number().int().positive().optional(),
   max_concurrent_tasks: z.number().int().positive().optional(),
@@ -71,15 +79,28 @@ const SchedulerConfigUpdateSchema = z.object({
   blocked_task_timeout_sec: z.number().int().positive().optional(),
   blocked_check_enabled: z.boolean().optional(),
   orphan_cancel_timeout_sec: z.number().int().positive().optional(),
+  // Discovery
   discovery_enabled: z.boolean().optional(),
   discovery_interval_sec: z.number().int().positive().optional(),
   discovery_repos: z.array(z.string()).optional(),
   discovery_auto_create: z.array(z.string()).optional(),
+  // Sequencer
+  sequencer_enabled: z.boolean().optional(),
+  sequencer_interval_sec: z.number().int().positive().optional(),
+  // Shepherd
+  shepherd_enabled: z.boolean().optional(),
+  shepherd_batch_size: z.number().int().positive().optional(),
+  // Armory
+  armory_enabled: z.boolean().optional(),
+  armory_batch_size: z.number().int().positive().optional(),
+  // Digest
   digest_enabled: z.boolean().optional(),
   digest_interval_sec: z.number().int().positive().optional(),
+  // Compaction
   compaction_enabled: z.boolean().optional(),
   compaction_day: z.number().int().min(0).max(6).optional(),
   compaction_hour: z.number().int().min(0).max(23).optional(),
+  // Auto prune
   auto_prune_enabled: z.boolean().optional(),
   auto_prune_threshold: z.number().int().positive().optional(),
   auto_prune_keep: z.number().int().positive().optional(),
@@ -221,6 +242,80 @@ app.patch('/hooks', zValidator('json', HooksConfigUpdateSchema), async (c) => {
     message: 'Hooks config updated',
     config: updated,
     config_path: getHooksConfigPath(),
+  })
+})
+
+// =============================================================================
+// Agents Configuration
+// =============================================================================
+
+// GET /api/config/agents - Get all agents config
+app.get('/agents', async (c) => {
+  const config = loadAgentsConfig()
+  const enabledAgents = getEnabledAgents()
+
+  return c.json({
+    agents: config.agents,
+    config_path: getAgentsConfigPath(),
+    enabled_count: enabledAgents.length,
+    total_count: Object.keys(config.agents).length,
+  })
+})
+
+// GET /api/config/agents/:name - Get specific agent config
+app.get('/agents/:name', async (c) => {
+  const agentName = c.req.param('name')
+  const agentConfig = getAgentConfig(agentName)
+
+  if (!agentConfig) {
+    return c.json({ error: `Agent not found: ${agentName}` }, 404)
+  }
+
+  return c.json({
+    name: agentName,
+    config: agentConfig,
+  })
+})
+
+// Validation schema for agent config updates
+const AgentConfigUpdateSchema = z.object({
+  enabled: z.boolean().optional(),
+  timeout_seconds: z.number().int().positive().optional(),
+  max_turns: z.number().int().positive().optional(),
+  default_model: z.string().optional().nullable(),
+  description: z.string().optional(),
+  command: z.string().optional(),
+  supports_streaming: z.boolean().optional(),
+})
+
+// PATCH /api/config/agents/:name - Update specific agent config
+app.patch('/agents/:name', zValidator('json', AgentConfigUpdateSchema), async (c) => {
+  const agentName = c.req.param('name')
+  const updates = c.req.valid('json')
+
+  // Check if agent exists
+  const existing = getAgentConfig(agentName)
+  if (!existing) {
+    return c.json({ error: `Agent not found: ${agentName}` }, 404)
+  }
+
+  // Handle nullable fields
+  const processedUpdates: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(updates)) {
+    if (value === null) {
+      processedUpdates[key] = undefined
+    } else if (value !== undefined) {
+      processedUpdates[key] = value
+    }
+  }
+
+  // Update agent config
+  const updated = updateAgentConfig(agentName, processedUpdates)
+
+  return c.json({
+    message: `Agent ${agentName} config updated`,
+    name: agentName,
+    config: updated,
   })
 })
 

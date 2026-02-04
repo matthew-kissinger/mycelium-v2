@@ -60,6 +60,20 @@ export type {
   SchedulerStatus,
 } from '../schemas/scheduler'
 
+// Device types
+export type {
+  Device,
+  DeviceCreate,
+  DeviceUpdate,
+  DeviceType,
+  DeviceStatus,
+  DeviceProtocol,
+  HealthCheckResult,
+  DeviceCommandRequest,
+  DeviceCommandResult,
+  RokuKeypress,
+} from '../schemas/device'
+
 // API request/response types
 export type {
   ApiError,

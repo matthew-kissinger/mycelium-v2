@@ -10,7 +10,11 @@ import {
   updateSchedulerConfig,
   startScheduler,
   stopScheduler,
+  triggerShepherdForRepo,
+  getActiveRuns,
 } from '../scheduler'
+import { runDiscoveryForRepo } from '../scheduler/cycles/discovery'
+import { runSequencerForRepo } from '../scheduler/cycles/sequencer'
 
 // =============================================================================
 // System Agent Runs Routes (/api/system-agents)
@@ -44,6 +48,11 @@ systemAgentsRoutes.get('/runs', async (c) => {
   return c.json(runs.map(queries.parseRun))
 })
 
+// GET /api/system-agents/active - Get currently running system agents
+systemAgentsRoutes.get('/active', async (c) => {
+  return c.json(getActiveRuns())
+})
+
 // GET /api/system-agents/runs/:id - Get run details
 systemAgentsRoutes.get('/runs/:id', async (c) => {
   const id = c.req.param('id')
@@ -72,22 +81,48 @@ const TriggerRequestSchema = z.object({
 discoveryRoutes.post('/trigger', zValidator('json', TriggerRequestSchema), async (c) => {
   const data = c.req.valid('json')
 
-  const run = await queries.createRun({
+  // Get repo to run discovery on
+  let repo: Awaited<ReturnType<typeof queries.getRepoByPath>> = null
+  if (data.repo_path) {
+    repo = await queries.getRepoByPath(data.repo_path)
+    if (!repo) {
+      return c.json({ error: 'Repo not found' }, 404)
+    }
+  } else {
+    // No repo specified - select one (like the cycle does)
+    const repos = await queries.getRepos()
+    if (repos.length === 0) {
+      return c.json({ error: 'No repos registered' }, 400)
+    }
+    repo = repos[0] // Simple selection for manual trigger
+  }
+
+  // Create a placeholder run to return immediately
+  const placeholderRun = {
+    id: crypto.randomUUID(),
+    agent_type: 'discovery' as const,
+    status: 'running' as const,
+    repo_path: repo.path,
+    context: data.context ?? null,
+    started_at: new Date().toISOString(),
+  }
+
+  // Broadcast start event
+  broadcast('system:agent_started', {
+    id: placeholderRun.id,
     agent_type: 'discovery',
-    repo_path: data.repo_path,
-    context: data.context,
+    repo_path: repo.path,
   })
 
-  // Broadcast the event
-  broadcast('system:agent_started', {
-    id: run.id,
-    agent_type: 'discovery',
-    repo_path: run.repo_path,
+  // Run discovery asynchronously (don't await)
+  const config = getSchedulerConfig()
+  runDiscoveryForRepo(repo, config).catch((err) => {
+    console.error('[Discovery] Manual trigger error:', err)
   })
 
   return c.json({
     message: 'Discovery agent triggered',
-    run: queries.parseRun(run as any),
+    run: placeholderRun,
   }, 201)
 })
 
@@ -101,22 +136,57 @@ export const sequencerRoutes = new Hono()
 sequencerRoutes.post('/trigger', zValidator('json', TriggerRequestSchema), async (c) => {
   const data = c.req.valid('json')
 
-  const run = await queries.createRun({
+  // Get unsequenced tasks (optionally filtered by repo)
+  const unsequencedTasks = await queries.getUnsequencedTasks(50)
+  let tasks = unsequencedTasks
+
+  if (data.repo_path) {
+    tasks = tasks.filter(t => t.repo_path === data.repo_path)
+    if (tasks.length === 0) {
+      return c.json({ error: 'No unsequenced tasks for this repo' }, 400)
+    }
+  }
+
+  if (tasks.length === 0) {
+    return c.json({ error: 'No unsequenced tasks' }, 400)
+  }
+
+  // Group by repo
+  const tasksByRepo = new Map<string, typeof tasks>()
+  for (const task of tasks) {
+    const existing = tasksByRepo.get(task.repo_path) ?? []
+    existing.push(task)
+    tasksByRepo.set(task.repo_path, existing)
+  }
+
+  // Create placeholder run
+  const repoPath = data.repo_path ?? tasks[0].repo_path
+  const placeholderRun = {
+    id: crypto.randomUUID(),
+    agent_type: 'sequencer' as const,
+    status: 'running' as const,
+    repo_path: repoPath,
+    context: { task_count: tasks.length },
+    started_at: new Date().toISOString(),
+  }
+
+  // Broadcast start event
+  broadcast('system:agent_started', {
+    id: placeholderRun.id,
     agent_type: 'sequencer',
-    repo_path: data.repo_path,
-    context: data.context,
+    repo_path: repoPath,
   })
 
-  // Broadcast the event
-  broadcast('system:agent_started', {
-    id: run.id,
-    agent_type: 'sequencer',
-    repo_path: run.repo_path,
-  })
+  // Run sequencer for each repo asynchronously
+  for (const [rp, repoTasks] of tasksByRepo) {
+    runSequencerForRepo(rp, repoTasks).catch((err) => {
+      console.error('[Sequencer] Manual trigger error:', err)
+    })
+  }
 
   return c.json({
     message: 'Sequencer agent triggered',
-    run: queries.parseRun(run as any),
+    run: placeholderRun,
   }, 201)
 })
 
@@ -135,23 +205,15 @@ shepherdRoutes.post('/trigger', zValidator('json', TriggerRequestSchema), async 
     return c.json({ error: 'repo_path is required for shepherd trigger' }, 400)
   }
 
-  const run = await queries.createRun({
-    agent_type: 'shepherd',
-    repo_path: data.repo_path,
-    context: data.context,
-  })
-
-  // Broadcast the event
-  broadcast('system:agent_started', {
-    id: run.id,
-    agent_type: 'shepherd',
-    repo_path: run.repo_path,
+  // Actually dispatch the shepherd cycle for this repo (non-blocking)
+  triggerShepherdForRepo(data.repo_path).catch((e) => {
+    console.error('[API] Shepherd trigger error:', e)
   })
 
   return c.json({
-    message: 'Shepherd agent triggered',
-    run: queries.parseRun(run as any),
-  }, 201)
+    message: `Shepherd triggered for ${data.repo_path}`,
+    repo_path: data.repo_path,
+  }, 202)
 })
 
 // GET /api/shepherd/status - Get shepherd batch status

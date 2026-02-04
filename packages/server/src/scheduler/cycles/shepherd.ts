@@ -14,9 +14,9 @@ import * as queries from '../../db/queries'
 import { dispatch } from '../../agents/dispatch'
 import { broadcast } from '../../sse'
 import { buildMycelContext } from '../../prompts/context'
-
-// Shepherd batch size threshold
-const SHEPHERD_BATCH_SIZE = 5
+import { getTelegramService } from '../../telegram'
+import { formatShepherdReport } from '../../telegram/messages'
+import { registerActiveRun, unregisterActiveRun, isShepherdRunningForRepo } from '../active-runs'
 
 /**
  * Run the Shepherd cycle.
@@ -27,6 +27,9 @@ export async function runShepherdCycle(
   specificRepo?: string
 ): Promise<void> {
   console.log('[Shepherd] Starting cycle...')
+
+  // Use configurable batch size
+  const batchSize = config.shepherd_batch_size ?? 5
 
   // Get all repos
   const repos = await queries.getRepos()
@@ -43,16 +46,25 @@ export async function runShepherdCycle(
 
   // Check each repo for unevaluated tasks
   for (const repo of targetRepos) {
-    const unevaluatedTasks = await queries.getUnevaluatedTasks(repo.path, SHEPHERD_BATCH_SIZE)
+    // Skip if shepherd is already running for this repo
+    if (isShepherdRunningForRepo(repo.path)) {
+      console.log(`[Shepherd] ${repo.name} already being evaluated, skipping`)
+      continue
+    }
 
-    if (unevaluatedTasks.length >= SHEPHERD_BATCH_SIZE) {
-      console.log(`[Shepherd] ${repo.name} has ${unevaluatedTasks.length} unevaluated tasks`)
-      await runShepherdForRepo(repo, unevaluatedTasks)
+    // Check threshold with small query first
+    const check = await queries.getUnevaluatedTasks(repo.path, batchSize)
+
+    if (check.length >= batchSize) {
+      // Threshold met - get ALL unevaluated tasks so we evaluate them in one pass
+      const allUnevaluated = await queries.getUnevaluatedTasks(repo.path, 200)
+      console.log(`[Shepherd] ${repo.name} has ${allUnevaluated.length} unevaluated tasks`)
+      await runShepherdForRepo(repo, allUnevaluated)
     } else if (specificRepo) {
       // If specifically triggered for this repo, run anyway
-      console.log(`[Shepherd] ${repo.name} has ${unevaluatedTasks.length} unevaluated tasks (below threshold, running anyway)`)
-      if (unevaluatedTasks.length > 0) {
-        await runShepherdForRepo(repo, unevaluatedTasks)
+      console.log(`[Shepherd] ${repo.name} has ${check.length} unevaluated tasks (below threshold, running anyway)`)
+      if (check.length > 0) {
+        await runShepherdForRepo(repo, check)
       }
     }
   }
@@ -79,6 +91,14 @@ async function runShepherdForRepo(
     context: { task_count: tasks.length },
   })
 
+  // Register active run
+  registerActiveRun({
+    run_id: run.id,
+    agent_type: 'shepherd',
+    repo_path: repoPath,
+    started_at: new Date().toISOString(),
+  })
+
   // Broadcast event
   broadcast('system:agent_started', {
     type: 'system:agent_started',
@@ -99,6 +119,9 @@ async function runShepherdForRepo(
     const basePrompt = buildShepherdPrompt(repo, tasks)
     const prompt = `${basePrompt}\n\n${mycelContext}`
 
+    // Collect session log entries
+    const sessionLog: Array<{ chunk: string; stream: string; timestamp: string }> = []
+
     // Dispatch to agent (use opus for evaluation)
     const result = await dispatch({
       agent: 'claude',
@@ -106,7 +129,30 @@ async function runShepherdForRepo(
       cwd: repoPath,
       model: 'opus',
       timeout: 1800, // 30 min timeout
+      onOutput: (chunk, stream = 'stdout') => {
+        sessionLog.push({ chunk, stream, timestamp: new Date().toISOString() })
+        // Broadcast output for live streaming
+        broadcast('agent:output', {
+          type: 'agent:output',
+          run_id: run.id,
+          agent_type: 'shepherd',
+          chunk,
+          stream,
+          timestamp: new Date().toISOString(),
+        })
+      },
     })
+
+    // Record fruiting session for system agent run
+    queries.createFruitingSession({
+      task_id: run.id,
+      repo_path: repoPath,
+      agent: 'claude',
+      model: 'opus',
+      context_trace: { agent_type: 'shepherd', task_count: tasks.length },
+      full_prompt: prompt,
+      session_log: sessionLog,
+    }).catch((e) => console.error('[Shepherd] Failed to record fruiting session:', e))
 
     if (!result.success) {
       await queries.failRun(run.id, result.output.slice(0, 500))
@@ -164,6 +210,24 @@ async function runShepherdForRepo(
       }
 
       console.log(`[Shepherd] ${repoName}: ${evaluation.health} - ${evaluation.headline}`)
+
+      // Send Telegram notification
+      const telegram = getTelegramService()
+      if (telegram?.isConnected()) {
+        const branchEvals = evaluation.branch_evaluations ?? []
+        const report = formatShepherdReport({
+          repo_path: repoPath,
+          repo_name: repoName,
+          health: evaluation.health,
+          headline: evaluation.headline,
+          concerns: evaluation.concerns,
+          wins: evaluation.wins,
+          merges: branchEvals.filter((b) => b.decision === 'MERGE').length || undefined,
+          rejects: branchEvals.filter((b) => b.decision === 'REJECT').length || undefined,
+          defers: branchEvals.filter((b) => b.decision === 'DEFER').length || undefined,
+        })
+        telegram.sendMessage(report).catch((e) => console.error('[Shepherd] Telegram notify error:', e))
+      }
     } else {
       console.log(`[Shepherd] ${repoName}: Could not parse evaluation output`)
     }
@@ -196,6 +260,8 @@ async function runShepherdForRepo(
       error: errorMsg,
       timestamp: new Date().toISOString(),
     })
+  } finally {
+    unregisterActiveRun(run.id)
   }
 }
 

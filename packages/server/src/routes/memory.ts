@@ -9,10 +9,56 @@ import {
   createPattern,
   createWarning,
   parsePattern,
+  deletePattern,
+  deleteWarning,
+  getAllPatterns,
+  getAllWarnings,
+  getReposWithMemory,
 } from '../db/queries'
 import { broadcast } from '../sse'
 
 const app = new Hono()
+
+// GET /api/memory/all - Get all memory grouped by global vs repo-specific
+app.get('/all', async (c) => {
+  const [patterns, warnings, reposWithMemory] = await Promise.all([
+    getAllPatterns(),
+    getAllWarnings(),
+    getReposWithMemory(),
+  ])
+
+  // Separate global from repo-specific
+  const globalPatterns = patterns.filter(p => !p.repo_path).map(parsePattern)
+  const globalWarnings = warnings.filter(w => !w.repo_path)
+
+  // Group by repo
+  const repoMemory: Record<string, {
+    patterns: ReturnType<typeof parsePattern>[]
+    warnings: typeof warnings
+  }> = {}
+
+  for (const repo of reposWithMemory) {
+    repoMemory[repo] = {
+      patterns: patterns.filter(p => p.repo_path === repo).map(parsePattern),
+      warnings: warnings.filter(w => w.repo_path === repo),
+    }
+  }
+
+  return c.json({
+    global: {
+      patterns: globalPatterns,
+      warnings: globalWarnings,
+    },
+    repos: repoMemory,
+    summary: {
+      total_patterns: patterns.length,
+      total_warnings: warnings.length,
+      global_patterns: globalPatterns.length,
+      global_warnings: globalWarnings.length,
+      repos_with_memory: reposWithMemory.length,
+    },
+  })
+})
 
 // GET /api/memory/global - Get global memory (patterns + warnings)
 app.get('/global', async (c) => {
@@ -109,17 +155,58 @@ app.post('/repo/:path', zValidator('json', MemoryWriteRequest), async (c) => {
   }
 })
 
-// POST /api/memory/compact - Trigger memory compaction (placeholder)
+// POST /api/memory/compact - Trigger memory compaction
 app.post('/compact', zValidator('json', MemoryCompactRequest), async (c) => {
-  const data = c.req.valid('json')
+  const { runCompactionCycleManual } = await import('../scheduler/cycles/compaction')
+  const { loadConfig } = await import('../scheduler/config')
 
-  // Placeholder: Memory compaction would be handled by a system agent
-  // For now, just return a success response indicating the request was received
-  return c.json({
-    message: 'Memory compaction triggered',
-    repo_path: data.repo_path ?? 'global',
-    status: 'queued',
-  })
+  const config = loadConfig()
+
+  // Run compaction directly (bypass day/hour check)
+  try {
+    await runCompactionCycleManual(config)
+    return c.json({
+      message: 'Memory compaction completed',
+      status: 'completed',
+    })
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    return c.json({ message: 'Compaction failed', error: msg, status: 'failed' }, 500)
+  }
+})
+
+// =============================================================================
+// Pattern Management
+// =============================================================================
+
+// DELETE /api/memory/patterns/:id - Delete a pattern
+app.delete('/patterns/:id', async (c) => {
+  const id = c.req.param('id')
+
+  try {
+    await deletePattern(id)
+    broadcast('memory:pattern_deleted', { id })
+    return c.json({ message: 'Pattern deleted', id })
+  } catch (error) {
+    return c.json({ error: 'Failed to delete pattern' }, 500)
+  }
+})
+
+// =============================================================================
+// Warning Management
+// =============================================================================
+
+// DELETE /api/memory/warnings/:id - Delete a warning
+app.delete('/warnings/:id', async (c) => {
+  const id = c.req.param('id')
+
+  try {
+    await deleteWarning(id)
+    broadcast('memory:warning_deleted', { id })
+    return c.json({ message: 'Warning deleted', id })
+  } catch (error) {
+    return c.json({ error: 'Failed to delete warning' }, 500)
+  }
 })
 
 // =============================================================================
@@ -153,7 +240,6 @@ app.get('/agent-stats/:agent', async (c) => {
 
 // POST /api/memory/agent-stats/backfill - Rebuild stats from completed tasks
 app.post('/agent-stats/backfill', async (c) => {
-  // Get all completed tasks
   const { db } = await import('../db')
   const { schema } = await import('../db')
   const { eq, or } = await import('drizzle-orm')
@@ -162,6 +248,33 @@ app.post('/agent-stats/backfill', async (c) => {
     .where(or(eq(schema.tasks.status, 'done'), eq(schema.tasks.status, 'failed')))
 
   const stats = await calculateAgentStats()
+
+  // Persist to agent_stats table
+  for (const [agentId, s] of Object.entries(stats.agents)) {
+    await db.insert(schema.agent_stats)
+      .values({
+        agent_id: agentId,
+        total_tasks: s.total_tasks,
+        successful: s.successful,
+        failed: s.failed,
+        success_rate: s.success_rate,
+        total_cost: s.total_cost_usd,
+        best_for: JSON.stringify(Object.entries(s.models_used).map(([m, n]) => `${m} (${n})`)),
+        updated_at: new Date().toISOString(),
+      })
+      .onConflictDoUpdate({
+        target: schema.agent_stats.agent_id,
+        set: {
+          total_tasks: s.total_tasks,
+          successful: s.successful,
+          failed: s.failed,
+          success_rate: s.success_rate,
+          total_cost: s.total_cost_usd,
+          best_for: JSON.stringify(Object.entries(s.models_used).map(([m, n]) => `${m} (${n})`)),
+          updated_at: new Date().toISOString(),
+        },
+      })
+  }
 
   return c.json({
     message: 'Agent stats rebuilt from task history',

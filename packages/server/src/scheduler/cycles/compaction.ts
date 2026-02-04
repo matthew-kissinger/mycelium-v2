@@ -20,6 +20,13 @@ let lastCompactionDate: string | null = null
  * Only runs once per scheduled day (e.g., Monday 11am).
  */
 export async function runCompactionCycle(config: SchedulerConfig): Promise<void> {
+  // Session log TTL cleanup runs every cycle (hourly) regardless of compaction schedule
+  try {
+    await queries.cleanExpiredSessionLogs()
+  } catch (e) {
+    console.error('[Compaction] Session log cleanup error:', e)
+  }
+
   const now = new Date()
   const today = now.toISOString().split('T')[0]
 
@@ -89,6 +96,67 @@ export async function runCompactionCycle(config: SchedulerConfig): Promise<void>
       error: errorMsg,
       timestamp: new Date().toISOString(),
     })
+  }
+}
+
+/**
+ * Run compaction manually (bypasses day/hour check).
+ */
+export async function runCompactionCycleManual(config: SchedulerConfig): Promise<void> {
+  console.log('[Compaction] Starting manual compaction...')
+
+  // Session log TTL cleanup
+  try {
+    await queries.cleanExpiredSessionLogs()
+  } catch (e) {
+    console.error('[Compaction] Session log cleanup error:', e)
+  }
+
+  const run = await queries.createRun({
+    agent_type: 'compaction',
+    context: { scheduled: false, manual: true },
+  })
+
+  broadcast('system:agent_started', {
+    type: 'system:agent_started',
+    run_id: run.id,
+    agent_type: 'compaction',
+    timestamp: new Date().toISOString(),
+  })
+
+  try {
+    const repos = await queries.getRepos()
+    for (const repo of repos) {
+      await compactRepoMemory(repo.path)
+    }
+
+    if (config.auto_prune_enabled) {
+      await pruneOldTasks(config)
+    }
+
+    await queries.completeRun(run.id, `Compacted ${repos.length} repos`)
+    console.log('[Compaction] Manual compaction completed')
+
+    broadcast('agent:completed', {
+      type: 'agent:completed',
+      run_id: run.id,
+      agent_type: 'compaction',
+      duration_seconds: 0,
+      timestamp: new Date().toISOString(),
+    })
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error)
+    await queries.failRun(run.id, errorMsg)
+    console.error('[Compaction] Error:', error)
+
+    broadcast('agent:failed', {
+      type: 'agent:failed',
+      run_id: run.id,
+      agent_type: 'compaction',
+      error: errorMsg,
+      timestamp: new Date().toISOString(),
+    })
+    throw error
   }
 }
 
