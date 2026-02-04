@@ -1,11 +1,11 @@
 /**
- * Prompt Configuration Management
+ * Prompt Configuration Management - DB-first with file fallback
  *
- * Provides access to system agent prompts with the ability to view
- * and (eventually) override them via config files.
+ * Load order: DB -> file (import to DB) -> code defaults
+ * Saves always go to DB with history tracking
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, readdirSync, readFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 
@@ -19,6 +19,13 @@ import {
   AUTO_GENESIS_PROMPT,
   ARMORY_AGENT_PROMPT,
 } from '../prompts'
+
+import {
+  getPromptOverride,
+  savePromptOverride,
+  deletePromptOverride as dbDeletePromptOverride,
+  importFilePrompt,
+} from '../db/config-store'
 
 // =============================================================================
 // Types
@@ -105,56 +112,42 @@ const PROMPT_DEFINITIONS: Record<string, {
 // =============================================================================
 
 /**
- * Ensure prompts config directory exists.
- */
-function ensureConfigDir(): void {
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true })
-  }
-}
-
-/**
- * Get path for a custom prompt file.
- */
-function getCustomPromptPath(promptId: string): string {
-  return join(CONFIG_DIR, `${promptId}.md`)
-}
-
-/**
- * Load custom prompt content if it exists.
+ * Load custom prompt content: DB -> file (import to DB) -> undefined
  */
 function loadCustomPrompt(promptId: string): string | undefined {
-  const path = getCustomPromptPath(promptId)
-  if (!existsSync(path)) {
-    return undefined
+  // Try DB first
+  const dbValue = getPromptOverride(promptId)
+  if (dbValue) return dbValue
+
+  // Try file (and import to DB if found)
+  const filePath = join(CONFIG_DIR, `${promptId}.md`)
+  if (existsSync(filePath)) {
+    try {
+      const content = readFileSync(filePath, 'utf-8')
+      importFilePrompt(promptId, content)
+      return content
+    } catch {
+      return undefined
+    }
   }
-  try {
-    return readFileSync(path, 'utf-8')
-  } catch {
-    return undefined
-  }
+
+  return undefined
 }
 
 /**
- * Save custom prompt content.
+ * Save custom prompt content to DB with history.
  */
 export function saveCustomPrompt(promptId: string, content: string): void {
-  ensureConfigDir()
-  const path = getCustomPromptPath(promptId)
-  writeFileSync(path, content, 'utf-8')
-  console.log('[Config] Custom prompt saved to', path)
+  savePromptOverride(promptId, content, 'api')
+  console.log('[Config] Custom prompt saved to DB:', promptId)
 }
 
 /**
  * Delete custom prompt (revert to default).
  */
 export function deleteCustomPrompt(promptId: string): void {
-  const path = getCustomPromptPath(promptId)
-  if (existsSync(path)) {
-    const { unlinkSync } = require('fs')
-    unlinkSync(path)
-    console.log('[Config] Custom prompt deleted:', path)
-  }
+  dbDeletePromptOverride(promptId)
+  console.log('[Config] Custom prompt deleted:', promptId)
 }
 
 /**

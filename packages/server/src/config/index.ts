@@ -1,10 +1,8 @@
 /**
- * Configuration Management
+ * Configuration Management - DB-first with file fallback
  *
- * Load and save configuration files for various system components:
- * - Scheduler config: <config_dir>/scheduler.json
- * - Genesis config: <config_dir>/genesis.json
- * - Hooks config: <config_dir>/hooks.json
+ * Load order: DB -> file (import to DB) -> code defaults
+ * Saves always go to DB with history tracking
  *
  * Config directory is platform-dependent:
  * - Linux/NixOS: ~/.config/mycelium-v2
@@ -12,10 +10,9 @@
  * - Windows: %APPDATA%/mycelium-v2
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import {
-  SchedulerConfig,
   GenesisConfig,
   HooksConfig,
   DEFAULT_GENESIS_CONFIG,
@@ -24,6 +21,7 @@ import {
 
 // Import platform utilities
 import { getConfigDir as getPlatformConfigDir, ensureDir } from '../platform'
+import { getConfigOverride, saveConfigOverride, importFileConfig } from '../db/config-store'
 
 // Re-export scheduler config functions (already implemented in scheduler/config.ts)
 export {
@@ -76,50 +74,49 @@ function ensureConfigDir(): void {
 // Genesis Configuration
 // =============================================================================
 
+const GENESIS_CONFIG_KEY = 'genesis'
 const GENESIS_CONFIG_FILE = join(CONFIG_DIR, 'genesis.json')
 
 /**
- * Load genesis config from disk, merging with defaults.
+ * Load genesis config: DB -> file (import to DB) -> defaults
  */
 export function loadGenesisConfig(): GenesisConfig {
-  ensureConfigDir()
-
-  if (!existsSync(GENESIS_CONFIG_FILE)) {
-    return { ...DEFAULT_GENESIS_CONFIG }
-  }
-
-  try {
-    const raw = readFileSync(GENESIS_CONFIG_FILE, 'utf-8')
-    const parsed = JSON.parse(raw)
-
-    // Merge with defaults (parsed overrides defaults)
-    return {
-      ...DEFAULT_GENESIS_CONFIG,
-      ...parsed,
+  // Try DB first
+  const dbValue = getConfigOverride(GENESIS_CONFIG_KEY)
+  if (dbValue) {
+    try {
+      return { ...DEFAULT_GENESIS_CONFIG, ...JSON.parse(dbValue) }
+    } catch {
+      console.error('[Config] Failed to parse DB genesis config, falling back')
     }
-  } catch (error) {
-    console.error('[Config] Failed to load genesis config, using defaults:', error)
-    return { ...DEFAULT_GENESIS_CONFIG }
   }
+
+  // Try file (and import to DB if found)
+  ensureConfigDir()
+  if (existsSync(GENESIS_CONFIG_FILE)) {
+    try {
+      const raw = readFileSync(GENESIS_CONFIG_FILE, 'utf-8')
+      importFileConfig(GENESIS_CONFIG_KEY, raw)
+      return { ...DEFAULT_GENESIS_CONFIG, ...JSON.parse(raw) }
+    } catch (error) {
+      console.error('[Config] Failed to load genesis file config:', error)
+    }
+  }
+
+  return { ...DEFAULT_GENESIS_CONFIG }
 }
 
 /**
- * Save genesis config to disk.
+ * Save genesis config to DB with history.
  */
 export function saveGenesisConfig(config: GenesisConfig): void {
-  ensureConfigDir()
-
-  try {
-    writeFileSync(GENESIS_CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8')
-    console.log('[Config] Genesis config saved to', GENESIS_CONFIG_FILE)
-  } catch (error) {
-    console.error('[Config] Failed to save genesis config:', error)
-    throw error
-  }
+  const oldValue = getConfigOverride(GENESIS_CONFIG_KEY)
+  saveConfigOverride(GENESIS_CONFIG_KEY, JSON.stringify(config, null, 2), 'api', oldValue)
+  console.log('[Config] Genesis config saved to DB')
 }
 
 /**
- * Update partial genesis config and save to disk.
+ * Update partial genesis config and save.
  */
 export function updateGenesisConfig(updates: Partial<GenesisConfig>): GenesisConfig {
   const current = loadGenesisConfig()
@@ -139,50 +136,49 @@ export function getGenesisConfigPath(): string {
 // Hooks Configuration
 // =============================================================================
 
+const HOOKS_CONFIG_KEY = 'hooks'
 const HOOKS_CONFIG_FILE = join(CONFIG_DIR, 'hooks.json')
 
 /**
- * Load hooks config from disk, merging with defaults.
+ * Load hooks config: DB -> file (import to DB) -> defaults
  */
 export function loadHooksConfig(): HooksConfig {
-  ensureConfigDir()
-
-  if (!existsSync(HOOKS_CONFIG_FILE)) {
-    return { ...DEFAULT_HOOKS_CONFIG }
-  }
-
-  try {
-    const raw = readFileSync(HOOKS_CONFIG_FILE, 'utf-8')
-    const parsed = JSON.parse(raw)
-
-    // Merge with defaults (parsed overrides defaults)
-    return {
-      ...DEFAULT_HOOKS_CONFIG,
-      ...parsed,
+  // Try DB first
+  const dbValue = getConfigOverride(HOOKS_CONFIG_KEY)
+  if (dbValue) {
+    try {
+      return { ...DEFAULT_HOOKS_CONFIG, ...JSON.parse(dbValue) }
+    } catch {
+      console.error('[Config] Failed to parse DB hooks config, falling back')
     }
-  } catch (error) {
-    console.error('[Config] Failed to load hooks config, using defaults:', error)
-    return { ...DEFAULT_HOOKS_CONFIG }
   }
+
+  // Try file (and import to DB if found)
+  ensureConfigDir()
+  if (existsSync(HOOKS_CONFIG_FILE)) {
+    try {
+      const raw = readFileSync(HOOKS_CONFIG_FILE, 'utf-8')
+      importFileConfig(HOOKS_CONFIG_KEY, raw)
+      return { ...DEFAULT_HOOKS_CONFIG, ...JSON.parse(raw) }
+    } catch (error) {
+      console.error('[Config] Failed to load hooks file config:', error)
+    }
+  }
+
+  return { ...DEFAULT_HOOKS_CONFIG }
 }
 
 /**
- * Save hooks config to disk.
+ * Save hooks config to DB with history.
  */
 export function saveHooksConfig(config: HooksConfig): void {
-  ensureConfigDir()
-
-  try {
-    writeFileSync(HOOKS_CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8')
-    console.log('[Config] Hooks config saved to', HOOKS_CONFIG_FILE)
-  } catch (error) {
-    console.error('[Config] Failed to save hooks config:', error)
-    throw error
-  }
+  const oldValue = getConfigOverride(HOOKS_CONFIG_KEY)
+  saveConfigOverride(HOOKS_CONFIG_KEY, JSON.stringify(config, null, 2), 'api', oldValue)
+  console.log('[Config] Hooks config saved to DB')
 }
 
 /**
- * Update partial hooks config and save to disk.
+ * Update partial hooks config and save.
  */
 export function updateHooksConfig(updates: Partial<HooksConfig>): HooksConfig {
   const current = loadHooksConfig()

@@ -206,6 +206,29 @@ async function initDb() {
       raw_response TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS config_overrides (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      updated_by TEXT DEFAULT 'api'
+    );
+
+    CREATE TABLE IF NOT EXISTS prompt_overrides (
+      prompt_id TEXT PRIMARY KEY,
+      content TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS config_history (
+      id TEXT PRIMARY KEY,
+      config_key TEXT NOT NULL,
+      field TEXT,
+      old_value TEXT,
+      new_value TEXT,
+      changed_at TEXT NOT NULL,
+      changed_by TEXT DEFAULT 'api'
+    );
+
     CREATE TABLE IF NOT EXISTS devices (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,

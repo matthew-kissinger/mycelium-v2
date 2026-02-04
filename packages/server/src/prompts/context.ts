@@ -478,7 +478,7 @@ export function buildSkillsSection(
 // MCP Servers - Available MCP tools
 // =============================================================================
 
-import { getMcpServers } from '../config/inventory'
+import { getMcpServers, getMcpServersForAgent } from '../config/inventory'
 
 /**
  * List MCP servers from all agent configs.
@@ -490,10 +490,11 @@ export function listMcpServers(): Array<{ name: string; command: string }> {
 
 /**
  * Build MCP servers section for prompts.
- * Uses lightweight listing (like v1) - just tells agents what's available.
+ * When agent is specified, only shows MCPs configured for that specific agent.
+ * Falls back to all MCPs when no agent specified (e.g. inventory display).
  */
-export function buildMcpSection(): string {
-  const servers = getMcpServers()
+export function buildMcpSection(agent?: string): string {
+  const servers = agent ? getMcpServersForAgent(agent) : getMcpServers()
   if (servers.length === 0) return ''
 
   const lines: string[] = [

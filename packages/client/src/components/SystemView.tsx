@@ -2,6 +2,7 @@
  * SystemView - Main orchestration architecture visualization
  *
  * Shows the Mycelium system flow with real-time status updates.
+ * Panel rendering has moved to layout/RightPanel.tsx in the three-column layout.
  */
 
 import { useEffect, useCallback } from 'react'
@@ -19,10 +20,8 @@ import { nodeTypes } from '../nodes'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const customNodeTypes = nodeTypes as any
 import { useSystemStore } from '../stores/system'
-import { Panel } from './Panel'
 
 export function SystemView() {
-  // Get system state
   const {
     nodes: systemNodes,
     edges: systemEdges,
@@ -31,8 +30,6 @@ export function SystemView() {
     connectSSE,
     disconnectSSE,
     openPanel,
-    panel,
-    closePanel,
   } = useSystemStore()
 
   // React Flow state
@@ -45,10 +42,9 @@ export function SystemView() {
     refreshAll()
     connectSSE()
 
-    // Set up polling for real-time updates
     const pollInterval = setInterval(() => {
       refreshAll()
-    }, 5000) // Poll every 5 seconds
+    }, 5000)
 
     return () => {
       clearInterval(pollInterval)
@@ -65,12 +61,11 @@ export function SystemView() {
     setEdges(systemEdges)
   }, [systemEdges, setEdges])
 
-  // Handle node click
+  // Handle node click - opens panel via uiStore (delegated from systemStore)
   const onNodeClick = useCallback(
     (_event: React.MouseEvent, node: Node) => {
       const nodeType = node.type
 
-      // Map node types to panel types
       const panelTypeMap: Record<string, 'scheduler' | 'cycle' | 'taskPool' | 'agent' | 'alignment' | 'memory'> = {
         scheduler: 'scheduler',
         cycle: 'cycle',
@@ -109,7 +104,7 @@ export function SystemView() {
   }
 
   return (
-    <div className="h-full w-full relative">
+    <div className="h-full w-full">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -118,9 +113,9 @@ export function SystemView() {
         onNodeClick={onNodeClick}
         nodeTypes={customNodeTypes}
         fitView
-        fitViewOptions={{ padding: 0.2 }}
+        fitViewOptions={{ padding: 0.15 }}
         proOptions={{ hideAttribution: true }}
-        nodesDraggable={false}
+        nodesDraggable={true}
         nodesConnectable={false}
         elementsSelectable={true}
         panOnDrag={true}
@@ -141,16 +136,6 @@ export function SystemView() {
           className="!bg-zinc-900 !border-zinc-700"
         />
       </ReactFlow>
-
-      {/* Side panel for drill-in */}
-      {panel.type && (
-        <Panel
-          type={panel.type}
-          nodeId={panel.nodeId}
-          data={panel.data}
-          onClose={closePanel}
-        />
-      )}
     </div>
   )
 }

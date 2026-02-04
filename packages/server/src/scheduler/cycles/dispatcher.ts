@@ -190,7 +190,7 @@ async function runTask(task: Awaited<ReturnType<typeof queries.getTask>>): Promi
   })
   const agentsSection = buildAgentsSection()
   const skillsSection = buildSkillsSection([], repoPath)
-  const mcpSection = buildMcpSection()
+  const mcpSection = buildMcpSection(agent)
 
   // Inject previous error context if this is a retry
   const retryCtx = parseRetryContext(task.retry_context)

@@ -1,28 +1,18 @@
 /**
  * Mycelium v2 - Agent Orchestration UI
  *
- * Main application component that renders the system architecture view.
+ * Three-column layout: sidebar | flow canvas | detail panel
  */
 
 import { useEffect, useState } from 'react'
-import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { SystemView } from './components/SystemView'
 import { Header } from './components/Header'
+import { AppLayout } from './layout/AppLayout'
+import { RightPanel } from './layout/RightPanel'
+import { ToastContainer } from './components/ToastContainer'
+import { usePanelRouter } from './hooks/usePanelRouter'
 import type { Stats } from '@mycelium/shared'
-
-// Query client for data fetching
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 5000,
-      refetchInterval: 10000,
-    },
-  },
-})
-
-// =============================================================================
-// Stats Fetching
-// =============================================================================
 
 async function fetchStats(): Promise<Stats> {
   const res = await fetch('/api/stats')
@@ -30,16 +20,15 @@ async function fetchStats(): Promise<Stats> {
   return res.json()
 }
 
-// =============================================================================
-// Main App Content
-// =============================================================================
-
 function AppContent() {
   const { data: stats } = useQuery<Stats>({
     queryKey: ['stats'],
     queryFn: fetchStats,
     refetchInterval: 5000,
   })
+
+  // Sync panel state to URL
+  usePanelRouter()
 
   // Check if backend is available
   const [backendAvailable, setBackendAvailable] = useState(true)
@@ -74,7 +63,6 @@ function AppContent() {
     return (
       <div className="flex h-screen items-center justify-center bg-zinc-950">
         <div className="text-center max-w-md">
-          <div className="text-4xl mb-4">🍄</div>
           <h1 className="text-xl font-semibold text-zinc-100 mb-2">Backend Not Available</h1>
           <p className="text-zinc-400 mb-4">
             The Mycelium server is not running. Start it with:
@@ -95,25 +83,17 @@ function AppContent() {
 
   return (
     <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
-      {/* Header with stats */}
       <Header stats={stats} />
 
-      {/* Main content - system architecture view */}
-      <main className="flex-1 overflow-hidden">
+      <AppLayout rightPanel={<RightPanel />}>
         <SystemView />
-      </main>
+      </AppLayout>
+
+      <ToastContainer />
     </div>
   )
 }
 
-// =============================================================================
-// Root App with Providers
-// =============================================================================
-
 export default function App() {
-  return (
-    <QueryClientProvider client={queryClient}>
-      <AppContent />
-    </QueryClientProvider>
-  )
+  return <AppContent />
 }

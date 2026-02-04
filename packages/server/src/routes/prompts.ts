@@ -13,10 +13,12 @@ import { z } from 'zod'
 import {
   listPrompts,
   getPrompt,
+  getEffectivePrompt,
   saveCustomPrompt,
   deleteCustomPrompt,
   getPromptsConfigPath,
 } from '../config'
+import { buildMycelContext, buildAgentsSection } from '../prompts/context'
 
 const app = new Hono()
 
@@ -108,6 +110,79 @@ app.post('/:id/reset', async (c) => {
     message: `Prompt ${promptId} reset to default`,
     id: promptId,
     isCustomized: false,
+  })
+})
+
+// GET /api/prompts/:id/variables - Get resolved template variable values
+app.get('/:id/variables', async (c) => {
+  const promptId = c.req.param('id')
+  const prompt = getPrompt(promptId)
+
+  if (!prompt) {
+    return c.json({ error: `Prompt not found: ${promptId}` }, 404)
+  }
+
+  // Resolve each template variable to its current value
+  const variables: Record<string, { value: string; length: number }> = {}
+
+  for (const varName of prompt.templateVariables) {
+    let value = ''
+    switch (varName) {
+      case 'MYCEL_CONTEXT':
+        value = buildMycelContext({ role: prompt.agent })
+        break
+      case 'AGENTS_SECTION':
+        value = buildAgentsSection()
+        break
+      case 'repo_path':
+        value = '(resolved at runtime per-repo)'
+        break
+      case 'repo_name':
+        value = '(resolved at runtime per-repo)'
+        break
+      default:
+        value = `(unknown variable: ${varName})`
+    }
+    variables[varName] = { value, length: value.length }
+  }
+
+  return c.json({
+    id: promptId,
+    templateVariables: prompt.templateVariables,
+    variables,
+  })
+})
+
+// GET /api/prompts/:id/preview - Get prompt with variables resolved
+app.get('/:id/preview', async (c) => {
+  const promptId = c.req.param('id')
+  const repoPath = c.req.query('repo_path') ?? '/example/repo'
+  const prompt = getPrompt(promptId)
+
+  if (!prompt) {
+    return c.json({ error: `Prompt not found: ${promptId}` }, 404)
+  }
+
+  const effectiveContent = prompt.customContent ?? prompt.content
+  let resolved = effectiveContent
+
+  // Replace template variables with resolved values
+  const replacements: Record<string, string> = {
+    '{MYCEL_CONTEXT}': buildMycelContext({ role: prompt.agent }),
+    '{AGENTS_SECTION}': buildAgentsSection(),
+    '{repo_path}': repoPath,
+    '{repo_name}': repoPath.split('/').pop() || repoPath,
+  }
+
+  for (const [placeholder, value] of Object.entries(replacements)) {
+    resolved = resolved.replaceAll(placeholder, value)
+  }
+
+  return c.json({
+    id: promptId,
+    preview: resolved,
+    length: resolved.length,
+    repo_path: repoPath,
   })
 })
 

@@ -61,7 +61,20 @@ export function Header({ stats }: HeaderProps) {
           <Stat label="Running" value={stats.running} color="text-blue-400" />
           <Stat label="Done" value={stats.done} color="text-green-400" />
           <Stat label="Failed" value={stats.failed} color="text-red-400" />
-          {stats.total_cost_usd !== undefined && (
+          {stats.per_use_cost_usd !== undefined ? (
+            <>
+              <Stat
+                label="Cline"
+                value={`$${stats.per_use_cost_usd.toFixed(2)}`}
+                color="text-amber-400"
+              />
+              <Stat
+                label="Sub"
+                value={`${stats.subscription_task_count || 0} tasks`}
+                color="text-zinc-400"
+              />
+            </>
+          ) : stats.total_cost_usd !== undefined && (
             <Stat label="Cost" value={`$${stats.total_cost_usd.toFixed(2)}`} color="text-zinc-300" />
           )}
         </div>
