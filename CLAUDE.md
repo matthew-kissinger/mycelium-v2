@@ -12,8 +12,8 @@
 | Component | Status |
 |-----------|--------|
 | Monorepo Structure | packages/{shared,server,client,cli,mcp} |
-| Backend API | Hono + Bun, 35+ endpoints |
-| Scheduler | 7 cycles (dispatcher, discovery, sequencer, shepherd, etc.) |
+| Backend API | Hono + Bun, 70+ endpoints |
+| Scheduler | 9 cycles (dispatcher, discovery, sequencer, shepherd, health, etc.) |
 | Agent Dispatch | Claude, Codex, Gemini, Cline, Cursor |
 | Context Injection | Skills, MCP servers, MYCEL_CONTEXT, AGENTS_SECTION |
 | SSE Streaming | Real-time task output |
@@ -31,7 +31,56 @@ mycelium-v2          [auto] [TypeScript]
 
 ## Running Mycelium v2
 
-### Development
+### NixOS (Recommended)
+
+```bash
+cd ~/repos/mycelium-v2
+
+# Enter Nix development shell (auto-activates with direnv)
+nix develop
+
+# Or use direnv
+direnv allow
+
+# Development runs automatically with correct environment
+bun run dev
+```
+
+With home-manager, the server runs as a systemd user service:
+
+```nix
+# In home.nix
+services.mycelium = {
+  enable = true;
+  server.enable = true;
+  scheduler.enable = true;  # Auto-starts scheduler
+};
+```
+
+See `nix/README.md` for full NixOS/home-manager integration.
+
+### NixOS Start/Stop (Laptop Hub)
+
+```bash
+# Start/stop the systemd user service
+systemctl --user start mycelium
+systemctl --user stop mycelium
+systemctl --user restart mycelium
+systemctl --user status mycelium
+
+# View logs
+journalctl --user -u mycelium -f
+
+# For development (not the service):
+cd ~/repos/mycelium-v2
+bun run dev              # Backend on :8765 (foreground)
+bun run dev:client       # Frontend on :5765 (separate terminal)
+
+# Stop dev servers: Ctrl+C in each terminal
+# The service and dev mode are independent - don't run both simultaneously
+```
+
+### Manual Development
 
 ```bash
 cd /home/mkagent/repos/mycelium-v2
@@ -42,22 +91,46 @@ bun install
 # Run backend + frontend
 bun run dev
 
-# Backend only (port 8000)
+# Backend only (port 8765)
 bun run dev:server
 
-# Frontend only (port 5173)
+# Frontend only (port 5765)
 bun run dev:client
 
 # Build all packages
 bun run build
+
+# Run tests
+bun test
+
+# Dev management (build-restart, scheduler, check)
+bun run dev:manage check              # System summary
+bun run dev:manage build-restart      # Build + restart
+bun run dev:manage scheduler start    # Start scheduler via API
 ```
 
 ### Configuration
 
-Copy `.env.example` to `.env.local` with your Telegram credentials:
+Copy `.env.example` to `.env.local`:
 ```bash
 cp .env.example .env.local
-# Edit with TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID
+```
+
+Key environment variables:
+```bash
+# Telegram
+TELEGRAM_BOT_TOKEN=your_token
+TELEGRAM_CHAT_ID=your_chat_id
+
+# Server
+PORT=8765
+HOST=0.0.0.0
+
+# Scheduler auto-start on server boot
+SCHEDULER_AUTO_START=true
+
+# Database (auto-detected per platform)
+DATABASE_PATH=~/.config/mycelium-v2/mycelium.db
 ```
 
 ---
@@ -141,6 +214,16 @@ mycel genesis auto                             # Analyze network, propose
 mycel genesis auto --create                    # Create directly
 mycel genesis config                           # Show genesis config
 
+# Devices
+mycel devices                                  # List all devices
+mycel device add <name> --type roku --host 192.168.1.103
+mycel device remove <name>                     # Remove device
+mycel device status <name>                     # Device status
+mycel device ping <name>                       # Health check device
+mycel device cmd <name> <command> [args]        # Execute device command
+mycel tv <command> [args]                      # Roku TV shortcuts
+mycel vol <level|up|down|mute|status>          # Yamaha volume shortcuts
+
 # MCP Server
 mycel mcp                                      # Start MCP server (stdio)
 
@@ -160,7 +243,9 @@ GET    /api/tasks                    List tasks (status, repo_path, limit filter
 GET    /api/tasks/:id                Get task details
 GET    /api/tasks/:id/context        Get assembled context
 GET    /api/tasks/:id/sessions       Get fruiting sessions
+GET    /api/tasks/:id/logs           Get task output logs
 GET    /api/tasks/graph              Get dependency graph
+GET    /api/tasks/logs/stats         Get log buffer statistics
 POST   /api/tasks                    Create task
 PATCH  /api/tasks/:id                Update task
 DELETE /api/tasks/:id                Delete task
@@ -187,6 +272,7 @@ POST   /api/orchestrate              Generate task spec with Opus
 GET    /api/repos                    List repos
 GET    /api/repos/:id                Get repo
 GET    /api/repos/health             Get health summary
+GET    /api/repos/browse             Browse directories
 POST   /api/repos                    Add repo
 POST   /api/repos/discover           Scan paths for repos
 PATCH  /api/repos/:id                Update repo
@@ -206,11 +292,14 @@ POST   /api/align                    Create + send via Telegram
 
 ### Memory
 ```
+GET    /api/memory/all               Get all memory grouped by global/repo
 GET    /api/memory/global            Get global patterns/warnings
 POST   /api/memory/global            Add to global memory
 GET    /api/memory/repo/:path        Get repo memory
 POST   /api/memory/repo/:path        Add to repo memory
 POST   /api/memory/compact           Trigger compaction
+DELETE /api/memory/patterns/:id      Delete a pattern
+DELETE /api/memory/warnings/:id      Delete a warning
 GET    /api/memory/agent-stats       Get agent performance stats
 GET    /api/memory/agent-stats/:agent Get stats for agent
 POST   /api/memory/agent-stats/backfill Rebuild from tasks
@@ -220,51 +309,97 @@ POST   /api/memory/agent-stats/backfill Rebuild from tasks
 ```
 POST   /api/notify                   Send notification
 GET    /api/inbox                    Get user messages
-GET    /api/inbox/:id/download       Download file
+GET    /api/inbox/:message_id/download Download file
 GET    /api/status                   Check Telegram connection
-GET    /api/telegram/updates         Get received updates
-GET    /api/telegram/webhook         Get webhook status
-POST   /api/telegram/webhook         Set webhook URL
-DELETE /api/telegram/webhook         Delete webhook
 ```
 
 ### System Agents
 ```
-GET    /api/system-agents            List agent runs
-POST   /api/discovery                Trigger Discovery
-POST   /api/sequencer                Trigger Sequencer
-POST   /api/shepherd                 Trigger Shepherd
-GET    /api/shepherd/status          Get Shepherd status
+GET    /api/system-agents/runs       List agent runs
+GET    /api/system-agents/runs/:id   Get run details
+GET    /api/system-agents/active     Get currently running agents
+POST   /api/discovery/trigger        Trigger Discovery
+POST   /api/sequencer/trigger        Trigger Sequencer
+POST   /api/shepherd/trigger         Trigger Shepherd (requires repo_path)
+GET    /api/shepherd/status          Get Shepherd batch status
 GET    /api/shepherd/evaluations     List evaluations
-POST   /api/shepherd/reset-counter   Reset counter
+POST   /api/shepherd/reset-counter   Reset evaluation counter
 ```
 
 ### Scheduler
 ```
-GET    /api/scheduler                Get scheduler status
+GET    /api/scheduler/status         Get scheduler status
+GET    /api/scheduler/config         Get scheduler config
+POST   /api/scheduler/config         Update scheduler config
 POST   /api/scheduler/start          Start scheduler
 POST   /api/scheduler/stop           Stop scheduler
-POST   /api/scheduler/configure      Update config
+```
+
+### Configuration
+```
+GET    /api/config                   Get overview of all config
+GET    /api/config/scheduler         Get scheduler config (with path)
+PATCH  /api/config/scheduler         Update scheduler config
+GET    /api/config/genesis           Get genesis config
+PATCH  /api/config/genesis           Update genesis config
+GET    /api/config/hooks             Get hooks config
+PATCH  /api/config/hooks             Update hooks config
+GET    /api/config/agents            Get all agents config
+GET    /api/config/agents/:name      Get specific agent config
+PATCH  /api/config/agents/:name      Update specific agent config
+```
+
+### Prompts
+```
+GET    /api/prompts                  List all system agent prompts
+GET    /api/prompts/:id              Get prompt with full content
+PATCH  /api/prompts/:id              Update prompt with custom content
+POST   /api/prompts/:id/reset        Reset prompt to default
+```
+
+### Inventory (Skills & MCPs)
+```
+GET    /api/inventory                Get full inventory
+GET    /api/inventory/skills         Get skills only
+GET    /api/inventory/mcps           Get MCP servers only
+POST   /api/inventory/armory         Trigger armory cycle manually
+GET    /api/inventory/armory/status  Get armory readiness status
+```
+
+### Devices
+```
+GET    /api/devices                  List devices (filter by type, status)
+GET    /api/devices/status           Get device status summary
+GET    /api/devices/:id              Get single device (by ID or name)
+POST   /api/devices                  Add device
+PATCH  /api/devices/:id              Update device
+DELETE /api/devices/:id              Remove device
+POST   /api/devices/health-check     Health check all devices
+POST   /api/devices/:id/health       Health check single device
+POST   /api/devices/:id/command      Execute command on device
 ```
 
 ### Hooks
 ```
 GET    /api/hooks/status             Get hooks config
 POST   /api/hooks/configure          Configure hooks
-POST   /api/hooks/test               Test hook
+POST   /api/hooks/test               Test a webhook
 ```
 
 ### Stats & Health
 ```
 GET    /api/stats                    Task statistics
-GET    /api/health                   Health check
-GET    /api/quality-report           Quality report
+GET    /api/health                   Health check (scheduler, telegram, agents)
 GET    /api/events                   SSE stream
+GET    /api/events/clients           SSE connected clients (debug)
 ```
 
 ### Export
 ```
 GET    /api/export/tasks             Export tasks as CSV/JSON
+GET    /api/export/evaluations       Export shepherd evaluations
+GET    /api/export/memory            Export memory patterns/warnings
+GET    /api/export/stats             Export comprehensive stats
 ```
 
 ---
@@ -274,8 +409,8 @@ GET    /api/export/tasks             Export tasks as CSV/JSON
 ### Unified Backend
 
 Single Bun process combining:
-- **Hono server** - HTTP API on port 8000
-- **Scheduler** - Async cycles for all system agents
+- **Hono server** - HTTP API on port 8765
+- **Scheduler** - Async cycles for all system agents (auto-starts with SCHEDULER_AUTO_START=true)
 - **Telegram Poller** - Long-polling for signals and messages
 
 ### Database Schema
@@ -289,6 +424,9 @@ tasks (
   spec_context,                   -- Orchestrator metadata
   depends_on,                     -- JSON array of task IDs
   sequenced,                      -- Has gone through Sequencer?
+  user_input,                     -- Original user request
+  enrich_with_opus,               -- Flag to enrich with Opus before dispatch
+  timeout_seconds,                -- Per-task timeout override
   result, error, parsed_result, error_details,
   retry_context,                  -- Previous error for retries
   cost_usd, duration_seconds,
@@ -297,17 +435,21 @@ tasks (
 )
 
 -- Network registry
-repos (id, path, name, description, language, mode, created_at, last_scanned_at)
+repos (id, path, name, description, language, mode,
+  weight,                         -- 0-100 allocation weight for discovery selection
+  created_at, last_scanned_at)
 
 -- Alignment signals
-signals (id, question, options, status, response, task_id, repo_path, created_at, responded_at)
+signals (id, question, options, status, response, task_id, repo_path,
+  telegram_message_id,            -- For Telegram reply matching
+  created_at, responded_at)
 
 -- Memory
 memory_patterns (id, content, source, task_id, repo_path, tags, created_at)
 memory_warnings (id, content, severity, task_id, repo_path, created_at)
 
 -- Agent stats
-agent_stats (agent_id, total_tasks, successful, failed, success_rate, total_cost, best_for, avoid_for)
+agent_stats (agent_id, total_tasks, successful, failed, success_rate, total_cost, best_for, avoid_for, updated_at)
 
 -- System agent runs
 system_agent_runs (id, agent_type, status, repo_path, context, output, error, started_at, completed_at)
@@ -315,8 +457,19 @@ system_agent_runs (id, agent_type, status, repo_path, context, output, error, st
 -- Shepherd evaluations
 shepherd_evaluations (id, repo_path, evaluated_at, tasks_evaluated, health, headline, concerns, wins, recommendation, global_patterns, global_warnings, branch_evaluations, raw_response)
 
--- Fruiting sessions
-fruiting_sessions (id, task_id, repo_path, agent, model, context_trace, full_prompt, created_at)
+-- Fruiting sessions (full agent execution traces)
+fruiting_sessions (id, task_id, repo_path, agent, model, context_trace, full_prompt,
+  session_log,                    -- JSON array of {chunk, stream, timestamp} - TTL 24h
+  created_at)
+
+-- Network devices (control and monitoring)
+devices (id, name, type, host, port, protocol,
+  status, last_seen, last_error, response_time_ms,
+  config,                         -- JSON device-specific settings
+  description, created_at, updated_at)
+-- Types: roku, yamaha, ssh, ollama, http, flipper
+-- Protocols: http, https, upnp, ssh, serial
+-- Statuses: online, offline, degraded, unknown
 ```
 
 ---
@@ -328,25 +481,47 @@ All cycles run **independently and non-blocking**. Database state coordinates.
 | Cycle | Interval | Purpose |
 |-------|----------|---------|
 | Dispatcher | 60 sec | Run sequenced tasks with resolved deps |
-| Discovery | 10 min | Scan repos, create tasks |
+| Discovery | 15 min | Scan repos, create tasks |
 | Sequencer | 15 min | Wire task dependencies |
-| Shepherd | On batch | Evaluate 5+ completed tasks per repo |
-| Armory | On batch | Skill/MCP inventory (10+ tasks network-wide) |
+| Shepherd | 15 min | Evaluate all unevaluated tasks per repo (5+ threshold, per-repo concurrency) |
+| Armory | Batch (10+ tasks) | Skill/MCP inventory |
+| Health Check | 60 sec | Device connectivity monitoring |
 | Blocked Check | 15 min | Detect stuck tasks |
-| Digest | 6 hours | Health summary |
-| Compaction | Weekly Mon 11am | Memory cleanup |
+| Digest | 6 hours | Health summary (internal, no agent dispatch) |
+| Compaction | Weekly Mon 11am + hourly TTL | Memory cleanup + session log TTL (internal, no agent dispatch) |
 
 ### Task Flow
 
 ```
 Discovery creates task (sequenced=false)
+    |                                                  + live SSE output (agent:output)
+Sequencer analyzes + wires deps (sequenced=true)     [15 min]
+    |                                                  + live SSE output + fruiting session
     |
-Sequencer analyzes + wires deps (sequenced=true)
+Dispatcher runs ONLY sequenced tasks                  [60s poll]
+    |                                                  + live SSE output (task:output)
+    |                                                  + fruiting session + session log
     |
-Dispatcher runs ONLY sequenced tasks
+On success: Telegram notification (rich format with agent/model/cost)
+On failure: Telegram notification + dependents cancelled
     |
-Shepherd evaluates (on completion batch)
+Shepherd evaluates ALL unevaluated per repo           [15 min, 5+ threshold]
+    |                                                  + per-repo concurrency (no global lock)
+    |                                                  + live SSE output + Telegram report
+    |
+Discovery sees failed/cancelled tasks and can recreate chains
+
+Active runs visible at GET /api/system-agents/active
+and in GET /api/scheduler/status (active_runs field)
 ```
+
+### Failure Handling
+
+When a task fails:
+1. Telegram notification sent with agent, duration, and error snippet
+2. All dependent tasks are recursively **cancelled** (not unblocked)
+3. Discovery sees failed + cancelled tasks and can recreate chains with different agent/model
+4. Per-task `timeout_seconds` can override agent defaults for large tasks
 
 ### Agent Timeouts
 
@@ -354,23 +529,34 @@ Shepherd evaluates (on completion batch)
 |-------|---------|-----------|
 | Claude | 30 min | 50 |
 | Codex | 30 min | 50 |
-| Gemini | 15 min | 30 |
-| Cline | 10 min | 30 |
-| Cursor | 10 min | 30 |
+| Gemini | 30 min | 30 |
+| Cline | 30 min | 30 |
+| Cursor | 30 min | 30 |
+
+Tasks can set `timeout_seconds` to override the agent default for large work.
 
 ---
 
 ## System Agents
+
+### Agent-Dispatched (run via CLI agents)
 
 | Agent | Model | Purpose | Can --wait? |
 |-------|-------|---------|-------------|
 | Discovery | opus/sonnet | Find work, create tasks | No |
 | Sequencer | sonnet | Wire dependencies | No |
 | Shepherd | opus | Evaluate yields, merge/reject | Yes (rare) |
-| Armory | opus | Skill/MCP inventory | No |
-| Genesis | opus | Create new repos | No |
-| Digest | haiku | Interval stats | No |
-| Compaction | opus | Memory cleanup | No |
+| Armory | sonnet | Skill/MCP inventory | No |
+| Genesis | opus | Create new repos (manual trigger only, no scheduler cycle) | No |
+
+### Internal Cycles (no agent dispatch)
+
+| Cycle | Purpose |
+|-------|---------|
+| Digest | Format and send interval stats via Telegram |
+| Compaction | Memory dedup + session log TTL cleanup (24h) |
+| Health Check | Device connectivity monitoring |
+| Blocked Check | Detect stuck/orphaned tasks |
 
 ### Prompt Locations
 
@@ -404,20 +590,34 @@ Dynamic context built per-agent:
 | State | Zustand + TanStack Query |
 | Styling | Tailwind v4 |
 | Validation | Zod |
+| Testing | bun:test |
 | Real-time | SSE |
 
 ---
 
 ## File Locations
 
+### Config Directory (Platform-Specific)
+
+| Platform | Config Directory |
+|----------|------------------|
+| Linux/NixOS | `~/.config/mycelium-v2/` |
+| macOS | `~/Library/Application Support/mycelium-v2/` |
+| Windows | `%APPDATA%\mycelium-v2\` |
+
+Override with `MYCELIUM_DATA_DIR` environment variable.
+
+### Directory Structure
+
 ```
-~/.config/mycelium-v2/
+<config_dir>/
 ├── mycelium.db         # SQLite database
 ├── scheduler.json      # Scheduler config
+├── agents.json         # Agent config overrides
 ├── genesis.json        # Genesis config
 ├── hooks.json          # Hooks config
-├── global_memory.json  # Network-wide learning
 ├── telegram.json       # Telegram config
+├── prompts/            # Custom prompt overrides
 └── logs/               # Runtime logs
 
 <repo>/.mycel/
@@ -429,7 +629,7 @@ Dynamic context built per-agent:
         └── layers/
 
 ~/.claude/skills/       # Skill libraries
-~/.claude/mcp.json      # MCP server config
+~/.claude/mcp.json      # MCP server config (auto-discovered from agent CLIs)
 ```
 
 ---

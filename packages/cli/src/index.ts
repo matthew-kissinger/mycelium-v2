@@ -17,9 +17,10 @@ import { registerSequenceCommands } from './commands/sequence.ts'
 import { registerGenesisCommands } from './commands/genesis.ts'
 import { registerSessionCommands } from './commands/sessions.ts'
 import { registerVersionCommand } from './commands/version.ts'
+import { registerDeviceCommands } from './commands/devices.ts'
 
 const VERSION = '0.1.0'
-const DEFAULT_API_URL = 'http://localhost:8000'
+const DEFAULT_API_URL = 'http://localhost:8765'
 
 const program = new Command()
 
@@ -49,6 +50,7 @@ registerSequenceCommands(program) // sequence [repo_path] [--dry-run]
 registerGenesisCommands(program)  // genesis, genesis create/auto/config
 registerSessionCommands(program)  // sessions, session <id>, trace <task_id>
 registerVersionCommand(program)   // version [--deps] [--outdated]
+registerDeviceCommands(program)   // devices, device add/remove/status/ping/cmd, tv, vol
 
 // Parse and execute
 program.parse()

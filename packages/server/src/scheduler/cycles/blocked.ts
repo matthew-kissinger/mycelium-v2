@@ -3,18 +3,53 @@
  *
  * Responsibilities:
  * - Find tasks running longer than stale threshold (35 min)
+ * - Detect process-dead orphans (no live process for running task)
  * - Mark as needs_attention after 3 hours
  * - Auto-cancel as orphaned after 4 hours
+ * - Cancel pending tasks whose dependencies have failed/cancelled
+ *
+ * Process tracking: The dispatcher registers processes in the in-memory
+ * registry via dispatch(). After server restart, the registry is empty,
+ * so we fall back to the PID stored in spec_context.
  */
 
 import { SchedulerConfig } from '@mycelium/shared'
 import * as queries from '../../db/queries'
 import { broadcast } from '../../sse'
+import { getRunningProcesses } from '../../agents/registry'
+import { getTelegramService } from '../../telegram'
 
 // Thresholds in minutes
 const STALE_THRESHOLD_MINUTES = 35 // Higher than max agent timeout (30 min)
 const NEEDS_ATTENTION_HOURS = 3
 const ORPHAN_THRESHOLD_HOURS = 4
+
+/**
+ * Check if a process with the given PID is still alive.
+ * Uses signal 0 which checks existence without actually sending a signal.
+ */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Extract stored PID from task's spec_context field.
+ * Returns null if not stored or invalid.
+ */
+function getStoredPid(task: { spec_context: string | null }): number | null {
+  if (!task.spec_context) return null
+  try {
+    const ctx = JSON.parse(task.spec_context)
+    return typeof ctx.pid === 'number' ? ctx.pid : null
+  } catch {
+    return null
+  }
+}
 
 /**
  * Run the Blocked Check cycle.
@@ -35,12 +70,60 @@ export async function runBlockedCheckCycle(config: SchedulerConfig): Promise<voi
   let needsAttentionCount = 0
   let orphanedCount = 0
 
+  // Get tracked processes to detect orphans (running in DB but no process)
+  const trackedProcesses = getRunningProcesses()
+
   for (const task of runningTasks) {
     if (!task.started_at) continue
 
     const startedAt = new Date(task.started_at).getTime()
     const runningMinutes = (now - startedAt) / (1000 * 60)
     const runningHours = runningMinutes / 60
+
+    // Check for process-dead orphans: task is "running" but no tracked process
+    // Only check after 2 minutes to allow for startup time
+    if (runningMinutes >= 2 && !trackedProcesses.has(task.id)) {
+      // Not in registry - check stored PID as post-restart fallback.
+      // After server restart the registry is empty, but the agent process
+      // may still be running with the PID we stored in spec_context.
+      const storedPid = getStoredPid(task)
+      if (storedPid && isProcessAlive(storedPid)) {
+        console.log(`[BlockedCheck] Task ${task.id.slice(0, 8)} not in registry but PID ${storedPid} is alive (${runningMinutes.toFixed(0)}min) - skipping`)
+        if (runningMinutes >= STALE_THRESHOLD_MINUTES) {
+          staleCount++
+        }
+        continue
+      }
+
+      console.log(`[BlockedCheck] Task ${task.id.slice(0, 8)} has no tracked process after ${runningMinutes.toFixed(0)}min - marking as failed`)
+
+      const errorMsg = `Orphaned - agent process exited without reporting result (ran ${runningMinutes.toFixed(0)}min)`
+      await queries.updateTask(task.id, {
+        status: 'failed',
+        error: errorMsg,
+        completed_at: new Date().toISOString(),
+        duration_seconds: (now - startedAt) / 1000,
+      })
+
+      broadcast('task:cancelled', {
+        type: 'task:cancelled',
+        task_id: task.id,
+        reason: 'process_dead',
+        timestamp: new Date().toISOString(),
+      })
+
+      // Notify via Telegram
+      const telegram = getTelegramService()
+      if (telegram?.isConnected()) {
+        const repoName = task.repo_path?.split('/').pop() || '?'
+        telegram.sendMessage(
+          `<b>Orphaned Task</b>\n<code>${task.id.slice(0, 8)}</code> [${task.agent}/${task.model}]\n${repoName}: ${task.title}\n\n${errorMsg}`
+        ).catch(() => {})
+      }
+
+      orphanedCount++
+      continue
+    }
 
     // Check for orphaned tasks (4+ hours)
     if (runningHours >= (config.orphan_cancel_timeout_sec / 3600)) {
@@ -88,5 +171,117 @@ export async function runBlockedCheckCycle(config: SchedulerConfig): Promise<voi
     }
   }
 
-  console.log(`[BlockedCheck] Checked ${runningTasks.length} tasks: ${staleCount} stale, ${needsAttentionCount} need attention, ${orphanedCount} orphaned`)
+  console.log(`[BlockedCheck] Checked ${runningTasks.length} running tasks: ${staleCount} stale, ${needsAttentionCount} need attention, ${orphanedCount} orphaned`)
+
+  // Second pass: cancel pending tasks whose dependencies have failed/cancelled
+  const cancelledFromDeps = await cancelTasksWithFailedDeps()
+  if (cancelledFromDeps > 0) {
+    console.log(`[BlockedCheck] Cancelled ${cancelledFromDeps} tasks with failed/cancelled dependencies`)
+  }
 }
+
+/**
+ * Cancel pending tasks whose dependencies have failed or been cancelled.
+ * This catches tasks that were missed by the dispatcher's cancelDependents
+ * (e.g. tasks created after a dependency failed, or deps cancelled by other means).
+ * Returns the total number of tasks cancelled (including recursive dependents).
+ */
+async function cancelTasksWithFailedDeps(): Promise<number> {
+  let cancelledCount = 0
+
+  try {
+    const pendingTasks = await queries.getTasks({ status: 'pending', limit: 200 })
+    if (pendingTasks.length === 0) return 0
+
+    for (const task of pendingTasks) {
+      const deps = JSON.parse(task.depends_on ?? '[]') as string[]
+      if (deps.length === 0) continue
+
+      // Check each dependency's status
+      for (const depId of deps) {
+        let depTask: { status: string; title: string } | null = null
+        try {
+          depTask = await queries.getTask(depId)
+        } catch {
+          continue
+        }
+
+        if (!depTask) continue
+
+        if (depTask.status === 'failed' || depTask.status === 'cancelled') {
+          const reason = `Cancelled: dependency "${depTask.title}" (${depId.slice(0, 8)}) is ${depTask.status}`
+          await queries.updateTask(task.id, {
+            status: 'cancelled',
+            error: reason,
+            completed_at: new Date().toISOString(),
+          })
+
+          console.log(`[BlockedCheck] Cancelled ${task.id.slice(0, 8)} - dep ${depId.slice(0, 8)} ${depTask.status}`)
+
+          broadcast('task:failed', {
+            type: 'task:failed',
+            task_id: task.id,
+            error: `Dependency ${depTask.status}: ${depTask.title}`,
+            timestamp: new Date().toISOString(),
+          })
+
+          // Notify via Telegram
+          const telegram = getTelegramService()
+          if (telegram?.isConnected()) {
+            const repoName = task.repo_path?.split('/').pop() || '?'
+            telegram.sendMessage(
+              `<b>Dep Cancelled</b>\n<code>${task.id.slice(0, 8)}</code> [${task.agent}/${task.model}]\n${repoName}: ${task.title}\n\nDep <code>${depId.slice(0, 8)}</code> ${depTask.status}`
+            ).catch(() => {})
+          }
+
+          cancelledCount++
+
+          // Recursively cancel tasks that depend on this now-cancelled task
+          cancelledCount += await cancelDependentsOfTask(task.id, task.title)
+          break // No need to check other deps, task is already cancelled
+        }
+      }
+    }
+  } catch (error) {
+    console.error('[BlockedCheck] Error checking failed dependencies:', error)
+  }
+
+  return cancelledCount
+}
+
+/**
+ * Recursively cancel tasks that depend on a cancelled task.
+ * Similar to dispatcher's cancelDependents but used by blocked check.
+ */
+async function cancelDependentsOfTask(cancelledTaskId: string, cancelledTitle: string): Promise<number> {
+  let count = 0
+  try {
+    const pending = await queries.getTasks({ status: 'pending', limit: 200 })
+    for (const task of pending) {
+      const deps = JSON.parse(task.depends_on ?? '[]') as string[]
+      if (deps.includes(cancelledTaskId)) {
+        await queries.updateTask(task.id, {
+          status: 'cancelled',
+          error: `Cancelled: dependency "${cancelledTitle}" (${cancelledTaskId.slice(0, 8)}) cancelled`,
+          completed_at: new Date().toISOString(),
+        })
+
+        console.log(`[BlockedCheck] Cascade cancelled ${task.id.slice(0, 8)} (dep ${cancelledTaskId.slice(0, 8)} cancelled)`)
+
+        broadcast('task:failed', {
+          type: 'task:failed',
+          task_id: task.id,
+          error: `Dependency cancelled: ${cancelledTitle}`,
+          timestamp: new Date().toISOString(),
+        })
+
+        count++
+        count += await cancelDependentsOfTask(task.id, task.title)
+      }
+    }
+  } catch (error) {
+    console.error('[BlockedCheck] Error cascading cancellations:', error)
+  }
+  return count
+}
+

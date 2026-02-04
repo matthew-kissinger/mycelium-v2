@@ -217,25 +217,20 @@ export async function killAllProcesses(): Promise<number> {
  *
  * Cline spawns cline-host and cline-core as background daemons (parent PID 1).
  * Simply killing the cline CLI process doesn't kill these daemons.
- * We use pkill to find and kill them by matching the workspace path.
+ * We use the platform module for cross-platform process killing.
  */
 async function killClineZombies(workspace: string): Promise<void> {
   console.log(`[REGISTRY] Killing Cline zombies for workspace: ${workspace}`)
 
   try {
+    // Import platform utilities dynamically to avoid circular deps
+    const { killProcessByPattern } = await import('../platform')
+
     // Kill cline-host processes for this workspace
-    const hostProc = Bun.spawn(['pkill', '-9', '-f', `cline-host.*--workspace.*${workspace}`], {
-      stdout: 'ignore',
-      stderr: 'ignore',
-    })
-    await hostProc.exited
+    await killProcessByPattern(`cline-host.*${workspace}`)
 
     // Kill cline-core processes (they are paired with host)
-    const coreProc = Bun.spawn(['pkill', '-9', '-f', `cline-core`], {
-      stdout: 'ignore',
-      stderr: 'ignore',
-    })
-    await coreProc.exited
+    await killProcessByPattern('cline-core')
 
     console.log(`[REGISTRY] Killed Cline daemons for workspace: ${workspace}`)
   } catch (error) {
@@ -250,21 +245,21 @@ async function killAllClineZombies(): Promise<void> {
   console.log('[REGISTRY] Killing all Cline zombie processes...')
 
   try {
+    const { killProcessByPattern } = await import('../platform')
+
     // Kill all cline-host processes
-    const hostProc = Bun.spawn(['pkill', '-9', '-f', 'cline-host'], {
-      stdout: 'ignore',
-      stderr: 'ignore',
-    })
-    await Promise.race([hostProc.exited, timeout(5000)])
+    await Promise.race([
+      killProcessByPattern('cline-host'),
+      timeout(5000),
+    ])
 
     // Kill all cline-core processes
-    const coreProc = Bun.spawn(['pkill', '-9', '-f', 'cline-core'], {
-      stdout: 'ignore',
-      stderr: 'ignore',
-    })
-    await Promise.race([coreProc.exited, timeout(5000)])
+    await Promise.race([
+      killProcessByPattern('cline-core'),
+      timeout(5000),
+    ])
   } catch (error) {
-    // Ignore errors - pkill returns non-zero if no processes matched
+    // Ignore errors - no processes may match
   }
 }
 

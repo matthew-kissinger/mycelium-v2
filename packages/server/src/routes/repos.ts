@@ -10,6 +10,69 @@ import { broadcast } from '../sse'
 
 const app = new Hono()
 
+// Browse directories - for folder picker UI
+app.get('/browse', async (c) => {
+  const path = c.req.query('path') || process.env.HOME || '/home'
+  const resolvedPath = resolve(path)
+
+  try {
+    if (!existsSync(resolvedPath)) {
+      return c.json({ error: 'Path does not exist', path: resolvedPath }, 404)
+    }
+
+    const stat = statSync(resolvedPath)
+    if (!stat.isDirectory()) {
+      return c.json({ error: 'Path is not a directory', path: resolvedPath }, 400)
+    }
+
+    const entries = readdirSync(resolvedPath, { withFileTypes: true })
+    const directories: Array<{
+      name: string
+      path: string
+      isGitRepo: boolean
+      isHidden: boolean
+    }> = []
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const fullPath = join(resolvedPath, entry.name)
+        const isGitRepo = existsSync(join(fullPath, '.git'))
+        const isHidden = entry.name.startsWith('.')
+
+        directories.push({
+          name: entry.name,
+          path: fullPath,
+          isGitRepo,
+          isHidden,
+        })
+      }
+    }
+
+    // Sort: non-hidden first, then alphabetically
+    directories.sort((a, b) => {
+      if (a.isHidden !== b.isHidden) return a.isHidden ? 1 : -1
+      return a.name.localeCompare(b.name)
+    })
+
+    // Get parent directory
+    const parentPath = resolve(resolvedPath, '..')
+    const hasParent = parentPath !== resolvedPath
+
+    return c.json({
+      current: resolvedPath,
+      parent: hasParent ? parentPath : null,
+      directories,
+      isGitRepo: existsSync(join(resolvedPath, '.git')),
+    })
+  } catch (error) {
+    return c.json({
+      error: 'Failed to browse directory',
+      message: (error as Error).message,
+      path: resolvedPath
+    }, 500)
+  }
+})
+
 // List repos
 app.get('/', async (c) => {
   const rows = await db.select().from(schema.repos)
@@ -212,6 +275,7 @@ app.post('/', zValidator('json', RepoCreateRequest), async (c) => {
     description,
     language,
     mode: data.mode ?? 'align',
+    weight: data.weight ?? 50,
     created_at: now,
   }
 
@@ -235,6 +299,7 @@ app.patch('/:id', zValidator('json', RepoUpdateRequest), async (c) => {
   const updates: Record<string, unknown> = {}
   if (data.description !== undefined) updates.description = data.description
   if (data.mode !== undefined) updates.mode = data.mode
+  if (data.weight !== undefined) updates.weight = data.weight
 
   if (Object.keys(updates).length === 0) {
     return c.json(existing[0])

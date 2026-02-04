@@ -40,6 +40,26 @@
 | 8A | COMPLETE | claude/opus | End-to-end testing |
 | 8B | COMPLETE | claude/opus | Telegram integration |
 | 8C | COMPLETE | claude/opus | Build and publishing setup |
+| Config-1 | COMPLETE | claude/opus | Scheduler Configuration UI |
+| Config-2 | COMPLETE | claude/opus | Agent Configuration |
+| Config-3 | COMPLETE | claude/opus | Prompt Management |
+| Config-4 | COMPLETE | claude/opus | Alignment/Signals UI |
+| Config-5 | COMPLETE | claude/opus | Memory Management UI |
+| Config-6 | COMPLETE | claude/opus | Live Task Logs |
+| Config-7 | COMPLETE | claude/opus | Task Pool UI Enhancements |
+| Feature-1 | COMPLETE | claude/opus | Repos Management with Weighted Discovery |
+| Feature-2 | COMPLETE | claude/opus | Armory Cycle & Inventory UI |
+| Feature-3 | COMPLETE | claude/opus | Device Management (DB, API, CLI, health check cycle) |
+| Feature-4 | COMPLETE | claude/opus | Platform Abstraction Layer (cross-platform paths, process mgmt) |
+| Feature-5 | COMPLETE | claude/opus | NixOS Integration (flake.nix, home-manager module) |
+| Fix-1 | COMPLETE | claude/opus | Shepherd batch eval fix (ASC ordering, evaluate all in one pass) |
+| Fix-2 | COMPLETE | claude/opus | Fruiting session recording (dispatcher + all system agents) |
+| Fix-3 | COMPLETE | claude/opus | Telegram notifications (dispatcher rich formatters, shepherd, digest) |
+| Fix-4 | COMPLETE | claude/opus | Session log capture (full stdout/stderr, 24h TTL, all 5 agents) |
+| Fix-5 | COMPLETE | claude/opus | Live system agent tracking (SSE output, active runs, per-repo shepherd) |
+| Fix-6 | COMPLETE | claude/opus | Process registry wiring (dispatcher passes taskId to dispatch, removed pgrep heuristic) |
+| Fix-7 | COMPLETE | claude/opus | Blocked check cancels pending tasks with failed/cancelled dependencies |
+| Infra-1 | COMPLETE | claude/opus | Dev script commands (build-restart, scheduler, check) + test infrastructure |
 
 ---
 
@@ -761,6 +781,58 @@
 - Client uses vite build with tsc -b for type checking
 - CI workflow runs on push/PR to master branch
 
+### Configuration Phase 7: Task Pool UI Enhancements
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Started**: 2026-02-01T04:30:00Z
+**Completed**: 2026-02-01T05:00:00Z
+**Validation**:
+- TypeScript compiles without errors (bun run build passes)
+- TaskPoolPanel displays stats grid with clickable status filters
+- List view shows all tasks with status, repo, agent, time, cost indicators
+- Task detail view shows full metadata, dependencies, prompt, result/error
+- Run, Cancel, Clone, Delete, Retry, View Logs actions work correctly
+- Dependencies tab shows task graph with "Needs X tasks" / "Blocks X tasks"
+- Refresh button updates both list and graph views
+- Tested with Playwright browser automation
+
+**Files Modified**:
+- `packages/client/src/stores/system.ts` - Added Task, TaskFilters, TaskGraph types; task management actions
+- `packages/client/src/components/Panel.tsx` - Expanded TaskPoolPanel with full task list, detail view, actions
+
+**Features Implemented**:
+1. **Stats Grid**: Clickable status buttons (Pending/Running/Done/Failed) that filter the list
+2. **Tabs**: Switch between List view and Dependencies view
+3. **Task List View**:
+   - Displays all tasks with title, repo, status, agent, time, cost
+   - Shows dependency count indicator
+   - Click to open task detail view
+4. **Task Detail View**:
+   - Full task information (agent, model, cost, duration, repo, timestamps)
+   - Dependencies list with short IDs
+   - Prompt content display
+   - Result/error display with expandable output
+   - Action buttons based on status:
+     - Pending: Run Task
+     - Running: Cancel, View Logs
+     - Done/Failed/Cancelled: Clone, Delete, Retry (for failed)
+5. **Dependencies View**:
+   - Shows tasks with dependencies
+   - Indicates "Needs X tasks" and "Blocks X tasks"
+   - Shows sequencing status
+
+**Store Actions Added**:
+- `fetchTasks(filters?)` - List tasks with status/repo/agent filters
+- `setTaskFilters(filters)` - Update filter state
+- `fetchTask(id)` - Get single task details
+- `runTask(id, options?)` - Execute a pending task
+- `cancelTask(id)` - Cancel a running task
+- `deleteTask(id)` - Remove a task
+- `cloneTask(id)` - Duplicate a task
+- `retryTask(id)` - Clone and run a failed task
+- `fetchTaskGraph(filters?)` - Get dependency graph data
+- `clearSelectedTask()` - Clear selected task state
+
 ### Phase 8B: Telegram Integration
 **Status**: COMPLETE
 **Agent**: claude/opus
@@ -800,6 +872,167 @@
 **Configuration**:
 - Environment variables: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 - Config file: ~/.config/mycelium-v2/telegram.json
+
+### Fix-1: Shepherd Batch Evaluation Fix
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-03
+**Validation**: Build passes, shepherd evaluates all unevaluated tasks in one pass
+
+**Files Modified**:
+- `packages/server/src/db/queries.ts` - Changed `getUnevaluatedTasks` ordering from DESC to ASC (oldest first), added `asc` import
+- `packages/server/src/scheduler/cycles/shepherd.ts` - Two-phase query: check threshold with batchSize, then fetch up to 200 when threshold met
+
+**Notes**:
+- Previously limited to 5 tasks per cycle (batchSize), requiring 9 cycles to clear 41 tasks
+- Now evaluates ALL unevaluated tasks in one Shepherd agent call once threshold is met
+- ASC ordering ensures oldest tasks are processed first instead of newest
+
+### Fix-2: Fruiting Session Recording
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-03
+**Validation**: Build passes, fruiting sessions created for tasks and system agent runs
+
+**Files Modified**:
+- `packages/server/src/db/queries.ts` - Added `createFruitingSession()`, `getFruitingSessionsByTask()`, `FruitingSessionCreateInput` interface
+- `packages/server/src/scheduler/cycles/dispatcher.ts` - Records fruiting session with context trace (prompt layer sizes) after task dispatch
+- `packages/server/src/scheduler/cycles/discovery.ts` - Records fruiting session after discovery agent dispatch
+- `packages/server/src/scheduler/cycles/sequencer.ts` - Records fruiting session after sequencer agent dispatch
+- `packages/server/src/scheduler/cycles/shepherd.ts` - Records fruiting session after shepherd agent dispatch
+- `packages/server/src/scheduler/cycles/armory.ts` - Records fruiting session after armory agent dispatch
+- `packages/server/src/routes/tasks.ts` - Updated `GET /:id/sessions` to return actual fruiting_sessions from DB
+
+**Notes**:
+- Context trace includes prompt layer breakdown (basePrompt, mycelContext, agentsSection, etc.) with sizes
+- Sessions route now returns parsed fruiting_sessions with session_log and context_trace JSON
+
+### Fix-3: Telegram Notification Integration
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-03
+**Validation**: Build passes, rich notifications sent for task completion/failure, shepherd reports, digest summaries
+
+**Files Modified**:
+- `packages/server/src/scheduler/cycles/dispatcher.ts` - Replaced inline `notifyTaskComplete`/`notifyTaskFailed` with `formatTaskCompleted`/`formatTaskFailed` from telegram/messages.ts; removed duplicate `escapeHtml`, `formatDuration`, `repoName` helpers
+- `packages/server/src/scheduler/cycles/shepherd.ts` - Added Telegram notification after evaluation using `formatShepherdReport`
+- `packages/server/src/scheduler/cycles/digest.ts` - Replaced TODO/console.log with actual Telegram send using `formatDigestSummary`
+- `packages/server/src/telegram/messages.ts` - Added agent/model line to `formatTaskCompleted` and `formatTaskFailed`
+
+**Notes**:
+- Dispatcher now uses rich formatters that include task ID, agent/model, duration, cost
+- Shepherd sends evaluation reports with health, headline, concerns, wins, merge/reject/defer counts
+- Digest sends periodic summaries with task counts, costs, active repos, pending signals
+
+### Fix-4: Session Log Capture
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-03
+**Validation**: Build passes, tested with all 5 agent types (claude, codex, gemini, cline, cursor), stderr captured
+
+**Files Created**:
+- `packages/server/drizzle/0002_session_logs.sql` - Migration adding session_log column
+
+**Files Modified**:
+- `packages/server/src/db/schema.ts` - Added `session_log` text column to `fruiting_sessions` table
+- `packages/server/src/db/queries.ts` - Added `cleanExpiredSessionLogs()` for 24h TTL cleanup; `createFruitingSession` accepts `session_log` field
+- `packages/server/src/logs/buffer.ts` - Added `getTaskLogEntries()` to expose raw log entries for DB persistence
+- `packages/server/src/logs/index.ts` - Re-exported `getTaskLogEntries`
+- `packages/server/src/scheduler/cycles/dispatcher.ts` - Grabs log buffer entries and persists to fruiting session on task completion (success or failure)
+- `packages/server/src/scheduler/cycles/discovery.ts` - Added `onOutput` session log collection and fruiting session recording
+- `packages/server/src/scheduler/cycles/sequencer.ts` - Added `onOutput` session log collection and fruiting session recording
+- `packages/server/src/scheduler/cycles/shepherd.ts` - Added `onOutput` session log collection and fruiting session recording
+- `packages/server/src/scheduler/cycles/armory.ts` - Added session log collection to existing `onOutput` and fruiting session recording
+- `packages/server/src/scheduler/cycles/compaction.ts` - Added `cleanExpiredSessionLogs()` call before weekly gate (runs every compaction interval, hourly)
+
+**Notes**:
+- Session logs stored as JSON array of `{chunk, stream, timestamp}` entries in `session_log` column
+- No max size limit - full agent stdout and stderr captured
+- 24h TTL: `cleanExpiredSessionLogs()` nullifies session_log data older than 24h but keeps the session record
+- TTL cleanup runs every compaction cycle (hourly), independent of the weekly memory compaction gate
+- Dispatch `onOutput` callback captures both stdout and stderr via stream parameter
+- All 5 agent types use the same dispatch path, so all produce session logs
+
+### Fix-5: Live System Agent Tracking
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-04
+**Validation**: Build passes, active runs tracked during shepherd execution, SSE output events wired
+
+**Files Created**:
+- `packages/server/src/scheduler/active-runs.ts` - Active run registry (separated to avoid circular imports)
+
+**Files Modified**:
+- `packages/shared/src/schemas/events.ts` - Added `agent:output` SSE event type and `AgentOutputEvent` schema
+- `packages/shared/src/schemas/scheduler.ts` - Added `ActiveRunInfo` schema, `active_runs` field to `SchedulerStatus`
+- `packages/server/src/scheduler/index.ts` - Re-exports active run functions, per-repo shepherd concurrency in `triggerShepherdForRepo`
+- `packages/server/src/scheduler/cycles/shepherd.ts` - Register/unregister active runs, broadcast `agent:output` SSE, skip repos already being evaluated
+- `packages/server/src/scheduler/cycles/discovery.ts` - Register/unregister active runs, broadcast `agent:output` SSE
+- `packages/server/src/scheduler/cycles/sequencer.ts` - Register/unregister active runs, broadcast `agent:output` SSE
+- `packages/server/src/scheduler/cycles/armory.ts` - Register/unregister active runs, broadcast `agent:output` SSE
+- `packages/server/src/routes/system-agents.ts` - Added `GET /api/system-agents/active` endpoint
+
+**Features**:
+1. **SSE output streaming for system agents**: All 4 agent-dispatched cycles (shepherd, discovery, sequencer, armory) broadcast `agent:output` events with run_id, agent_type, chunk, and stream. Clients subscribe to `agent:*` or `agent:<run_id>`.
+2. **Active run tracking**: In-memory registry tracks which system agents are currently running, with run_id, agent_type, repo_path, and started_at. Visible via `GET /api/system-agents/active` and `GET /api/scheduler/status` (active_runs field). Runs are registered on start and unregistered in `finally` blocks.
+3. **Per-repo shepherd concurrency**: Shepherd runs no longer use the global cycle lock. Multiple repos can be evaluated simultaneously. Same repo won't run twice (checked via `isShepherdRunningForRepo`). Triggered shepherds skip repos already being evaluated.
+
+### Fix-6: Process Registry Wiring
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-04
+**Validation**: Build passes, dispatched tasks now register in in-memory process registry
+
+**Files Modified**:
+- `packages/server/src/scheduler/cycles/dispatcher.ts` - Added `taskId` field to `dispatch()` call
+- `packages/server/src/scheduler/cycles/blocked.ts` - Removed `isAgentProcessRunning` pgrep/proc heuristic (50 lines), updated header comment
+
+**Root Cause**:
+- `dispatch()` already had registry wiring (`registerProcess`/`unregisterProcess` calls gated by `if (taskId)`)
+- The dispatcher never passed `taskId` in the options, so the registry was always empty for task agents
+- Blocked check fell back to pgrep heuristic which couldn't distinguish between tasks in the same repo
+- One missing field caused the entire process tracking system to be dead code
+
+**Notes**:
+- Registry is now authoritative for process tracking
+- Stored PID in `spec_context` remains as post-restart fallback (registry is in-memory, lost on restart)
+- pgrep/proc heuristic removed entirely - was unreliable on NixOS and couldn't distinguish tasks per repo
+
+### Fix-7: Blocked Check Failed Dependency Cancellation
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-04
+**Validation**: Build passes, blocked check cancels tasks with failed/cancelled dependencies
+
+**Files Modified**:
+- `packages/server/src/scheduler/cycles/blocked.ts` - Added `cancelTasksWithFailedDeps()` and `cancelDependentsOfTask()` functions
+
+**Notes**:
+- Second pass after running-task scan queries pending tasks with `depends_on`
+- For each dependency, checks if it's failed or cancelled via `getTask(depId)`
+- Cancels task with descriptive error, broadcasts SSE event, sends Telegram notification
+- `cancelDependentsOfTask()` recursively cascades cancellations downstream
+- Catches tasks missed by dispatcher's `cancelDependents` (e.g. tasks created after dep failed)
+
+### Infra-1: Dev Script + Test Infrastructure
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-04
+**Validation**: `bun test` passes 32/32 tests, build clean
+
+**Files Modified**:
+- `scripts/dev.ts` - Added `build-restart`, `scheduler start|stop`, `check` commands
+- `package.json` - Added `dev:manage` and `test` scripts
+
+**Files Created**:
+- `packages/server/src/agents/fallback.test.ts` - 32 unit tests for fallback module (bun:test)
+
+**Notes**:
+- `build-restart`: builds all packages, restarts servers only if build succeeds
+- `scheduler start|stop`: hits POST /api/scheduler/start or /stop
+- `check`: fetches /api/stats + /api/scheduler/status in parallel, prints tasks by status, cycle timings, active agents
+- Test coverage: getFallbackModel, shouldRetry, buildRetryContext, parseRetryContext, resolveModel
+- All pure functions, no DB/IO mocking needed
 
 ---
 
@@ -897,7 +1130,7 @@ Before marking a phase complete:
 
 ## Open Questions
 
-1. **Log aggregation**: Should we copy agent logs to central location or reference in-place?
+1. ~~**Log aggregation**: Should we copy agent logs to central location or reference in-place?~~ **RESOLVED**: Session logs stored in DB (fruiting_sessions.session_log) with 24h TTL
 2. **Streaming fallback**: For non-streaming harnesses, poll interval?
 3. **Cost normalization**: Different harnesses report cost differently - normalize?
 4. **Model mapping**: Map generic model names to harness-specific?
@@ -942,4 +1175,21 @@ Before marking a phase complete:
 | 2026-01-31 | 8C | claude/opus | Build and publishing setup (package.json, tsconfig, CI workflow) |
 | 2026-01-31 | 8B | claude/opus | Telegram integration (service, polling, messages, routes) |
 | 2026-02-01 | 8A | claude/opus | End-to-end testing (7 workflows, API fixes, type corrections) |
+| 2026-02-01 | Config-1 | claude/opus | Scheduler Configuration UI (expand SchedulerPanel, intervals, toggles, save) |
+| 2026-02-01 | Config-2 | claude/opus | Agent Configuration (agents.json, GET/PATCH routes, AgentPanel edit mode) |
+| 2026-02-01 | Config-3 | claude/opus | Prompt Management (prompts.ts config, API routes, PromptsPanel with editor) |
+| 2026-02-01 | Config-4 | claude/opus | Alignment/Signals UI (AlignmentPanel filters, response buttons, delete) |
+| 2026-02-01 | Config-5 | claude/opus | Memory Management UI (MemoryPanel with delete endpoints, pattern/warning lists) |
+| 2026-02-01 | Config-6 | claude/opus | Live Task Logs (in-memory buffer, task:output SSE, LiveLogViewer component) |
+| 2026-02-01 | Config-7 | claude/opus | Task Pool UI (full task list, filters, detail view, actions, dependencies) |
+| 2026-02-01 | Feature-1 | claude/opus | Repos Management with weighted discovery selection |
+| 2026-02-01 | Feature-2 | claude/opus | Armory Cycle, Inventory API, and UI panels |
+| 2026-02-03 | Fix-1 | claude/opus | Shepherd batch eval: ASC ordering, evaluate all unevaluated in one pass |
+| 2026-02-03 | Fix-2 | claude/opus | Fruiting sessions: query functions + recording in dispatcher and all 4 system agent cycles |
+| 2026-02-03 | Fix-3 | claude/opus | Telegram: dispatcher uses rich formatters, shepherd sends reports, digest sends summaries |
+| 2026-02-03 | Fix-4 | claude/opus | Session logs: full agent output capture in DB, 24h TTL, hourly cleanup in compaction |
+| 2026-02-04 | Fix-5 | claude/opus | Live agent tracking: SSE output streaming, active runs API, per-repo shepherd concurrency |
+| 2026-02-04 | Fix-6 | claude/opus | Process registry: dispatcher passes taskId to dispatch(), removed pgrep/proc heuristic from blocked check |
+| 2026-02-04 | Fix-7 | claude/opus | Blocked check: cancel pending tasks whose dependencies are failed/cancelled, recursive cascade |
+| 2026-02-04 | Infra-1 | claude/opus | Dev script: build-restart, scheduler start/stop, check commands; bun:test infrastructure + fallback module tests |
 

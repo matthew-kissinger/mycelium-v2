@@ -167,6 +167,7 @@ export const RepoCreateRequest = z.object({
   path: z.string().min(1),
   description: z.string().optional(),
   mode: RepoMode.default('align'),
+  weight: z.number().int().min(0).max(100).default(50),
   auto_create: z.boolean().default(false),
 })
 export type RepoCreateRequest = z.infer<typeof RepoCreateRequest>
@@ -175,6 +176,7 @@ export type RepoCreateRequest = z.infer<typeof RepoCreateRequest>
 export const RepoUpdateRequest = z.object({
   description: z.string().optional(),
   mode: RepoMode.optional(),
+  weight: z.number().int().min(0).max(100).optional(),
 })
 export type RepoUpdateRequest = z.infer<typeof RepoUpdateRequest>
 

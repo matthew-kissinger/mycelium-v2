@@ -15,6 +15,7 @@ import {
 import { dispatch, killProcess, clearDependencies } from '../agents'
 import { broadcast } from '../sse'
 import * as queries from '../db/queries'
+import { startTaskLog, appendLog, completeTaskLog, getTaskLogs, getLogBufferStats } from '../logs'
 
 const app = new Hono()
 
@@ -167,6 +168,57 @@ app.get('/:id/context', async (c) => {
   context.global_patterns = globalPatterns.map(queries.parsePattern)
 
   return c.json(context)
+})
+
+// =============================================================================
+// GET /api/tasks/:id/logs - Get task output logs
+// =============================================================================
+app.get('/:id/logs', async (c) => {
+  const id = c.req.param('id')
+  const since = c.req.query('since')
+  const limit = c.req.query('limit') ? parseInt(c.req.query('limit')!) : undefined
+
+  // First check if task exists
+  const task = await queries.getTask(id)
+  if (!task) {
+    return c.json({ error: 'Task not found' }, 404)
+  }
+
+  // Get logs from buffer
+  const logs = getTaskLogs(id, since ?? undefined, limit)
+
+  // If no logs in buffer but task has result/error, provide that
+  if (!logs.found && (task.result || task.error)) {
+    return c.json({
+      task_id: id,
+      entries: [{
+        chunk: task.result || task.error || '',
+        timestamp: task.completed_at || task.started_at || task.created_at,
+        stream: task.error ? 'stderr' : 'stdout',
+      }],
+      started_at: task.started_at,
+      completed_at: task.completed_at,
+      status: task.status,
+      from_result: true,
+    })
+  }
+
+  return c.json({
+    task_id: id,
+    entries: logs.entries,
+    started_at: logs.started_at || task.started_at,
+    completed_at: logs.completed_at || task.completed_at,
+    status: task.status,
+    from_result: false,
+  })
+})
+
+// =============================================================================
+// GET /api/tasks/logs/stats - Get log buffer statistics
+// =============================================================================
+app.get('/logs/stats', async (c) => {
+  const stats = getLogBufferStats()
+  return c.json(stats)
 })
 
 // =============================================================================
@@ -419,6 +471,9 @@ async function executeTask(task: {
   const controller = new AbortController()
   runningTasks.set(task.id, controller)
 
+  // Start logging for this task
+  startTaskLog(task.id)
+
   try {
     const result = await dispatch({
       agent: task.agent as any,
@@ -426,8 +481,11 @@ async function executeTask(task: {
       cwd: task.repo_path,
       model: task.model ?? undefined,
       taskId: task.id,  // Register process for cleanup
-      onOutput: (chunk) => {
-        broadcast('task:output', { id: task.id, chunk })
+      onOutput: (chunk, stream = 'stdout') => {
+        // Store in log buffer
+        appendLog(task.id, chunk, stream)
+        // Broadcast to SSE
+        broadcast('task:output', { id: task.id, chunk, stream })
       },
     })
 
@@ -491,6 +549,7 @@ async function executeTask(task: {
     })
   } finally {
     runningTasks.delete(task.id)
+    completeTaskLog(task.id)
   }
 }
 
@@ -589,20 +648,15 @@ app.get('/:id/sessions', async (c) => {
     return c.json({ error: 'Task not found' }, 404)
   }
 
-  // Get system agent runs related to this task
-  // Sessions could be discovery runs, shepherd evaluations, etc.
-  const runs = await queries.getRuns({ limit: 100 })
+  // Get fruiting sessions for this task (recorded by dispatcher)
+  const fruitingSessions = await queries.getFruitingSessionsByTask(id)
 
-  // Filter runs that reference this task in their context
-  const taskSessions = runs.filter((run) => {
-    if (!run.context) return false
-    try {
-      const ctx = JSON.parse(run.context)
-      return ctx.task_id === id || (ctx.tasks && ctx.tasks.includes(id))
-    } catch {
-      return false
-    }
-  })
+  // Parse JSON fields in fruiting sessions
+  const parsedFruitingSessions = fruitingSessions.map((s) => ({
+    ...s,
+    context_trace: s.context_trace ? JSON.parse(s.context_trace) : null,
+    session_log: s.session_log ? JSON.parse(s.session_log) : null,
+  }))
 
   // Also get shepherd evaluations that include this task
   const allEvaluations = await queries.getShepherdEvaluations({ limit: 100 })
@@ -613,9 +667,9 @@ app.get('/:id/sessions', async (c) => {
 
   return c.json({
     task_id: id,
-    sessions: taskSessions.map(queries.parseRun),
+    fruiting_sessions: parsedFruitingSessions,
     evaluations: taskEvaluations.map(queries.parseShepherdEvaluation),
-    total_sessions: taskSessions.length,
+    total_sessions: parsedFruitingSessions.length,
     total_evaluations: taskEvaluations.length,
   })
 })

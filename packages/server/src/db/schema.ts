@@ -24,6 +24,9 @@ export const tasks = sqliteTable('tasks', {
   user_input: text('user_input'), // Original user request
   enrich_with_opus: integer('enrich_with_opus', { mode: 'boolean' }).default(false),
 
+  // Execution config
+  timeout_seconds: integer('timeout_seconds'),
+
   // Results
   result: text('result'),
   parsed_result: text('parsed_result'), // JSON
@@ -52,6 +55,7 @@ export const repos = sqliteTable('repos', {
   description: text('description'),
   language: text('language'),
   mode: text('mode').notNull().default('align'),
+  weight: integer('weight').default(50), // 0-100 allocation weight for discovery selection
   created_at: text('created_at').notNull(),
   last_scanned_at: text('last_scanned_at'),
 })
@@ -143,5 +147,30 @@ export const fruiting_sessions = sqliteTable('fruiting_sessions', {
   model: text('model'),
   context_trace: text('context_trace'), // JSON
   full_prompt: text('full_prompt'),
+  session_log: text('session_log'), // JSON array of {chunk, stream, timestamp} - TTL 24h
   created_at: text('created_at').notNull(),
+})
+
+// Devices table (network devices for control and monitoring)
+export const devices = sqliteTable('devices', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  type: text('type').notNull(), // roku, yamaha, ssh, ollama, http, flipper
+  host: text('host').notNull(),
+  port: integer('port'),
+  protocol: text('protocol').default('http'), // http, https, upnp, ssh, serial
+
+  // Health tracking
+  status: text('status').default('unknown'), // online, offline, degraded, unknown
+  last_seen: text('last_seen'),
+  last_error: text('last_error'),
+  response_time_ms: integer('response_time_ms'),
+
+  // Device-specific config (JSON)
+  config: text('config'), // JSON object for device-specific settings
+
+  // Metadata
+  description: text('description'),
+  created_at: text('created_at').notNull(),
+  updated_at: text('updated_at'),
 })

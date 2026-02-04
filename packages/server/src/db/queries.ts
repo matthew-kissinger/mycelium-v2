@@ -1,4 +1,4 @@
-import { eq, desc, and, inArray, isNull, ne, sql } from 'drizzle-orm'
+import { eq, desc, asc, and, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { db } from './index'
 import * as schema from './schema'
 
@@ -13,6 +13,7 @@ export interface TaskCreateInput {
   agent?: string
   model?: string
   depends_on?: string[]
+  timeout_seconds?: number
 }
 
 export interface TaskUpdateInput {
@@ -20,18 +21,20 @@ export interface TaskUpdateInput {
   agent?: string
   model?: string
   prompt?: string
-  result?: string
+  result?: string | null
   parsed_result?: object
-  error?: string
+  error?: string | null
   error_details?: object
   sequenced?: boolean
   depends_on?: string[]
-  cost_usd?: number
-  duration_seconds?: number
-  started_at?: string
-  completed_at?: string
+  cost_usd?: number | null
+  duration_seconds?: number | null
+  started_at?: string | null
+  completed_at?: string | null
   shepherd_evaluated_at?: string
   armory_reviewed_at?: string
+  retry_context?: string | null
+  spec_context?: string | null
 }
 
 export async function getTasks(options?: {
@@ -108,6 +111,7 @@ export async function createTask(input: TaskCreateInput) {
     prompt: input.prompt ?? null,
     depends_on: JSON.stringify(input.depends_on ?? []),
     sequenced: false,
+    timeout_seconds: input.timeout_seconds ?? null,
     created_at: now,
   }
 
@@ -134,6 +138,8 @@ export async function updateTask(id: string, input: TaskUpdateInput) {
   if (input.depends_on !== undefined) updates.depends_on = JSON.stringify(input.depends_on)
   if (input.parsed_result !== undefined) updates.parsed_result = JSON.stringify(input.parsed_result)
   if (input.error_details !== undefined) updates.error_details = JSON.stringify(input.error_details)
+  if (input.retry_context !== undefined) updates.retry_context = input.retry_context
+  if (input.spec_context !== undefined) updates.spec_context = input.spec_context
 
   await db.update(schema.tasks).set(updates).where(eq(schema.tasks.id, id))
 
@@ -213,7 +219,7 @@ export async function getUnevaluatedTasks(repo_path?: string, limit = 50) {
         eq(schema.tasks.status, 'done'),
         isNull(schema.tasks.shepherd_evaluated_at)
       ))
-      .orderBy(desc(schema.tasks.completed_at))
+      .orderBy(asc(schema.tasks.completed_at))
       .limit(limit)
   }
 
@@ -222,7 +228,7 @@ export async function getUnevaluatedTasks(repo_path?: string, limit = 50) {
       eq(schema.tasks.status, 'done'),
       isNull(schema.tasks.shepherd_evaluated_at)
     ))
-    .orderBy(desc(schema.tasks.completed_at))
+    .orderBy(asc(schema.tasks.completed_at))
     .limit(limit)
 }
 
@@ -535,6 +541,41 @@ export async function deleteWarning(id: string) {
   await db.delete(schema.memory_warnings).where(eq(schema.memory_warnings.id, id))
 }
 
+// Get all patterns (both global and repo-specific) with repo info
+export async function getAllPatterns(limit = 500) {
+  return db.select().from(schema.memory_patterns)
+    .orderBy(desc(schema.memory_patterns.created_at))
+    .limit(limit)
+}
+
+// Get all warnings (both global and repo-specific) with repo info
+export async function getAllWarnings(limit = 500) {
+  return db.select().from(schema.memory_warnings)
+    .orderBy(desc(schema.memory_warnings.created_at))
+    .limit(limit)
+}
+
+// Get unique repo paths that have memory
+export async function getReposWithMemory() {
+  const patternRepos = await db.selectDistinct({ repo_path: schema.memory_patterns.repo_path })
+    .from(schema.memory_patterns)
+    .where(sql`${schema.memory_patterns.repo_path} IS NOT NULL`)
+
+  const warningRepos = await db.selectDistinct({ repo_path: schema.memory_warnings.repo_path })
+    .from(schema.memory_warnings)
+    .where(sql`${schema.memory_warnings.repo_path} IS NOT NULL`)
+
+  const allRepos = new Set<string>()
+  for (const r of patternRepos) {
+    if (r.repo_path) allRepos.add(r.repo_path)
+  }
+  for (const r of warningRepos) {
+    if (r.repo_path) allRepos.add(r.repo_path)
+  }
+
+  return Array.from(allRepos).sort()
+}
+
 // ============================================================================
 // System Agent Runs
 // ============================================================================
@@ -766,4 +807,193 @@ export async function getTaskStats() {
   }
 
   return stats
+}
+
+// ============================================================================
+// Devices
+// ============================================================================
+
+export interface DeviceCreateInput {
+  name: string
+  type: string
+  host: string
+  port?: number
+  protocol?: string
+  config?: Record<string, unknown>
+  description?: string
+}
+
+export interface DeviceUpdateInput {
+  name?: string
+  host?: string
+  port?: number
+  protocol?: string
+  config?: Record<string, unknown>
+  description?: string
+  status?: string
+  last_seen?: string
+  last_error?: string
+  response_time_ms?: number
+}
+
+export async function getDevices(options?: { type?: string; status?: string }) {
+  const { type, status } = options ?? {}
+
+  if (type && status) {
+    return db.select().from(schema.devices)
+      .where(and(
+        eq(schema.devices.type, type),
+        eq(schema.devices.status, status)
+      ))
+      .orderBy(schema.devices.name)
+  }
+
+  if (type) {
+    return db.select().from(schema.devices)
+      .where(eq(schema.devices.type, type))
+      .orderBy(schema.devices.name)
+  }
+
+  if (status) {
+    return db.select().from(schema.devices)
+      .where(eq(schema.devices.status, status))
+      .orderBy(schema.devices.name)
+  }
+
+  return db.select().from(schema.devices).orderBy(schema.devices.name)
+}
+
+export async function getDevice(id: string) {
+  const rows = await db.select().from(schema.devices).where(eq(schema.devices.id, id))
+  return rows[0] ?? null
+}
+
+export async function getDeviceByName(name: string) {
+  const rows = await db.select().from(schema.devices).where(eq(schema.devices.name, name))
+  return rows[0] ?? null
+}
+
+export async function createDevice(input: DeviceCreateInput) {
+  const id = crypto.randomUUID()
+  const now = new Date().toISOString()
+
+  const device = {
+    id,
+    name: input.name,
+    type: input.type,
+    host: input.host,
+    port: input.port ?? null,
+    protocol: input.protocol ?? 'http',
+    config: input.config ? JSON.stringify(input.config) : null,
+    description: input.description ?? null,
+    status: 'unknown',
+    created_at: now,
+  }
+
+  await db.insert(schema.devices).values(device)
+  return device
+}
+
+export async function updateDevice(id: string, input: DeviceUpdateInput) {
+  const updates: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  }
+
+  if (input.name !== undefined) updates.name = input.name
+  if (input.host !== undefined) updates.host = input.host
+  if (input.port !== undefined) updates.port = input.port
+  if (input.protocol !== undefined) updates.protocol = input.protocol
+  if (input.description !== undefined) updates.description = input.description
+  if (input.status !== undefined) updates.status = input.status
+  if (input.last_seen !== undefined) updates.last_seen = input.last_seen
+  if (input.last_error !== undefined) updates.last_error = input.last_error
+  if (input.response_time_ms !== undefined) updates.response_time_ms = input.response_time_ms
+  if (input.config !== undefined) updates.config = JSON.stringify(input.config)
+
+  await db.update(schema.devices).set(updates).where(eq(schema.devices.id, id))
+
+  return getDevice(id)
+}
+
+export async function deleteDevice(id: string) {
+  await db.delete(schema.devices).where(eq(schema.devices.id, id))
+}
+
+/**
+ * Parse device for API response (deserialize JSON fields)
+ */
+export function parseDevice(device: typeof schema.devices.$inferSelect) {
+  return {
+    ...device,
+    config: device.config ? JSON.parse(device.config) : null,
+  }
+}
+
+// ============================================================================
+// Fruiting Sessions
+// ============================================================================
+
+export interface FruitingSessionCreateInput {
+  task_id: string
+  repo_path: string
+  agent?: string
+  model?: string
+  context_trace?: object
+  full_prompt?: string
+  session_log?: Array<{ chunk: string; stream: string; timestamp: string }>
+}
+
+export async function createFruitingSession(input: FruitingSessionCreateInput) {
+  const id = crypto.randomUUID()
+  const now = new Date().toISOString()
+
+  const session = {
+    id,
+    task_id: input.task_id,
+    repo_path: input.repo_path,
+    agent: input.agent ?? null,
+    model: input.model ?? null,
+    context_trace: input.context_trace ? JSON.stringify(input.context_trace) : null,
+    full_prompt: input.full_prompt ?? null,
+    session_log: input.session_log ? JSON.stringify(input.session_log) : null,
+    created_at: now,
+  }
+
+  await db.insert(schema.fruiting_sessions).values(session)
+  return session
+}
+
+/**
+ * Clear session_log for sessions older than the TTL.
+ * Keeps the session record but nulls out the log data.
+ */
+export async function cleanExpiredSessionLogs(ttlMs = 24 * 60 * 60 * 1000) {
+  const cutoff = new Date(Date.now() - ttlMs).toISOString()
+
+  const result = await db.update(schema.fruiting_sessions)
+    .set({ session_log: null })
+    .where(and(
+      sql`${schema.fruiting_sessions.created_at} < ${cutoff}`,
+      sql`${schema.fruiting_sessions.session_log} IS NOT NULL`
+    ))
+
+  return result
+}
+
+export async function getFruitingSessionsByTask(taskId: string) {
+  return db.select().from(schema.fruiting_sessions)
+    .where(eq(schema.fruiting_sessions.task_id, taskId))
+    .orderBy(desc(schema.fruiting_sessions.created_at))
+}
+
+/**
+ * Get devices that need health check (not checked recently or unknown status)
+ */
+export async function getDevicesForHealthCheck(maxAgeMs = 60000) {
+  const cutoff = new Date(Date.now() - maxAgeMs).toISOString()
+
+  // Get devices that haven't been seen recently or have unknown status
+  return db.select().from(schema.devices)
+    .where(sql`${schema.devices.last_seen} IS NULL OR ${schema.devices.last_seen} < ${cutoff} OR ${schema.devices.status} = 'unknown'`)
+    .orderBy(schema.devices.name)
 }

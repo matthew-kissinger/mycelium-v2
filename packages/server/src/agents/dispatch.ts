@@ -9,7 +9,8 @@ export interface DispatchOptions {
   model?: string
   timeout?: number
   taskId?: string  // Required for process registry tracking
-  onOutput?: (chunk: string) => void
+  onOutput?: (chunk: string, stream?: 'stdout' | 'stderr') => void
+  onStart?: (pid: number) => void  // Called with PID after process spawns
 }
 
 /**
@@ -20,7 +21,7 @@ export interface DispatchOptions {
  * Registers process with the registry for cleanup on cancel/shutdown.
  */
 export async function dispatch(options: DispatchOptions): Promise<AgentExecuteResult> {
-  const { agent, prompt, cwd, model, timeout, taskId, onOutput } = options
+  const { agent, prompt, cwd, model, timeout, taskId, onOutput, onStart } = options
   const config = DEFAULT_AGENT_CONFIGS[agent]
 
   if (!config) {
@@ -37,6 +38,11 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
 
   // Build command args based on agent type
   const args = buildAgentArgs(agent, prompt, model, cwd)
+
+  // Switch cline model before dispatch if a specific model is requested
+  if (agent === 'cline' && model) {
+    await switchClineModel(model)
+  }
 
   let proc: Subprocess<'ignore', 'pipe', 'pipe'>
   let output = ''
@@ -56,6 +62,11 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
       registerProcess(taskId, proc, agent, cwd)
     }
 
+    // Notify caller of PID for persistence
+    if (proc.pid) {
+      onStart?.(proc.pid)
+    }
+
     // Stream stdout
     const stdoutReader = proc.stdout.getReader()
     const stderrReader = proc.stderr.getReader()
@@ -72,9 +83,11 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
         const chunk = decoder.decode(value)
         if (target === 'stdout') {
           output += chunk
-          onOutput?.(chunk)
+          onOutput?.(chunk, 'stdout')
         } else {
           stderr += chunk
+          // Also stream stderr for live logs
+          onOutput?.(chunk, 'stderr')
         }
       }
     }
@@ -137,12 +150,12 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
  * Build CLI arguments for each agent type.
  * Each agent has different CLI patterns.
  *
- * IMPORTANT: These must match the actual CLI interfaces:
+ * IMPORTANT: These must match the actual CLI interfaces (verified Feb 2026):
  * - Claude: claude -p "prompt" --model <model> --dangerously-skip-permissions
- * - Codex: codex -q "prompt" --model <model> --full-auto
- * - Gemini: gemini -p "prompt" --model <model>
- * - Cline: cline --yolo --mode act --output-format json [--model <model>] --task "prompt"
- * - Cursor: agent --print --output-format json --approve-mcps [--model <model>] --workspace <cwd> "prompt"
+ * - Codex: codex exec "prompt" --model <model> --full-auto
+ * - Gemini: gemini "prompt" --model <model> --yolo
+ * - Cline: cline "prompt" --yolo --mode act
+ * - Cursor: agent --print --output-format json [--model <model>] "prompt"
  */
 function buildAgentArgs(agent: AgentType, prompt: string, model?: string, cwd?: string): string[] {
   switch (agent) {
@@ -155,43 +168,95 @@ function buildAgentArgs(agent: AgentType, prompt: string, model?: string, cwd?: 
       ]
 
     case 'codex':
-      // codex -q "prompt" --model gpt-5.2-codex --full-auto
+      // codex exec "prompt" --model gpt-5.2-codex --full-auto
       return [
-        '-q', prompt,
+        'exec',
+        prompt,
         ...(model ? ['--model', model] : []),
         '--full-auto',
       ]
 
     case 'gemini':
-      // gemini -p "prompt" --model gemini-3-flash-preview
+      // gemini "prompt" --model gemini-2.5-flash --yolo
       return [
-        '-p', prompt,
+        prompt,
         ...(model ? ['--model', model] : []),
+        '--yolo',
       ]
 
     case 'cline':
-      // cline --yolo --mode act --output-format json [--model <model>] --task "prompt"
+      // cline "prompt" --yolo --mode act
       return [
+        prompt,
         '--yolo',
         '--mode', 'act',
-        '--output-format', 'json',
-        ...(model ? ['--model', model] : []),
-        '--task', prompt,
       ]
 
     case 'cursor':
-      // agent --print --output-format json --approve-mcps [--model <model>] --workspace <cwd> "prompt"
+      // agent --print --output-format json [--model <model>] "prompt"
       return [
         '--print',
         '--output-format', 'json',
-        '--approve-mcps',
         ...(model ? ['--model', model] : []),
-        ...(cwd ? ['--workspace', cwd] : []),
         prompt,
       ]
 
     default:
       return [prompt]
+  }
+}
+
+// =============================================================================
+// Cline model switching
+// =============================================================================
+
+/**
+ * Map short model names to OpenRouter model IDs.
+ * Discovery creates tasks with short names like "kimi-k2.5" or "deepseek-v3.2".
+ */
+const CLINE_MODEL_MAP: Record<string, string> = {
+  'kimi-k2.5': 'moonshotai/kimi-k2.5',
+  'kimi-k2': 'moonshotai/kimi-k2-0905',
+  'kimi-k2-thinking': 'moonshotai/kimi-k2-thinking',
+  'deepseek-v3.2': 'deepseek/deepseek-v3.2',
+  'deepseek-r1': 'deepseek/deepseek-r1-0528',
+  'qwen3-coder': 'qwen/qwen3-coder',
+  'qwen3-coder-next': 'qwen/qwen3-coder-next',
+  'glm-4.7': 'z-ai/glm-4.7',
+  'glm-4.7-flash': 'z-ai/glm-4.7-flash',
+  'devstral': 'mistralai/devstral-2512',
+}
+
+/** Current cline model to avoid redundant switches */
+let currentClineModel: string | null = null
+
+/**
+ * Switch cline's OpenRouter model before dispatch.
+ * Uses `cline auth` to change the model non-interactively.
+ */
+async function switchClineModel(model: string): Promise<void> {
+  // Resolve short name to full OpenRouter ID
+  const modelId = CLINE_MODEL_MAP[model] ?? model
+
+  // Skip if already set to this model
+  if (currentClineModel === modelId) return
+
+  console.log(`[Dispatch] Switching cline model to ${modelId}`)
+
+  try {
+    const proc = spawn({
+      cmd: ['cline', 'auth', '-p', 'openrouter', '-m', modelId],
+      stdout: 'pipe',
+      stderr: 'pipe',
+      stdin: 'ignore',
+    })
+
+    await proc.exited
+    currentClineModel = modelId
+    console.log(`[Dispatch] Cline model switched to ${modelId}`)
+  } catch (error) {
+    console.error(`[Dispatch] Failed to switch cline model:`, error)
+    // Continue with current model rather than failing the task
   }
 }
 

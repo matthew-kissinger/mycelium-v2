@@ -143,10 +143,12 @@ function eventToTopic(event: SSEEventType | string, data?: unknown): string {
       }
     }
 
-    // Agent events: check run_id
+    // Agent events: check run_id and agent_type
     if (event.startsWith('agent:')) {
       const runId = obj.run_id
       if (runId) {
+        // Return both the specific run topic and the general event type
+        // so clients can subscribe to agent:* or agent:<run_id>
         return `agent:${runId}`
       }
     }

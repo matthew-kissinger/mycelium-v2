@@ -91,13 +91,13 @@ You MUST use a VARIETY of agents across tasks. Do NOT default everything to Clau
 
 **Match agents to task types:**
 - **codex** (gpt-5.2-codex): Code generation, pattern-based work, mechanical refactors
-- **gemini** (gemini-3-flash-preview): Most tasks, fast iteration; (pro): deep research only (limited credits)
-- **cursor** (composer-1): Multi-file composition, large refactors; (thinking models): complex design
-- **cline** (kimi-k2): Strong reasoning; (glm-4.7): code and general tasks
+- **gemini** (gemini-3-flash-preview): Most tasks, fast iteration; (gemini-3-pro-preview): deep research only
+- **cursor** (composer-1): Multi-file composition, large refactors; (opus-4.5-thinking): complex design
+- **cline** (kimi-k2.5): Strong reasoning; (glm-4.7): code and general tasks
 - **claude** (sonnet): Balanced work; (opus): architecture, complex debugging; (haiku): simple fixes
 
 **Distribution goal:** Aim for at least 2-3 different agents across your suggested tasks.
-Example: "1. Fix X (codex/gpt-5.2-codex), 2. Add feature Y (gemini/flash), 3. Refactor Z (cursor/composer-1)"
+Example: "1. Fix X (codex/gpt-5.2-codex), 2. Add feature Y (gemini/gemini-3-flash-preview), 3. Refactor Z (cursor/composer-1)"
 
 ## Guidelines
 
@@ -255,9 +255,9 @@ You MUST use a VARIETY of agents across tasks. Do NOT default everything to Clau
 
 **Match agents to task types:**
 - **codex** (gpt-5.2-codex): Code generation, pattern-based work, mechanical refactors, boilerplate
-- **gemini** (gemini-3-flash-preview): Most tasks, fast iteration; (pro): deep research only (limited credits)
-- **cursor** (composer-1): Multi-file composition, large refactors; (thinking models): complex design
-- **cline** (kimi-k2): Strong reasoning; (glm-4.7): code and general tasks
+- **gemini** (gemini-3-flash-preview): Most tasks, fast iteration; (gemini-3-pro-preview): deep research only
+- **cursor** (composer-1): Multi-file composition, large refactors; (opus-4.5-thinking): complex design
+- **cline** (kimi-k2.5): Strong reasoning; (glm-4.7): code and general tasks
 - **claude** (sonnet): Balanced feature work; (opus): architecture, complex debugging; (haiku): simple fixes
 
 **Distribution requirement:** Use at least 2-3 different agents across your tasks.
@@ -268,7 +268,7 @@ Example distribution:
 - Task 1: codex/gpt-5.2-codex (code generation)
 - Task 2: gemini/gemini-3-flash-preview (feature work)
 - Task 3: cursor/composer-1 (multi-file refactor)
-- Task 4: cline/kimi-k2 (feature work)
+- Task 4: cline/kimi-k2.5(feature work)
 - Task 5: claude/haiku (simple fix)
 
 ## Guidelines
@@ -367,9 +367,9 @@ When complete: test your changes, commit with "fix: resolve intermittent 401 aft
 
 Use a VARIETY of agents. Match agent strengths to task requirements:
 - **codex** (model: gpt-5.2-codex): Code generation, pattern-based work, mechanical refactors
-- **gemini** (model: gemini-3-flash-preview): Most tasks, fast iteration. Use gemini-3-pro-preview only for deep research (limited credits)
-- **cursor** (model: composer-1): Multi-file composition. Use thinking models for complex design
-- **cline** (model: kimi-k2): Strong reasoning. Alternative: glm-4.7 for code and general tasks
+- **gemini** (model: gemini-3-flash-preview): Most tasks, fast iteration. Use gemini-3-pro-preview only for deep research
+- **cursor** (model: composer-1): Multi-file composition. Use opus-4.5-thinking for complex design
+- **cline** (model: kimi-k2.5): Strong reasoning. Alternative: glm-4.7 for code and general tasks
 - **claude** (model: sonnet): Balanced work. Use opus for architecture, haiku for simple fixes
 
 If Discovery report suggested specific agents, use those. Otherwise select appropriately.
@@ -397,6 +397,7 @@ export interface DiscoveryContext {
   repoDescription?: string
   pendingTasks: Array<{ id: string; title: string; status: string }>
   recentTasks: Array<{ id: string; title: string; status: string; result?: string }>
+  failedTasks: Array<{ id: string; title: string; agent?: string; model?: string; error?: string }>
   patterns: string[]
   warnings: string[]
   agentsAvailable: string[]
@@ -472,6 +473,20 @@ export function buildDiscoveryPrompt(
     for (const task of context.recentTasks.slice(0, 5)) {
       const icon = task.status === 'done' ? 'OK' : task.status === 'failed' ? 'FAIL' : task.status
       contextParts.push(`- [${icon}] ${task.title}`)
+    }
+    contextParts.push('')
+  }
+
+  // Failed tasks (for retry consideration)
+  if (context.failedTasks.length > 0) {
+    contextParts.push('## Failed Tasks - Consider Retrying')
+    contextParts.push('')
+    contextParts.push('These tasks failed. Evaluate if they should be retried (with a different agent/model or adjusted scope) or if the failure reveals the task was poorly scoped.')
+    contextParts.push('')
+    for (const task of context.failedTasks.slice(0, 10)) {
+      const agentInfo = task.agent ? ` (${task.agent}/${task.model ?? 'default'})` : ''
+      const errorSnippet = task.error ? `: ${task.error.slice(0, 150)}` : ''
+      contextParts.push(`- [FAILED] ${task.title}${agentInfo}${errorSnippet}`)
     }
     contextParts.push('')
   }

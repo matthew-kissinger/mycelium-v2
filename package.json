@@ -15,6 +15,8 @@
     "dev:client": "cd packages/client && bun run dev",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf packages/*/dist",
+    "dev:manage": "bun scripts/dev.ts",
+    "test": "bun test",
     "db:generate": "bun run --filter server db:generate",
     "db:migrate": "bun run --filter server db:migrate",
     "db:studio": "bun run --filter server db:studio"
