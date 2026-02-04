@@ -223,6 +223,28 @@ function initializeScheduler(config: SchedulerConfig): void {
 }
 
 /**
+ * Compute next_run ISO string for a cycle based on its interval.
+ */
+function computeNextRun(cycleName: CycleName): string | undefined {
+  if (!schedulerState) return undefined
+  const config = schedulerState.config
+  const intervalMap: Record<string, number | undefined> = {
+    dispatcher: config.dispatcher_interval_sec,
+    discovery: config.discovery_interval_sec,
+    sequencer: config.sequencer_interval_sec,
+    shepherd: config.shepherd_interval_sec,
+    blocked_check: 15 * 60,
+    digest: config.digest_interval_sec,
+    compaction: 60 * 60,
+    armory: 60 * 60,
+    health_check: config.health_check_interval_sec,
+  }
+  const interval = intervalMap[cycleName]
+  if (!interval) return undefined
+  return new Date(Date.now() + interval * 1000).toISOString()
+}
+
+/**
  * Wrapper to run a cycle with error handling and state updates.
  */
 async function runCycle(
@@ -253,11 +275,13 @@ async function runCycle(
     // Update state on success
     state.runs_completed++
     state.last_run = startTime.toISOString()
+    state.next_run = computeNextRun(cycleName)
     console.log(`[Scheduler] ${cycleName} cycle completed`)
   } catch (error) {
     // Update state on error
     state.errors++
     state.last_run = startTime.toISOString()
+    state.next_run = computeNextRun(cycleName)
     console.error(`[Scheduler] ${cycleName} cycle failed:`, error)
   } finally {
     state.running = false
@@ -272,99 +296,37 @@ function startCycles(): void {
 
   const config = schedulerState.config
 
-  // Dispatcher cycle
-  const dispatcherState = schedulerState.cycles.get('dispatcher')!
-  if (dispatcherState.enabled) {
-    dispatcherState.intervalRef = setInterval(
-      () => runCycle('dispatcher', () => runDispatcherCycle(config)),
-      config.dispatcher_interval_sec * 1000
-    )
-    console.log(`[Scheduler] Dispatcher cycle started (every ${config.dispatcher_interval_sec}s)`)
+  // Helper to start a cycle with interval and initial next_run
+  const startCycle = (name: CycleName, handler: () => Promise<void>, intervalSec: number) => {
+    const state = schedulerState!.cycles.get(name)!
+    if (!state.enabled) return
+    state.next_run = new Date(Date.now() + intervalSec * 1000).toISOString()
+    state.intervalRef = setInterval(() => runCycle(name, handler), intervalSec * 1000)
+    console.log(`[Scheduler] ${name} cycle started (every ${intervalSec}s)`)
   }
 
-  // Discovery cycle
-  const discoveryState = schedulerState.cycles.get('discovery')!
-  if (discoveryState.enabled) {
-    discoveryState.intervalRef = setInterval(
-      () => runCycle('discovery', () => runDiscoveryCycle(config)),
-      config.discovery_interval_sec * 1000
-    )
-    console.log(`[Scheduler] Discovery cycle started (every ${config.discovery_interval_sec}s)`)
-  }
-
-  // Sequencer cycle
-  const sequencerState = schedulerState.cycles.get('sequencer')!
-  if (sequencerState.enabled) {
-    sequencerState.intervalRef = setInterval(
-      () => runCycle('sequencer', () => runSequencerCycle(config)),
-      config.sequencer_interval_sec * 1000
-    )
-    console.log(`[Scheduler] Sequencer cycle started (every ${config.sequencer_interval_sec}s)`)
-  }
-
-  // Blocked check cycle (every 15 min)
-  const blockedState = schedulerState.cycles.get('blocked_check')!
-  if (blockedState.enabled) {
-    blockedState.intervalRef = setInterval(
-      () => runCycle('blocked_check', () => runBlockedCheckCycle(config)),
-      15 * 60 * 1000 // 15 minutes
-    )
-    console.log('[Scheduler] Blocked check cycle started (every 15min)')
-  }
-
-  // Digest cycle
-  const digestState = schedulerState.cycles.get('digest')!
-  if (digestState.enabled) {
-    digestState.intervalRef = setInterval(
-      () => runCycle('digest', () => runDigestCycle(config)),
-      config.digest_interval_sec * 1000
-    )
-    console.log(`[Scheduler] Digest cycle started (every ${config.digest_interval_sec}s)`)
-  }
-
-  // Compaction cycle - check every hour if it's time
-  const compactionState = schedulerState.cycles.get('compaction')!
-  if (compactionState.enabled) {
-    compactionState.intervalRef = setInterval(
-      () => runCycle('compaction', () => runCompactionCycle(config)),
-      60 * 60 * 1000 // Check every hour
-    )
-    console.log('[Scheduler] Compaction cycle started (checks hourly)')
-  }
+  startCycle('dispatcher', () => runDispatcherCycle(config), config.dispatcher_interval_sec)
+  startCycle('discovery', () => runDiscoveryCycle(config), config.discovery_interval_sec)
+  startCycle('sequencer', () => runSequencerCycle(config), config.sequencer_interval_sec)
+  startCycle('shepherd', () => runShepherdCycle(config), config.shepherd_interval_sec)
+  startCycle('blocked_check', () => runBlockedCheckCycle(config), 15 * 60)
+  startCycle('digest', () => runDigestCycle(config), config.digest_interval_sec)
+  startCycle('compaction', () => runCompactionCycle(config), 60 * 60)
+  startCycle('health_check', () => runHealthCheckCycle(config), config.health_check_interval_sec)
 
   // Armory cycle - check every hour if batch threshold met
   const armoryState = schedulerState.cycles.get('armory')!
   if (armoryState.enabled) {
+    armoryState.next_run = new Date(Date.now() + 60 * 60 * 1000).toISOString()
     armoryState.intervalRef = setInterval(
       async () => {
-        // Only run if batch threshold is met
         if (await shouldRunArmory(config)) {
           await runCycle('armory', () => runArmoryCycle(config))
         }
       },
-      60 * 60 * 1000 // Check every hour
+      60 * 60 * 1000
     )
     console.log('[Scheduler] Armory cycle started (checks hourly)')
-  }
-
-  // Shepherd cycle (interval-based, checks for repos with batch_size+ unevaluated tasks)
-  const shepherdState = schedulerState.cycles.get('shepherd')!
-  if (shepherdState.enabled) {
-    shepherdState.intervalRef = setInterval(
-      () => runCycle('shepherd', () => runShepherdCycle(config)),
-      config.shepherd_interval_sec * 1000
-    )
-    console.log(`[Scheduler] Shepherd cycle started (every ${config.shepherd_interval_sec}s)`)
-  }
-
-  // Health check cycle (device monitoring)
-  const healthCheckState = schedulerState.cycles.get('health_check')!
-  if (healthCheckState.enabled) {
-    healthCheckState.intervalRef = setInterval(
-      () => runCycle('health_check', () => runHealthCheckCycle(config)),
-      config.health_check_interval_sec * 1000
-    )
-    console.log(`[Scheduler] Health check cycle started (every ${config.health_check_interval_sec}s)`)
   }
 }
 

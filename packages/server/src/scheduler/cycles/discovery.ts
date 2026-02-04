@@ -146,7 +146,7 @@ export async function runDiscoveryForRepo(
     })
     const agentsSection = buildAgentsSection()
     const skillsSection = buildSkillsSection([], repoPath)
-    const mcpSection = buildMcpSection()
+    const mcpSection = buildMcpSection('claude')
 
     // Build prompt with dynamic context
     const prompt = buildDiscoveryPrompt(context, mycelContext, agentsSection)

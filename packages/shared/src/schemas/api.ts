@@ -274,6 +274,11 @@ export const StatsResponse = z.object({
   done: z.number().int().nonnegative(),
   failed: z.number().int().nonnegative(),
   total_cost_usd: z.number().nonnegative(),
+  per_use_cost_usd: z.number().nonnegative().optional(),
+  subscription_task_count: z.number().int().nonnegative().optional(),
+  unsequenced: z.number().int().nonnegative().optional(),
+  waiting: z.number().int().nonnegative().optional(),
+  ready: z.number().int().nonnegative().optional(),
 })
 export type StatsResponse = z.infer<typeof StatsResponse>
 

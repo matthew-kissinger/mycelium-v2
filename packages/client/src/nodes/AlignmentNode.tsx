@@ -41,7 +41,7 @@ function AlignmentNodeComponent({ data, selected }: NodeProps) {
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
-          <span className="text-lg">💬</span>
+          <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">SIG</span>
           <span className="font-semibold text-zinc-100">{label}</span>
         </div>
         {pending_count > 0 && (

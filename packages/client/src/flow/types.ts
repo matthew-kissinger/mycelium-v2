@@ -27,7 +27,7 @@ export interface SchedulerNodeData extends BaseNodeData {
 
 /** Cycle node - scheduler cycles (discovery, sequencer, etc.) */
 export interface CycleNodeData extends BaseNodeData {
-  cycleType: 'discovery' | 'sequencer' | 'dispatcher' | 'shepherd' | 'armory' | 'blocked_check' | 'digest' | 'compaction'
+  cycleType: 'discovery' | 'sequencer' | 'dispatcher' | 'shepherd' | 'armory' | 'blocked_check' | 'digest' | 'compaction' | 'health_check'
   enabled: boolean
   running: boolean
   last_run?: string
@@ -41,6 +41,9 @@ export interface CycleNodeData extends BaseNodeData {
 export interface TaskPoolNodeData extends BaseNodeData {
   counts: {
     pending: number
+    unsequenced: number
+    waiting: number
+    ready: number
     running: number
     done: number
     failed: number

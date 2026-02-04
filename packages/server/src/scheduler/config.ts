@@ -1,121 +1,95 @@
 /**
- * Scheduler Configuration - load/save config from disk
+ * Scheduler Configuration - DB-first with file fallback
+ *
+ * Load order: DB -> file -> code defaults
+ * Saves always go to DB with history tracking
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { SchedulerConfig } from '@mycelium/shared'
 import { getConfigDir, ensureDir } from '../platform'
+import { getConfigOverride, saveConfigOverride, importFileConfig } from '../db/config-store'
 
-// Config file path (cross-platform)
+const CONFIG_KEY = 'scheduler'
 const CONFIG_DIR = getConfigDir()
 const CONFIG_FILE = join(CONFIG_DIR, 'scheduler.json')
 
 /**
  * Default scheduler configuration.
- * Matches the schema from @mycelium/shared
  */
 export const DEFAULT_CONFIG: SchedulerConfig = {
-  // Dispatcher cycle
   dispatcher_enabled: true,
-  dispatcher_interval_sec: 60, // 1 minute
+  dispatcher_interval_sec: 60,
   max_concurrent_tasks: 3,
   min_concurrent_tasks: 3,
   max_concurrent_ceiling: 10,
-
-  // Blocked task detection
-  blocked_task_timeout_sec: 10800, // 3 hours
+  blocked_task_timeout_sec: 10800,
   blocked_check_enabled: true,
-  orphan_cancel_timeout_sec: 14400, // 4 hours
-
-  // Discovery cycle
+  orphan_cancel_timeout_sec: 14400,
   discovery_enabled: true,
-  discovery_interval_sec: 900, // 15 minutes
+  discovery_interval_sec: 900,
   discovery_repos: [],
   discovery_auto_create: [],
-
-  // Sequencer cycle
   sequencer_enabled: true,
-  sequencer_interval_sec: 900, // 15 minutes
-
-  // Shepherd cycle (interval-based, checks for repos with batch_size+ unevaluated tasks)
+  sequencer_interval_sec: 900,
   shepherd_enabled: true,
-  shepherd_interval_sec: 900, // 15 minutes
-  shepherd_batch_size: 5, // Tasks needed before evaluation
-
-  // Armory cycle
+  shepherd_interval_sec: 900,
+  shepherd_batch_size: 5,
   armory_enabled: true,
-  armory_batch_size: 10, // Tasks needed before armory review
-
-  // Digest cycle
+  armory_batch_size: 10,
   digest_enabled: true,
-  digest_interval_sec: 21600, // 6 hours
-
-  // Compaction cycle
+  digest_interval_sec: 21600,
   compaction_enabled: true,
-  compaction_day: 1, // Monday (0 = Sunday)
-  compaction_hour: 11, // 11am
-
-  // Health check cycle (device monitoring)
+  compaction_day: 1,
+  compaction_hour: 11,
   health_check_enabled: true,
-  health_check_interval_sec: 60, // 1 minute
-
-  // Auto-prune
+  health_check_interval_sec: 60,
   auto_prune_enabled: true,
   auto_prune_threshold: 100,
   auto_prune_keep: 30,
 }
 
 /**
- * Ensure config directory exists.
- */
-function ensureConfigDir(): void {
-  ensureDir(CONFIG_DIR)
-}
-
-/**
- * Load scheduler config from disk, merging with defaults.
+ * Load scheduler config: DB -> file (import to DB) -> defaults
  */
 export function loadConfig(): SchedulerConfig {
-  ensureConfigDir()
-
-  if (!existsSync(CONFIG_FILE)) {
-    // No config file - return defaults
-    return { ...DEFAULT_CONFIG }
-  }
-
-  try {
-    const raw = readFileSync(CONFIG_FILE, 'utf-8')
-    const parsed = JSON.parse(raw)
-
-    // Merge with defaults (parsed overrides defaults)
-    return {
-      ...DEFAULT_CONFIG,
-      ...parsed,
+  // Try DB first
+  const dbValue = getConfigOverride(CONFIG_KEY)
+  if (dbValue) {
+    try {
+      return { ...DEFAULT_CONFIG, ...JSON.parse(dbValue) }
+    } catch {
+      console.error('[Scheduler] Failed to parse DB config, falling back')
     }
-  } catch (error) {
-    console.error('[Scheduler] Failed to load config, using defaults:', error)
-    return { ...DEFAULT_CONFIG }
   }
+
+  // Try file (and import to DB if found)
+  ensureDir(CONFIG_DIR)
+  if (existsSync(CONFIG_FILE)) {
+    try {
+      const raw = readFileSync(CONFIG_FILE, 'utf-8')
+      importFileConfig(CONFIG_KEY, raw)
+      return { ...DEFAULT_CONFIG, ...JSON.parse(raw) }
+    } catch (error) {
+      console.error('[Scheduler] Failed to load file config:', error)
+    }
+  }
+
+  return { ...DEFAULT_CONFIG }
 }
 
 /**
- * Save scheduler config to disk.
+ * Save scheduler config to DB with history.
  */
 export function saveConfig(config: SchedulerConfig): void {
-  ensureConfigDir()
-
-  try {
-    writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8')
-    console.log('[Scheduler] Config saved to', CONFIG_FILE)
-  } catch (error) {
-    console.error('[Scheduler] Failed to save config:', error)
-    throw error
-  }
+  const oldValue = getConfigOverride(CONFIG_KEY)
+  saveConfigOverride(CONFIG_KEY, JSON.stringify(config, null, 2), 'api', oldValue)
+  console.log('[Scheduler] Config saved to DB')
 }
 
 /**
- * Update partial config and save to disk.
+ * Update partial config and save.
  */
 export function updateConfig(updates: Partial<SchedulerConfig>): SchedulerConfig {
   const current = loadConfig()
@@ -125,7 +99,7 @@ export function updateConfig(updates: Partial<SchedulerConfig>): SchedulerConfig
 }
 
 /**
- * Get config file path.
+ * Get config file path (for display/info only).
  */
 export function getConfigPath(): string {
   return CONFIG_FILE

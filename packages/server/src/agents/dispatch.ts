@@ -130,7 +130,7 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
       output: output || stderr,
       exit_code: exitCode,
       duration_seconds: duration,
-      cost_usd: parseCostFromOutput(output),
+      cost_usd: config.billing_type === 'per_use' ? parseCostFromOutput(output) : 0,
     }
   } catch (error) {
     // Unregister process on error
@@ -154,7 +154,7 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
  * - Claude: claude -p "prompt" --model <model> --dangerously-skip-permissions
  * - Codex: codex exec "prompt" --model <model> --full-auto
  * - Gemini: gemini "prompt" --model <model> --yolo
- * - Cline: cline "prompt" --yolo --mode act
+ * - Cline: cline task new "prompt" --yolo --mode act
  * - Cursor: agent --print --output-format json [--model <model>] "prompt"
  */
 function buildAgentArgs(agent: AgentType, prompt: string, model?: string, cwd?: string): string[] {
@@ -185,8 +185,9 @@ function buildAgentArgs(agent: AgentType, prompt: string, model?: string, cwd?: 
       ]
 
     case 'cline':
-      // cline "prompt" --yolo --mode act
+      // cline task new "prompt" --yolo --mode act
       return [
+        'task', 'new',
         prompt,
         '--yolo',
         '--mode', 'act',

@@ -18,7 +18,10 @@
 | Context Injection | Skills, MCP servers, MYCEL_CONTEXT, AGENTS_SECTION |
 | SSE Streaming | Real-time task output |
 | CLI | Core commands working |
-| Frontend | React Flow visualization |
+| Frontend | Three-column layout (sidebar, React Flow canvas, detail panel) |
+| Cost Tracking | Per-use (Cline/OpenRouter) vs subscription billing split |
+| Config Storage | DB-first with file fallback, history tracking |
+| Prompt Management | DB overrides, template variable preview, resolved variable inspection |
 
 ### Network
 
@@ -347,6 +350,7 @@ PATCH  /api/config/hooks             Update hooks config
 GET    /api/config/agents            Get all agents config
 GET    /api/config/agents/:name      Get specific agent config
 PATCH  /api/config/agents/:name      Update specific agent config
+GET    /api/config/history           Get config change history (key, limit, offset)
 ```
 
 ### Prompts
@@ -355,6 +359,8 @@ GET    /api/prompts                  List all system agent prompts
 GET    /api/prompts/:id              Get prompt with full content
 PATCH  /api/prompts/:id              Update prompt with custom content
 POST   /api/prompts/:id/reset        Reset prompt to default
+GET    /api/prompts/:id/variables    Get resolved template variable values
+GET    /api/prompts/:id/preview      Get prompt with variables resolved (repo_path query)
 ```
 
 ### Inventory (Skills & MCPs)
@@ -413,6 +419,22 @@ Single Bun process combining:
 - **Scheduler** - Async cycles for all system agents (auto-starts with SCHEDULER_AUTO_START=true)
 - **Telegram Poller** - Long-polling for signals and messages
 
+### Config Storage
+
+DB-first with file fallback. Load order: DB -> file (import to DB on first read) -> code defaults.
+All saves go to DB with history tracking in `config_history` table.
+
+| Config | DB Key | File Fallback |
+|--------|--------|---------------|
+| Scheduler | `scheduler` | `scheduler.json` |
+| Agents | `agents` | `agents.json` |
+| Genesis | `genesis` | `genesis.json` |
+| Hooks | `hooks` | `hooks.json` |
+| Prompts | `prompt_overrides` table | `prompts/*.md` |
+
+First time a file config is found with no DB override, it's auto-imported to DB.
+Config changes are audited in `config_history` (old_value, new_value, changed_by, changed_at).
+
 ### Database Schema
 
 ```sql
@@ -470,6 +492,16 @@ devices (id, name, type, host, port, protocol,
 -- Types: roku, yamaha, ssh, ollama, http, flipper
 -- Protocols: http, https, upnp, ssh, serial
 -- Statuses: online, offline, degraded, unknown
+
+-- Config overrides (DB-first storage, replaces JSON files)
+config_overrides (key, value, updated_at, updated_by)
+-- Keys: scheduler, agents, genesis, hooks
+
+-- Prompt overrides (DB-first storage, replaces .md files)
+prompt_overrides (prompt_id, content, updated_at)
+
+-- Config change history (audit trail)
+config_history (id, config_key, field, old_value, new_value, changed_at, changed_by)
 ```
 
 ---
@@ -573,7 +605,19 @@ Dynamic context built per-agent:
 - `buildMycelContext()` - CLI instructions, identity prefix
 - `buildAgentsSection()` - Available agents and models
 - `buildSkillsSection()` - Skills from ~/.claude/skills/
-- `buildMcpSection()` - MCP servers from ~/.claude/mcp.json
+- `buildMcpSection(agent)` - MCP servers for the specific agent being dispatched
+
+MCP servers are per-agent - each CLI has its own config:
+| Agent | Config |
+|-------|--------|
+| Claude | `~/.claude.json` + `.mcp.json` (JSON) |
+| Codex | `~/.codex/config.toml` (TOML) |
+| Gemini | `~/.gemini/settings.json` (JSON) |
+| Cline | VS Code globalStorage (JSON) |
+| Cursor | `~/.cursor/mcp.json` (JSON) |
+
+`getMcpServersForAgent(agent)` queries only that agent's config.
+`getMcpServers()` aggregates all (used for inventory display only).
 
 ---
 
@@ -630,6 +674,70 @@ Override with `MYCELIUM_DATA_DIR` environment variable.
 
 ~/.claude/skills/       # Skill libraries
 ~/.claude/mcp.json      # MCP server config (auto-discovered from agent CLIs)
+```
+
+### Frontend Source Structure
+
+```
+packages/client/src/
+├── App.tsx                 # Root: Header + AppLayout + ToastContainer
+├── main.tsx                # Entry: QueryClient + RouterProvider
+├── index.css               # Tailwind base styles
+├── components/
+│   ├── Header.tsx          # Top bar: title, connection, scheduler, stats
+│   ├── SystemView.tsx      # React Flow canvas (center column)
+│   ├── Panel.tsx           # Legacy panel router (used by SystemView node clicks)
+│   └── ToastContainer.tsx  # Fixed bottom-right stacked notifications
+├── layout/
+│   ├── AppLayout.tsx       # Three-column CSS flex: sidebar | canvas | panel
+│   ├── LeftSidebar.tsx     # Collapsible nav (240px/48px) with live data
+│   └── RightPanel.tsx      # 400px non-overlay detail panel
+├── panels/                 # Extracted panel components (from Panel.tsx)
+│   ├── SchedulerPanel.tsx  # Scheduler status + config
+│   ├── CyclePanel.tsx      # Cycle detail + live logs
+│   ├── TaskPoolPanel.tsx   # Task list + filters + create button
+│   ├── AgentPanel.tsx      # Agent config editor
+│   ├── AlignmentPanel.tsx  # Signals + response UI
+│   ├── MemoryPanel.tsx     # Patterns + warnings management
+│   ├── PromptsPanel.tsx    # System agent prompt editor
+│   ├── LogsPanel.tsx       # Live task output viewer
+│   ├── ReposPanel.tsx      # Repo list + browse + add
+│   ├── InventoryPanel.tsx  # Skills + MCP servers
+│   ├── index.ts            # Barrel exports
+│   ├── task/
+│   │   └── TaskCreateForm.tsx  # Task creation form
+│   └── components/
+│       └── ConfigControls.tsx  # Shared ConfigInput, ConfigToggle
+├── stores/                 # Zustand domain stores
+│   ├── system.ts           # Facade re-exporting domain stores
+│   ├── api.ts              # fetchAPI<T>() helper
+│   ├── uiStore.ts          # Panel state, sidebar, toasts
+│   ├── connectionStore.ts  # SSE EventSource management
+│   ├── schedulerStore.ts   # Scheduler status, config, active runs
+│   ├── taskStore.ts        # Tasks, logs, graph, filters, stats
+│   ├── signalStore.ts      # Signals, pending count
+│   ├── memoryStore.ts      # Patterns, warnings, grouped memory
+│   ├── promptStore.ts      # System agent prompts
+│   ├── repoStore.ts        # Repos, browse
+│   ├── inventoryStore.ts   # Skills, MCPs
+│   ├── agentStore.ts       # Agent configurations
+│   └── flowStore.ts        # React Flow nodes/edges
+├── nodes/                  # React Flow node components
+│   ├── index.ts            # Node type registry
+│   ├── CycleNode.tsx       # Scheduler cycle nodes (DSC, SEQ, etc.)
+│   ├── AlignmentNode.tsx   # Signal/alignment node
+│   ├── TaskPoolNode.tsx    # Task pool summary node
+│   ├── MemoryNode.tsx      # Memory summary node
+│   └── AgentSlotsNode.tsx  # Agent slots node
+├── lib/                    # Shared utilities
+│   ├── formatters.ts       # formatTimeAgo, formatDuration, formatCost
+│   ├── status.ts           # statusColor, statusBadge, truncate
+│   └── utils.ts            # General utilities
+├── hooks/
+│   └── usePanelRouter.ts   # URL query param sync for panels
+├── types/
+│   └── index.ts            # Re-exports from @mycelium/shared + client types
+└── flow/                   # React Flow configuration
 ```
 
 ---

@@ -13,6 +13,7 @@
  * so we fall back to the PID stored in spec_context.
  */
 
+import { readFileSync } from 'fs'
 import { SchedulerConfig } from '@mycelium/shared'
 import * as queries from '../../db/queries'
 import { broadcast } from '../../sse'
@@ -25,16 +26,29 @@ const NEEDS_ATTENTION_HOURS = 3
 const ORPHAN_THRESHOLD_HOURS = 4
 
 /**
- * Check if a process with the given PID is still alive.
- * Uses signal 0 which checks existence without actually sending a signal.
+ * Check if a process with the given PID is genuinely alive (not a zombie).
+ * signal 0 returns true for zombies since the PID still exists in the
+ * process table, so we check /proc/<pid>/status for State: Z on Linux.
  */
 function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0)
-    return true
   } catch {
     return false
   }
+
+  // Check for zombie state via /proc on Linux
+  try {
+    const status = readFileSync(`/proc/${pid}/status`, 'utf-8')
+    const stateMatch = status.match(/^State:\s+(\S)/m)
+    if (stateMatch && stateMatch[1] === 'Z') {
+      return false
+    }
+  } catch {
+    // /proc not available (non-Linux) - fall back to signal 0 result
+  }
+
+  return true
 }
 
 /**

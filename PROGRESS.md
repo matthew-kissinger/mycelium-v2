@@ -60,6 +60,26 @@
 | Fix-6 | COMPLETE | claude/opus | Process registry wiring (dispatcher passes taskId to dispatch, removed pgrep heuristic) |
 | Fix-7 | COMPLETE | claude/opus | Blocked check cancels pending tasks with failed/cancelled dependencies |
 | Infra-1 | COMPLETE | claude/opus | Dev script commands (build-restart, scheduler, check) + test infrastructure |
+| Fix-8 | COMPLETE | claude/opus | Per-agent MCP injection (buildMcpSection filters by dispatched agent, not union of all) |
+| Fix-9 | COMPLETE | claude/opus | Zombie process detection (isProcessAlive checks /proc status for State: Z) |
+| Refactor-0 | COMPLETE | claude/opus | Fix Cline dispatch args (task new subcommand) |
+| Refactor-1 | COMPLETE | claude/opus | Dead code removal (~1930 lines, 10 files) |
+| Refactor-2 | COMPLETE | claude/opus | Shared client types module |
+| Refactor-3 | COMPLETE | claude/opus | Store splitting (system.ts -> 12 domain stores) |
+| Refactor-4 | COMPLETE | claude/opus | Panel extraction (Panel.tsx 3717 -> 267 lines, 10 panel components) |
+| Refactor-5 | COMPLETE | claude/opus | Three-column layout (sidebar, canvas, right panel) |
+| Refactor-6 | COMPLETE | claude/opus | Task creation UI, toast system, URL routing |
+| Refactor-7 | COMPLETE | claude/opus | Cost tracking model (billing_type, per-use vs subscription) |
+| Canvas-1 | COMPLETE | claude/opus | Ring layout, sidebar groups, task pipeline sub-states, edge animations |
+| Canvas-2 | COMPLETE | claude/opus | Compact nodes, hidden support nodes, reduced edges |
+| Data-1 | COMPLETE | claude/opus | next_run timer computation in scheduler, cancelled count in stats |
+| Data-2 | COMPLETE | claude/opus | Shepherd per-repo unevaluated breakdown in sidebar |
+| Data-3 | COMPLETE | claude/opus | DB-first config storage (scheduler, agents, genesis, hooks) |
+| Data-4 | COMPLETE | claude/opus | DB-first prompt overrides with file fallback |
+| Data-5 | COMPLETE | claude/opus | Config history API endpoint |
+| Data-6 | COMPLETE | claude/opus | Prompt preview + variable resolution endpoints |
+| Data-7 | COMPLETE | claude/opus | PromptsPanel template variable inspection UI |
+| Data-8 | COMPLETE | claude/opus | Memory per-repo breakdown in sidebar |
 
 ---
 
@@ -1014,6 +1034,190 @@
 - `cancelDependentsOfTask()` recursively cascades cancellations downstream
 - Catches tasks missed by dispatcher's `cancelDependents` (e.g. tasks created after dep failed)
 
+### Fix-9: Zombie Process Detection
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-04
+**Validation**: Build passes
+
+**Files Modified**:
+- `packages/server/src/scheduler/cycles/blocked.ts` - `isProcessAlive()` now checks `/proc/<pid>/status` for zombie state
+
+**Root Cause**:
+- `process.kill(pid, 0)` returns true for zombie processes since the PID still exists in the process table
+- Zombie (`<defunct>`) processes have exited but haven't been reaped by their parent
+- Blocked check was skipping zombie tasks thinking they were still alive
+- e.g. Gemini task 9edc9114 ran as PID 370341, became zombie with zero log entries, blocked check kept skipping it
+
+**Notes**:
+- Reads `/proc/<pid>/status` and checks for `State: Z` (zombie)
+- Falls back to signal 0 result on non-Linux (no /proc)
+- Linux-specific but that's our target (NixOS)
+
+### Refactor-0: Fix Cline Dispatch Args
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-04
+**Validation**: Build passes
+
+**Files Modified**:
+- `packages/server/src/agents/dispatch.ts` - Changed Cline args from `[prompt, '--yolo', '--mode', 'act']` to `['task', 'new', prompt, '--yolo', '--mode', 'act']`
+
+**Notes**:
+- Top-level `cline` command does not support `--yolo` flag (caused 88% failure rate)
+- `cline task new` subcommand supports `--yolo` and `--mode act`
+- Enables future multi-step dispatch via `task send`
+
+### Refactor-1: Dead Code Removal
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-04
+**Validation**: Build passes, ~1930 lines removed
+
+**Files Deleted**:
+- `packages/client/src/stores/workflow.ts` (762 lines)
+- `packages/client/src/stores/index.ts` (7 lines)
+- `packages/client/src/components/LiveLogs.tsx` (138 lines)
+- `packages/client/src/components/Sidebar.tsx` (75 lines)
+- `packages/client/src/components/TaskPanel.tsx` (644 lines)
+- `packages/client/src/components/SignalPanel.tsx` (313 lines)
+- `packages/client/src/nodes/AgentNode.tsx`, `TaskNode.tsx`, `RepoNode.tsx`, `SignalNode.tsx`
+
+**Files Modified**:
+- `packages/client/src/nodes/index.ts` - Removed legacy node registrations
+- `packages/client/src/App.tsx` - Removed duplicate QueryClient, mushroom emoji
+- `packages/client/src/nodes/CycleNode.tsx` - Replaced emojis with 3-letter monospace labels (DSC, SEQ, DIS, etc.)
+- `packages/client/src/nodes/AlignmentNode.tsx`, `TaskPoolNode.tsx`, `MemoryNode.tsx`, `AgentSlotsNode.tsx` - Same emoji replacement
+- `packages/client/src/components/Panel.tsx` - Replaced folder emojis with `[git]`/`[dir]` text
+
+### Refactor-2: Shared Client Types Module
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-04
+
+**Files Created**:
+- `packages/client/src/types/index.ts` - Re-exports from `@mycelium/shared` plus client-specific types (Stats, SchedulerStatus, AgentConfigData, GroupedMemory, PromptInfo, LogEntry, TaskLogs, Task, etc.)
+
+### Refactor-3: Store Splitting
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-04
+**Validation**: Build passes, all panels load data correctly
+
+**Files Created**:
+- `packages/client/src/stores/api.ts` - Shared `fetchAPI<T>()` helper
+- `packages/client/src/stores/uiStore.ts` - Panel state, sidebar collapsed, toast system with auto-dismiss
+- `packages/client/src/stores/schedulerStore.ts` - Scheduler status, config, running system agents
+- `packages/client/src/stores/taskStore.ts` - Tasks, logs, graph, filters, stats, running tasks, createTask
+- `packages/client/src/stores/signalStore.ts` - Signals, pending count
+- `packages/client/src/stores/memoryStore.ts` - Patterns, warnings, grouped memory
+- `packages/client/src/stores/promptStore.ts` - Prompts, selected prompt
+- `packages/client/src/stores/repoStore.ts` - Repos, browse
+- `packages/client/src/stores/inventoryStore.ts` - Skills, MCPs
+- `packages/client/src/stores/agentStore.ts` - Agent configurations
+- `packages/client/src/stores/connectionStore.ts` - SSE EventSource management
+- `packages/client/src/stores/flowStore.ts` - React Flow nodes/edges
+
+**Files Modified**:
+- `packages/client/src/stores/system.ts` - Rewritten as thin facade re-exporting domain stores
+
+### Refactor-4: Panel Extraction
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-04
+**Validation**: Build passes, all panels work via imports
+
+**Files Created**:
+- `packages/client/src/panels/SchedulerPanel.tsx`
+- `packages/client/src/panels/CyclePanel.tsx`
+- `packages/client/src/panels/TaskPoolPanel.tsx`
+- `packages/client/src/panels/AgentPanel.tsx`
+- `packages/client/src/panels/AlignmentPanel.tsx`
+- `packages/client/src/panels/MemoryPanel.tsx`
+- `packages/client/src/panels/PromptsPanel.tsx`
+- `packages/client/src/panels/LogsPanel.tsx`
+- `packages/client/src/panels/ReposPanel.tsx`
+- `packages/client/src/panels/InventoryPanel.tsx`
+- `packages/client/src/panels/index.ts` - Barrel file
+- `packages/client/src/panels/components/ConfigControls.tsx` - Shared ConfigInput, ConfigToggle
+- `packages/client/src/lib/formatters.ts` - formatTimeAgo, formatDuration, formatCost, formatInterval
+- `packages/client/src/lib/status.ts` - statusColor, statusBadge, truncate
+
+**Files Modified**:
+- `packages/client/src/components/Panel.tsx` - Rewritten from 3717 to 267 lines (imports from panels/)
+
+### Refactor-5: Three-Column Layout
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-04
+**Validation**: Build passes
+
+**Files Created**:
+- `packages/client/src/layout/AppLayout.tsx` - CSS flex: sidebar | canvas | detail panel
+- `packages/client/src/layout/LeftSidebar.tsx` - Collapsible nav (240px/48px) with live data summaries
+- `packages/client/src/layout/RightPanel.tsx` - 400px non-overlay panel using uiStore
+
+**Files Modified**:
+- `packages/client/src/App.tsx` - Uses AppLayout with LeftSidebar and RightPanel
+- `packages/client/src/components/SystemView.tsx` - Removed Panel overlay rendering
+- `packages/client/src/stores/system.ts` - openPanel/closePanel now delegate to uiStore
+
+### Refactor-6: New Features
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-04
+**Validation**: Build passes
+
+**Files Created**:
+- `packages/client/src/panels/task/TaskCreateForm.tsx` - Task creation form (title, repo, agent, model, prompt, timeout)
+- `packages/client/src/components/ToastContainer.tsx` - Fixed bottom-right stacked toasts (auto-dismiss 5s info, manual dismiss errors)
+- `packages/client/src/hooks/usePanelRouter.ts` - URL query param sync for panels (?panel=taskPool&taskId=abc)
+
+**Files Modified**:
+- `packages/client/src/panels/TaskPoolPanel.tsx` - Added "New Task" button and TaskCreateForm integration
+- `packages/client/src/stores/taskStore.ts` - Toast notifications on run/cancel/delete/clone
+- `packages/client/src/stores/schedulerStore.ts` - Toast notifications on start/stop
+- `packages/client/src/stores/signalStore.ts` - Toast notifications on respond
+
+### Refactor-7: Cost Tracking Model
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-04
+**Validation**: Build passes, 32/32 tests pass
+
+**Files Modified**:
+- `packages/shared/src/schemas/agent.ts` - Added `BillingType` enum (`per_use` | `subscription`) and `billing_type` field to `AgentConfig`; Cline = `per_use`, rest = `subscription`
+- `packages/shared/src/schemas/api.ts` - Added `per_use_cost_usd` and `subscription_task_count` optional fields to `StatsResponse`
+- `packages/shared/src/types/index.ts` - Re-exported `BillingType`
+- `packages/server/src/agents/dispatch.ts` - Subscription agents get `cost_usd: 0`, per-use agents parse cost from output
+- `packages/server/src/routes/stats.ts` - Calculates and returns per_use_cost_usd and subscription_task_count
+- `packages/client/src/components/Header.tsx` - Shows "Cline: $X.XX" and "Sub: N tasks" when cost data available
+
+### Fix-8: Per-Agent MCP Injection
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-04
+**Validation**: Build passes, dispatcher and discovery inject only the dispatched agent's MCPs
+
+**Files Modified**:
+- `packages/server/src/config/inventory.ts` - Added `getMcpServersForAgent(agent)` that queries only that agent's CLI/config
+- `packages/server/src/prompts/context.ts` - `buildMcpSection(agent?)` accepts optional agent param, filters when provided
+- `packages/server/src/scheduler/cycles/dispatcher.ts` - Passes task agent to `buildMcpSection(agent)`
+- `packages/server/src/scheduler/cycles/discovery.ts` - Passes `'claude'` to `buildMcpSection('claude')`
+
+**Root Cause**:
+- `buildMcpSection()` aggregated MCPs from all 5 agent configs into one union list
+- This list was injected into every agent's prompt regardless of which agent was running the task
+- Non-Claude agents (cline, codex, etc.) were told they had MCPs they couldn't actually access
+- e.g. Cline was told it had Playwright MCP (configured in Claude), tried to use it, and failed
+
+**Notes**:
+- `getMcpServersForAgent(agent)` switches on agent name, queries only that agent's source
+- Claude/Codex/Gemini: queried via CLI (`<agent> mcp list`)
+- Cursor/Cline: read from their config files
+- `getMcpServers()` (union of all) kept for inventory display and armory cycle
+- Each agent CLI spawns its own MCP server processes (STDIO) - they cannot be shared
+
 ### Infra-1: Dev Script + Test Infrastructure
 **Status**: COMPLETE
 **Agent**: claude/opus
@@ -1034,6 +1238,71 @@
 - Test coverage: getFallbackModel, shouldRetry, buildRetryContext, parseRetryContext, resolveModel
 - All pure functions, no DB/IO mocking needed
 
+### Canvas-1: Ring Layout and Sidebar Overhaul
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-04
+**Validation**: Build passes, ring layout visible, sidebar grouped
+
+**Files Modified/Created**:
+- `packages/client/src/flow/architecture.ts` - Ring layout coordinates, feedback loop edge (Memory->Discovery)
+- `packages/client/src/flow/types.ts` - health_check cycleType, task pipeline sub-state counts
+- `packages/client/src/nodes/CycleNode.tsx` - Added health_check label/color
+- `packages/client/src/nodes/TaskPoolNode.tsx` - Pipeline sub-state bars (unsequenced/waiting/ready)
+- `packages/client/src/stores/flowStore.ts` - Edge animations when cycles running
+- `packages/client/src/layout/LeftSidebar.tsx` - Grouped sections (Pipeline/Tasks/Support/Data)
+- `packages/client/src/components/SystemView.tsx` - fitView padding, draggable nodes
+- `packages/client/src/types/index.ts` - Stats sub-state fields
+- `packages/server/src/routes/stats.ts` - Added unsequenced/waiting/ready/cancelled counts
+- `packages/shared/src/schemas/api.ts` - Added optional fields to StatsResponse
+
+### Data-1 through Data-2: Scheduler and Shepherd Data Wiring
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-04
+**Validation**: Build passes, next_run timers visible, shepherd per-repo breakdown works
+
+**Files Modified**:
+- `packages/server/src/scheduler/index.ts` - computeNextRun() function, sets next_run on cycle start and after runs
+- `packages/client/src/stores/system.ts` - Added ShepherdStatus, fetchShepherdStatus(), added to refreshAll
+- `packages/client/src/types/index.ts` - Added ShepherdStatus interface
+- `packages/client/src/layout/LeftSidebar.tsx` - Removed AGENTS section, added shepherd per-repo sub-items
+
+### Data-3 through Data-4: DB-First Config and Prompt Storage
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-04
+**Validation**: Build passes, 32/32 tests pass
+
+**Files Created**:
+- `packages/server/src/db/config-store.ts` - Core DB config store with getConfigOverride/saveConfigOverride, getPromptOverride/savePromptOverride, importFileConfig/importFilePrompt, getConfigHistory
+
+**Files Modified**:
+- `packages/server/src/db/schema.ts` - Added config_overrides, prompt_overrides, config_history tables
+- `packages/server/src/index.ts` - Added CREATE TABLE statements for 3 new tables
+- `packages/server/src/scheduler/config.ts` - Rewritten for DB-first (DB -> file import -> defaults)
+- `packages/server/src/config/agents.ts` - Rewritten for DB-first with mergeAgentsConfig helper
+- `packages/server/src/config/index.ts` - Genesis and hooks configs rewritten for DB-first
+- `packages/server/src/config/prompts.ts` - Custom prompt load/save/delete now use DB with file fallback
+
+**Notes**:
+- One-time file import: if DB has no override but file exists, imports file content to DB
+- All saves record history in config_history table (old_value, new_value, changed_by, changed_at)
+- File paths kept for display/info only (getConfigPath functions)
+
+### Data-5 through Data-8: API Endpoints and Frontend Updates
+**Status**: COMPLETE
+**Agent**: claude/opus
+**Completed**: 2026-02-04
+**Validation**: Build passes, 32/32 tests pass
+
+**Files Modified**:
+- `packages/server/src/routes/config.ts` - Added GET /api/config/history endpoint with key/limit/offset
+- `packages/server/src/routes/prompts.ts` - Added GET /:id/variables (resolved values) and GET /:id/preview (full substitution)
+- `packages/client/src/panels/PromptsPanel.tsx` - Template variable chips with expandable resolved values
+- `packages/client/src/stores/system.ts` - fetchMemory now fetches /memory/all (grouped) for per-repo data
+- `packages/client/src/layout/LeftSidebar.tsx` - Memory item shows per-repo sub-items with pattern/warning counts
+
 ---
 
 ## Agent Harness Compatibility Matrix
@@ -1051,6 +1320,9 @@
 | Exit codes | Standard | Standard | Standard | Custom | Custom |
 | Cost in output | Yes | Yes | Yes | No | No |
 | Session logs | ~/.claude/ | ~/.codex/ | ~/.gemini/ | ~/.cline/ | ~/.cursor/ |
+| MCP config | `~/.claude.json` (JSON) | `~/.codex/config.toml` (TOML) | `~/.gemini/settings.json` (JSON) | VS Code globalStorage (JSON) | `~/.cursor/mcp.json` (JSON) |
+| MCP query | `claude mcp list` | `codex mcp list` | `gemini mcp list` | File read | File read |
+| MCP transport | stdio, HTTP, SSE | stdio, HTTP | stdio, SSE, HTTP | stdio, SSE | stdio, SSE, HTTP |
 
 ### Harness-Specific Behaviors
 
@@ -1192,4 +1464,24 @@ Before marking a phase complete:
 | 2026-02-04 | Fix-6 | claude/opus | Process registry: dispatcher passes taskId to dispatch(), removed pgrep/proc heuristic from blocked check |
 | 2026-02-04 | Fix-7 | claude/opus | Blocked check: cancel pending tasks whose dependencies are failed/cancelled, recursive cascade |
 | 2026-02-04 | Infra-1 | claude/opus | Dev script: build-restart, scheduler start/stop, check commands; bun:test infrastructure + fallback module tests |
+| 2026-02-04 | Fix-8 | claude/opus | Per-agent MCP injection: buildMcpSection(agent) queries only that agent's config, prevents cross-agent MCP pollution |
+| 2026-02-04 | Fix-9 | claude/opus | Zombie detection: isProcessAlive checks /proc/<pid>/status for State: Z, prevents blocked check from skipping dead processes |
+| 2026-02-04 | Refactor-0 | claude/opus | Cline dispatch: changed args from `--yolo` (invalid for top-level) to `task new ... --yolo --mode act` |
+| 2026-02-04 | Refactor-1 | claude/opus | Dead code: deleted workflow.ts, stores/index.ts, LiveLogs, Sidebar, TaskPanel, SignalPanel, 4 legacy nodes; replaced emojis with monospace labels |
+| 2026-02-04 | Refactor-2 | claude/opus | Types: created packages/client/src/types/index.ts re-exporting shared + client-specific types |
+| 2026-02-04 | Refactor-3 | claude/opus | Stores: split 1340-line system.ts into api, uiStore, schedulerStore, taskStore, signalStore, memoryStore, promptStore, repoStore, inventoryStore, agentStore, connectionStore, flowStore; system.ts kept as facade |
+| 2026-02-04 | Refactor-4 | claude/opus | Panels: extracted 10 components from Panel.tsx (3717->267 lines) into panels/ dir; created lib/formatters.ts and lib/status.ts |
+| 2026-02-04 | Refactor-5 | claude/opus | Layout: AppLayout (3-col), LeftSidebar (collapsible nav with live data), RightPanel (non-overlay); updated App.tsx and SystemView.tsx |
+| 2026-02-04 | Refactor-6 | claude/opus | Features: TaskCreateForm (panels/task/), ToastContainer with auto-dismiss, usePanelRouter URL sync; toast notifications in taskStore, schedulerStore, signalStore |
+| 2026-02-04 | Refactor-7 | claude/opus | Costs: billing_type field in AgentConfig (per_use for cline, subscription for rest); stats API returns per_use_cost_usd and subscription_task_count; Header shows split |
+| 2026-02-04 | Canvas-1 | claude/opus | Ring layout for React Flow canvas (loop topology), sidebar grouped sections (Pipeline/Tasks/Support/Data), task pipeline sub-states (unsequenced/waiting/ready), edge animations |
+| 2026-02-04 | Canvas-2 | claude/opus | Compact nodes with minimal height, support nodes hidden (armory/blocked/digest/compaction/health), reduced edges for cleaner graph |
+| 2026-02-04 | Data-1 | claude/opus | computeNextRun() in scheduler index.ts sets next_run on cycle start and after runs; cancelled count added to stats API |
+| 2026-02-04 | Data-2 | claude/opus | Sidebar shepherd item shows per-repo sub-items with unevaluated/batch_size counts; repos at threshold in amber |
+| 2026-02-04 | Data-3 | claude/opus | DB-first config: config_overrides table, config-store.ts module, scheduler/agents/genesis/hooks loaders rewritten for DB->file->defaults; one-time file import; saves to DB with history |
+| 2026-02-04 | Data-4 | claude/opus | Prompt overrides in prompt_overrides table; prompts.ts loadCustomPrompt reads DB first, falls back to .md files with import; save/delete go to DB |
+| 2026-02-04 | Data-5 | claude/opus | GET /api/config/history endpoint with key/limit/offset query params; returns config_history rows (audit trail of all config and prompt changes) |
+| 2026-02-04 | Data-6 | claude/opus | GET /api/prompts/:id/variables returns resolved template variable values with char lengths; GET /api/prompts/:id/preview returns full prompt with variables substituted |
+| 2026-02-04 | Data-7 | claude/opus | PromptsPanel shows template variables as clickable chips; clicking expands resolved value in scrollable pane; fetches from /api/prompts/:id/variables |
+| 2026-02-04 | Data-8 | claude/opus | fetchMemory now fetches /memory/all (grouped); sidebar Memory item shows per-repo sub-items with pattern/warning counts; warnings highlighted |
 

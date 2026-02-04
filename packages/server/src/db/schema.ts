@@ -151,6 +151,32 @@ export const fruiting_sessions = sqliteTable('fruiting_sessions', {
   created_at: text('created_at').notNull(),
 })
 
+// Config overrides (replaces JSON files on disk)
+export const config_overrides = sqliteTable('config_overrides', {
+  key: text('key').primaryKey(), // 'scheduler', 'agents', 'genesis', 'hooks'
+  value: text('value').notNull(), // JSON blob
+  updated_at: text('updated_at').notNull(),
+  updated_by: text('updated_by').default('api'), // 'api', 'cli', 'import'
+})
+
+// Prompt overrides (replaces .md files on disk)
+export const prompt_overrides = sqliteTable('prompt_overrides', {
+  prompt_id: text('prompt_id').primaryKey(),
+  content: text('content').notNull(),
+  updated_at: text('updated_at').notNull(),
+})
+
+// Config change history (audit trail)
+export const config_history = sqliteTable('config_history', {
+  id: text('id').primaryKey(),
+  config_key: text('config_key').notNull(), // 'scheduler', 'agents.claude', 'prompt:discovery'
+  field: text('field'), // specific field changed, or null for full replace
+  old_value: text('old_value'),
+  new_value: text('new_value'),
+  changed_at: text('changed_at').notNull(),
+  changed_by: text('changed_by').default('api'),
+})
+
 // Devices table (network devices for control and monitoring)
 export const devices = sqliteTable('devices', {
   id: text('id').primaryKey(),

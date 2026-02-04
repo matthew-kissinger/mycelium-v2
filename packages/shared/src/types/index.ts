@@ -17,6 +17,7 @@ export type {
 
 export type {
   AgentConfig,
+  BillingType,
   AgentExecuteRequest,
   AgentExecuteResult,
 } from '../schemas/agent'

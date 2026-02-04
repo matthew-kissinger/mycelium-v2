@@ -245,6 +245,44 @@ function readMcpFromFile(filePath: string, source: string): McpServer[] {
 }
 
 /**
+ * Get MCP servers for a specific agent.
+ * Only queries that agent's config - no cross-agent pollution.
+ */
+export function getMcpServersForAgent(agent: string): McpServer[] {
+  let servers: McpServer[] = []
+
+  switch (agent) {
+    case 'claude':
+      servers = queryMcpFromCli('claude', 'claude')
+      break
+    case 'codex':
+      servers = queryMcpFromCli('codex', 'codex')
+      break
+    case 'gemini':
+      servers = queryMcpFromCli('gemini', 'gemini')
+      break
+    case 'cursor':
+      servers = readMcpFromFile(CURSOR_MCP_CONFIG, 'cursor')
+      break
+    case 'cline':
+      servers = readMcpFromFile(CLINE_MCP_CONFIG, 'cline')
+      break
+    default:
+      // Unknown agent - return empty (safe default)
+      return []
+  }
+
+  // Normalize names - strip "plugin:" prefix (Claude-specific naming)
+  const cleaned: McpServer[] = []
+  for (const server of servers) {
+    if (server.name.startsWith('plugin:')) continue
+    cleaned.push(server)
+  }
+
+  return cleaned.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
  * Get all installed MCP servers from all agent configs.
  * Queries CLI for claude/codex/gemini, reads files for cursor/cline.
  * Dedupes by name, preferring connected/enabled sources.

@@ -34,6 +34,7 @@ import {
   getAgentsConfigPath,
   getEnabledAgents,
 } from '../config'
+import { getConfigHistory } from '../db/config-store'
 
 const app = new Hono()
 
@@ -316,6 +317,25 @@ app.patch('/agents/:name', zValidator('json', AgentConfigUpdateSchema), async (c
     message: `Agent ${agentName} config updated`,
     name: agentName,
     config: updated,
+  })
+})
+
+// =============================================================================
+// Config History
+// =============================================================================
+
+// GET /api/config/history - Get config change history
+app.get('/history', async (c) => {
+  const key = c.req.query('key')
+  const limit = parseInt(c.req.query('limit') ?? '50')
+  const offset = parseInt(c.req.query('offset') ?? '0')
+
+  const history = getConfigHistory({ key: key || undefined, limit, offset })
+
+  return c.json({
+    history,
+    total: history.length,
+    filters: { key: key || null, limit, offset },
   })
 })
 

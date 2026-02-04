@@ -1,6 +1,10 @@
 import { z } from 'zod'
 import { AgentType } from './task'
 
+// Billing type: per_use = pay-per-token (e.g. Cline via OpenRouter), subscription = monthly plan
+export const BillingType = z.enum(['per_use', 'subscription'])
+export type BillingType = z.infer<typeof BillingType>
+
 // Agent configuration
 export const AgentConfig = z.object({
   type: AgentType,
@@ -8,6 +12,7 @@ export const AgentConfig = z.object({
   timeout_seconds: z.number().default(1800), // 30 min default
   max_turns: z.number().default(50),
   supports_streaming: z.boolean().default(true),
+  billing_type: BillingType.default('subscription'),
 })
 export type AgentConfig = z.infer<typeof AgentConfig>
 
@@ -20,6 +25,7 @@ export const DEFAULT_AGENT_CONFIGS: Record<string, AgentConfig> = {
     timeout_seconds: 1800,
     max_turns: 50,
     supports_streaming: true,
+    billing_type: 'subscription',
   },
   codex: {
     type: 'codex',
@@ -27,6 +33,7 @@ export const DEFAULT_AGENT_CONFIGS: Record<string, AgentConfig> = {
     timeout_seconds: 1800,
     max_turns: 50,
     supports_streaming: true,
+    billing_type: 'subscription',
   },
   gemini: {
     type: 'gemini',
@@ -34,6 +41,7 @@ export const DEFAULT_AGENT_CONFIGS: Record<string, AgentConfig> = {
     timeout_seconds: 1800,
     max_turns: 30,
     supports_streaming: true,
+    billing_type: 'subscription',
   },
   cline: {
     type: 'cline',
@@ -41,6 +49,7 @@ export const DEFAULT_AGENT_CONFIGS: Record<string, AgentConfig> = {
     timeout_seconds: 1800,
     max_turns: 30,
     supports_streaming: false,
+    billing_type: 'per_use',
   },
   cursor: {
     type: 'cursor',
@@ -48,6 +57,7 @@ export const DEFAULT_AGENT_CONFIGS: Record<string, AgentConfig> = {
     timeout_seconds: 1800,
     max_turns: 30,
     supports_streaming: false,
+    billing_type: 'subscription',
   },
 }
 
