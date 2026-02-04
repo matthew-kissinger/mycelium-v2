@@ -145,6 +145,7 @@ DATABASE_PATH=~/.config/mycelium-v2/mycelium.db
 mycel stats                                    # Show stats
 mycel tasks [--status pending]                 # List tasks
 mycel task create "title" --repo /path --agent claude --model sonnet
+mycel task create "title" --agent cline --model kimi-k2.5 --provider openrouter
 mycel task create "title" --prompt "full spec" # With full spec
 mycel task run <id>                            # Run task
 mycel task info <id>                           # Task details
@@ -441,7 +442,7 @@ Config changes are audited in `config_history` (old_value, new_value, changed_by
 -- Core task tracking
 tasks (
   id, title, prompt, status,
-  agent, model, repo_path,
+  agent, model, provider, repo_path, -- provider: openrouter|cline for cline agent
   branch_name, github_url,        -- Git tracking
   spec_context,                   -- Orchestrator metadata
   depends_on,                     -- JSON array of task IDs

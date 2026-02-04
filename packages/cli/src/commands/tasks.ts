@@ -218,6 +218,7 @@ export function registerTaskCommands(program: Command): void {
     .requiredOption('-r, --repo <path>', 'Repository path')
     .option('-a, --agent <agent>', 'Agent to use (claude, codex, gemini, cline, cursor)')
     .option('-m, --model <model>', 'Model to use')
+    .option('--provider <provider>', 'Provider for cline (openrouter or cline)')
     .option('-p, --prompt <prompt>', 'Task prompt/specification')
     .option('-d, --depends-on <ids...>', 'Task IDs this task depends on')
     .option('--json', 'Output as JSON')
@@ -244,6 +245,9 @@ export function registerTaskCommands(program: Command): void {
         if (options.model) {
           body.model = options.model
         }
+        if (options.provider) {
+          body.provider = options.provider
+        }
         if (options.prompt) {
           body.prompt = options.prompt
         }
@@ -267,6 +271,9 @@ export function registerTaskCommands(program: Command): void {
         if (response.task.model) {
           console.log(`  Model: ${response.task.model}`)
         }
+        if (response.task.provider) {
+          console.log(`  Provider: ${response.task.provider}`)
+        }
         if (response.task.depends_on.length > 0) {
           console.log(`  Deps:  ${response.task.depends_on.map(shortId).join(', ')}`)
         }
@@ -289,6 +296,7 @@ export function registerTaskCommands(program: Command): void {
     .description('Run a pending task')
     .option('-a, --agent <agent>', 'Override agent')
     .option('-m, --model <model>', 'Override model')
+    .option('--provider <provider>', 'Override provider for cline (openrouter or cline)')
     .option('--json', 'Output as JSON')
     .action(async (id: string, options) => {
       try {
@@ -301,6 +309,9 @@ export function registerTaskCommands(program: Command): void {
         }
         if (options.model) {
           body.model = options.model
+        }
+        if (options.provider) {
+          body.provider = options.provider
         }
 
         const response = await client.post<TaskRunResponse>(
@@ -357,6 +368,9 @@ export function registerTaskCommands(program: Command): void {
         console.log(`Repo:       ${task.repo_path}`)
         console.log(`Agent:      ${task.agent ?? '-'}`)
         console.log(`Model:      ${task.model ?? '-'}`)
+        if (task.provider) {
+          console.log(`Provider:   ${task.provider}`)
+        }
         console.log(`Sequenced:  ${task.sequenced ? 'yes' : 'no'}`)
         console.log(`Created:    ${task.created_at}`)
 
@@ -490,6 +504,7 @@ export function registerTaskCommands(program: Command): void {
     .description('Update a task')
     .option('-a, --agent <agent>', 'Set agent')
     .option('-m, --model <model>', 'Set model')
+    .option('--provider <provider>', 'Set provider for cline (openrouter or cline)')
     .option('-s, --status <status>', 'Set status')
     .option('-d, --depends-on <ids...>', 'Set dependencies')
     .option('--clear-deps', 'Clear all dependencies')
@@ -506,6 +521,9 @@ export function registerTaskCommands(program: Command): void {
         }
         if (options.model) {
           body.model = options.model
+        }
+        if (options.provider) {
+          body.provider = options.provider
         }
         if (options.status) {
           body.status = options.status
@@ -538,6 +556,9 @@ export function registerTaskCommands(program: Command): void {
         }
         if (response.task.model) {
           console.log(`  Model:  ${response.task.model}`)
+        }
+        if (response.task.provider) {
+          console.log(`  Provider: ${response.task.provider}`)
         }
         if (response.task.depends_on.length > 0) {
           console.log(`  Deps:   ${response.task.depends_on.map(shortId).join(', ')}`)

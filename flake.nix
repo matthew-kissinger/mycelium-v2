@@ -41,6 +41,9 @@
               # Database
               sqlite
 
+              # Browser automation (Playwright)
+              playwright-driver
+
               # Development
               nodePackages.prettier
               git
@@ -58,6 +61,7 @@
               echo "  Bun:        $(bun --version)"
               echo "  Node:       $(node --version)"
               echo "  TypeScript: $(tsc --version 2>/dev/null || echo 'run: bun install')"
+              echo "  Playwright: ${pkgs.playwright-driver.version} (nix-managed browsers)"
               echo ""
               echo "Commands:"
               echo "  bun run dev         - Start backend (port 8765)"
@@ -70,6 +74,48 @@
               export MYCELIUM_DATA_DIR="$HOME/.config/mycelium-v2"
               export DATABASE_PATH="$MYCELIUM_DATA_DIR/mycelium.db"
               export NODE_ENV="development"
+
+              # Playwright: bridge nix-managed browsers to any playwright-core version.
+              # Nix provides browsers at specific revisions (e.g. chromium-1200).
+              # npx @playwright/mcp@latest may expect different revisions (e.g. 1208).
+              # We create a shim directory with symlinks for all known revisions.
+              _pw_shim="$HOME/.cache/playwright-nix"
+              _pw_nix="${pkgs.playwright-driver.passthru.browsers}"
+              mkdir -p "$_pw_shim"
+
+              # Link nix-provided browser directories
+              for _dir in "$_pw_nix"/*/; do
+                _base=$(basename "$_dir")
+                [ -e "$_pw_shim/$_base" ] || ln -sfn "$_dir" "$_pw_shim/$_base"
+              done
+
+              # Create revision aliases so newer playwright-core versions find browsers.
+              # Map: any revision -> nix-provided revision for each browser type.
+              _setup_aliases() {
+                local browser="$1"
+                local nix_rev=""
+                # Find the nix-provided revision
+                for d in "$_pw_shim/$browser"-[0-9]*/; do
+                  [ -d "$d" ] && nix_rev=$(basename "$d") && break
+                done
+                [ -z "$nix_rev" ] && return
+                # Create aliases for common revisions that newer versions may request
+                for rev in 1200 1208 1209 1210 1211 1212 1213 1214 1215; do
+                  local target="$_pw_shim/$browser-$rev"
+                  if [ ! -e "$target" ]; then
+                    ln -sfn "$_pw_shim/$nix_rev" "$target"
+                  fi
+                done
+              }
+              _setup_aliases "chromium"
+              _setup_aliases "chromium_headless_shell"
+              _setup_aliases "firefox"
+              _setup_aliases "webkit"
+              _setup_aliases "ffmpeg"
+
+              export PLAYWRIGHT_BROWSERS_PATH="$_pw_shim"
+              export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+              unset _pw_shim _pw_nix
 
               # Ensure data directory exists
               mkdir -p "$MYCELIUM_DATA_DIR"

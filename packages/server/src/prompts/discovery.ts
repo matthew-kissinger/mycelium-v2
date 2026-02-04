@@ -93,7 +93,7 @@ You MUST use a VARIETY of agents across tasks. Do NOT default everything to Clau
 - **codex** (gpt-5.2-codex): Code generation, pattern-based work, mechanical refactors
 - **gemini** (gemini-3-flash-preview): Most tasks, fast iteration; (gemini-3-pro-preview): deep research only
 - **cursor** (composer-1): Multi-file composition, large refactors; (opus-4.5-thinking): complex design
-- **cline** (kimi-k2.5): Strong reasoning; (glm-4.7): code and general tasks
+- **cline** (kimi-k2.5): Strong reasoning; (glm-4.7): code/general tasks. Use --provider openrouter for OpenRouter credits
 - **claude** (sonnet): Balanced work; (opus): architecture, complex debugging; (haiku): simple fixes
 
 **Distribution goal:** Aim for at least 2-3 different agents across your suggested tasks.
@@ -134,6 +134,8 @@ Your job has FOUR required steps - you MUST complete ALL of them:
 **Update stale docs** directly - you have write access. Don't create tasks for doc updates you can do yourself.
 
 **Create tasks** using \`mycel task create "title" --repo {repo_path} --agent <agent> --model <model> --prompt "..."\`
+
+**For cline tasks**, add \`--provider openrouter\` or \`--provider cline\` to select the billing provider.
 
 **Wire dependencies** using \`--depends-on <task_id1> <task_id2>\` when creating tasks that must wait for others.
 
@@ -257,7 +259,7 @@ You MUST use a VARIETY of agents across tasks. Do NOT default everything to Clau
 - **codex** (gpt-5.2-codex): Code generation, pattern-based work, mechanical refactors, boilerplate
 - **gemini** (gemini-3-flash-preview): Most tasks, fast iteration; (gemini-3-pro-preview): deep research only
 - **cursor** (composer-1): Multi-file composition, large refactors; (opus-4.5-thinking): complex design
-- **cline** (kimi-k2.5): Strong reasoning; (glm-4.7): code and general tasks
+- **cline** (kimi-k2.5): Strong reasoning; (glm-4.7): code/general tasks. Use --provider openrouter for OpenRouter credits
 - **claude** (sonnet): Balanced feature work; (opus): architecture, complex debugging; (haiku): simple fixes
 
 **Distribution requirement:** Use at least 2-3 different agents across your tasks.
@@ -268,7 +270,7 @@ Example distribution:
 - Task 1: codex/gpt-5.2-codex (code generation)
 - Task 2: gemini/gemini-3-flash-preview (feature work)
 - Task 3: cursor/composer-1 (multi-file refactor)
-- Task 4: cline/kimi-k2.5(feature work)
+- Task 4: cline/kimi-k2.5 --provider openrouter (feature work)
 - Task 5: claude/haiku (simple fix)
 
 ## Guidelines
@@ -359,6 +361,8 @@ When complete: test your changes, commit with "fix: resolve intermittent 401 aft
 
 **Create tasks** using \`mycel task create "title" --repo {repo_path} --agent <agent> --model <model> --prompt "..."\`
 
+**For cline tasks**, add \`--provider openrouter\` or \`--provider cline\` to select the billing provider.
+
 **Send confirmation** when done: \`mycel notify "[TASK CREATOR] Created N tasks"\`
 
 {AGENTS_SECTION}
@@ -369,7 +373,7 @@ Use a VARIETY of agents. Match agent strengths to task requirements:
 - **codex** (model: gpt-5.2-codex): Code generation, pattern-based work, mechanical refactors
 - **gemini** (model: gemini-3-flash-preview): Most tasks, fast iteration. Use gemini-3-pro-preview only for deep research
 - **cursor** (model: composer-1): Multi-file composition. Use opus-4.5-thinking for complex design
-- **cline** (model: kimi-k2.5): Strong reasoning. Alternative: glm-4.7 for code and general tasks
+- **cline** (model: kimi-k2.5): Strong reasoning; (glm-4.7): code/general tasks. Use --provider openrouter for OpenRouter credits
 - **claude** (model: sonnet): Balanced work. Use opus for architecture, haiku for simple fixes
 
 If Discovery report suggested specific agents, use those. Otherwise select appropriately.

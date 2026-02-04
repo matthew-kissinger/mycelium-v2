@@ -7,6 +7,7 @@ export const tasks = sqliteTable('tasks', {
   status: text('status').notNull().default('pending'),
   agent: text('agent'),
   model: text('model'),
+  provider: text('provider'), // For agents with multiple auth (cline: openrouter/cline)
   repo_path: text('repo_path').notNull(),
   prompt: text('prompt'),
 

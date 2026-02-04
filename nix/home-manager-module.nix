@@ -17,6 +17,8 @@ with lib;
 let
   cfg = config.services.mycelium;
   settingsFormat = pkgs.formats.json { };
+  playwrightBrowsers = pkgs.playwright-driver.passthru.browsers;
+  playwrightShimDir = "${config.home.homeDirectory}/.cache/playwright-nix";
 in
 {
   options.services.mycelium = {
@@ -162,17 +164,45 @@ in
 
   config = mkIf cfg.enable {
     # =========================================================================
-    # Ensure directories exist
+    # Ensure directories exist + Playwright browser shim
     # =========================================================================
     home.activation.myceliumSetup = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       run mkdir -p "${cfg.dataDir}"
       run mkdir -p "${cfg.dataDir}/logs"
+
+      # Playwright: create shim directory with version-aliased symlinks to
+      # nix-managed browsers. This bridges nix-provided browser revisions to
+      # whatever revision npx @playwright/mcp@latest expects.
+      run mkdir -p "${playwrightShimDir}"
+      for _dir in ${playwrightBrowsers}/*/; do
+        _base=$(basename "$_dir")
+        [ -e "${playwrightShimDir}/$_base" ] || ln -sfn "$_dir" "${playwrightShimDir}/$_base"
+      done
+      for browser in chromium chromium_headless_shell firefox webkit ffmpeg; do
+        nix_rev=""
+        for d in ${playwrightShimDir}/$browser-[0-9]*/; do
+          [ -d "$d" ] && nix_rev=$(basename "$d") && break
+        done
+        [ -z "$nix_rev" ] && continue
+        for rev in 1200 1208 1209 1210 1211 1212 1213 1214 1215; do
+          target="${playwrightShimDir}/$browser-$rev"
+          [ -e "$target" ] || ln -sfn "${playwrightShimDir}/$nix_rev" "$target"
+        done
+      done
     '';
 
     # =========================================================================
     # Install CLI
     # =========================================================================
     home.packages = [ cfg.package ];
+
+    # =========================================================================
+    # Session-wide Playwright environment (inherited by all user processes)
+    # =========================================================================
+    home.sessionVariables = {
+      PLAYWRIGHT_BROWSERS_PATH = playwrightShimDir;
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
+    };
 
     # =========================================================================
     # Scheduler configuration file
@@ -209,6 +239,8 @@ in
           "HOST=${cfg.server.host}"
           "DATABASE_PATH=${cfg.dataDir}/mycelium.db"
           "MYCELIUM_DATA_DIR=${cfg.dataDir}"
+          "PLAYWRIGHT_BROWSERS_PATH=${playwrightShimDir}"
+          "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1"
         ]
         ++ (mapAttrsToList (k: v: "${k}=${v}") cfg.extraEnv)
         ++ (optional (cfg.scheduler.enable && cfg.scheduler.autoStart) "SCHEDULER_AUTO_START=true")

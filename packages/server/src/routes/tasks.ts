@@ -250,6 +250,7 @@ app.post('/', zValidator('json', TaskCreate), async (c) => {
     status: 'pending',
     agent: data.agent ?? null,
     model: data.model ?? null,
+    provider: data.provider ?? null,
     repo_path: data.repo_path,
     prompt: data.prompt ?? null,
     depends_on: JSON.stringify(resolvedDeps),
@@ -281,6 +282,7 @@ app.patch('/:id', zValidator('json', TaskUpdate), async (c) => {
   if (data.status !== undefined) updates.status = data.status
   if (data.agent !== undefined) updates.agent = data.agent
   if (data.model !== undefined) updates.model = data.model
+  if (data.provider !== undefined) updates.provider = data.provider
   if (data.result !== undefined) updates.result = data.result
   if (data.error !== undefined) updates.error = data.error
   if (data.sequenced !== undefined) updates.sequenced = data.sequenced
@@ -348,11 +350,12 @@ app.post('/:id/run', async (c) => {
   const id = c.req.param('id')
 
   // Parse optional overrides from body
-  let overrides: { agent?: string; model?: string } = {}
+  let overrides: { agent?: string; model?: string; provider?: string } = {}
   try {
     const body = await c.req.json()
     if (body.agent) overrides.agent = body.agent
     if (body.model) overrides.model = body.model
+    if (body.provider) overrides.provider = body.provider
   } catch {
     // No body or invalid JSON, use task defaults
   }
@@ -390,20 +393,23 @@ app.post('/:id/run', async (c) => {
   }
 
   // Mark as running
+  const provider = overrides.provider ?? task.provider ?? undefined
   await queries.updateTask(id, {
     status: 'running',
     agent: agent,
     model: overrides.model ?? task.model ?? undefined,
+    provider: provider,
     started_at: new Date().toISOString(),
   })
 
-  broadcast('task:started', { id, status: 'running', agent })
+  broadcast('task:started', { id, status: 'running', agent, provider })
 
   // Execute agent (fire and forget, result handled async)
   executeTask({
     ...task,
     agent,
     model: overrides.model ?? task.model,
+    provider,
   }).catch(console.error)
 
   return c.json({ message: 'Task started', id, agent })
@@ -464,6 +470,7 @@ async function executeTask(task: {
   id: string
   agent: string | null
   model: string | null
+  provider?: string | null
   prompt: string | null
   repo_path: string
 }) {
@@ -480,6 +487,7 @@ async function executeTask(task: {
       prompt: task.prompt!,
       cwd: task.repo_path,
       model: task.model ?? undefined,
+      provider: task.provider as 'openrouter' | 'cline' | undefined,
       taskId: task.id,  // Register process for cleanup
       onOutput: (chunk, stream = 'stdout') => {
         // Store in log buffer
@@ -618,6 +626,7 @@ app.post('/:id/clone', async (c) => {
     status: 'pending',
     agent: task.agent,
     model: task.model,
+    provider: task.provider,
     repo_path: task.repo_path,
     prompt: task.prompt,
     depends_on: '[]', // Reset dependencies for clone

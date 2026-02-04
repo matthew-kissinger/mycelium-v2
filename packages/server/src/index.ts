@@ -23,9 +23,9 @@ import {
   schedulerRoutes,
 } from './routes/system-agents'
 import { getSchedulerStatus } from './scheduler'
-import { getRuns, parseRun } from './db/queries'
+import { getRuns, parseRun, cleanupOrphanedRuns } from './db/queries'
 import { createSSEResponse, getClientCount, getClientInfo, shutdown as shutdownSSE } from './sse'
-import { shutdownRegistry, getRunningProcessCount } from './agents'
+import { shutdownRegistry, getRunningProcessCount, cleanupClineInstances, getHealthSummary, checkOpenRouterCredits, checkClineCredits, getClineProvider, getOpenRouterFreeModels } from './agents'
 import { db, schema } from './db'
 import { sql } from 'drizzle-orm'
 import { initTelegramService, getTelegramService, shutdownTelegramService } from './telegram'
@@ -43,6 +43,15 @@ app.get('/api/health', async (c) => {
   const schedulerStatus = getSchedulerStatus()
   const runningSystemAgents = await getRuns({ status: 'running' })
 
+  // Get agent health and quota info (async API calls in parallel)
+  const [agentHealth, openrouterCredits, clineCredits, clineProvider, freeModels] = await Promise.all([
+    Promise.resolve(getHealthSummary()),
+    checkOpenRouterCredits(),
+    checkClineCredits(),
+    getClineProvider(),
+    getOpenRouterFreeModels(),
+  ])
+
   return c.json({
     backend: true,
     scheduler: schedulerStatus.running,
@@ -58,6 +67,13 @@ app.get('/api/health', async (c) => {
     uptime_seconds: Math.floor(process.uptime()),
     sse_clients: getClientCount(),
     running_agents: getRunningProcessCount(),
+    agent_health: agentHealth,
+    cline: {
+      provider: clineProvider,
+      openrouter_credits: openrouterCredits,
+      cline_credits: clineCredits,
+      free_models: freeModels,
+    },
   })
 })
 
@@ -255,6 +271,13 @@ async function initDb() {
     // Column already exists
   }
 
+  try {
+    // Add provider column to tasks for cline auth selection
+    sqlite.exec(`ALTER TABLE tasks ADD COLUMN provider TEXT;`)
+  } catch {
+    // Column already exists
+  }
+
   console.log('Database initialized')
 }
 
@@ -276,6 +299,12 @@ const port = parseInt(process.env.PORT ?? '8765')
 initDb().then(async () => {
   console.log(`Server running at http://localhost:${port}`)
 
+  // Clean up orphaned system agent runs from previous sessions
+  const cleaned = await cleanupOrphanedRuns(1) // 1 hour threshold
+  if (cleaned > 0) {
+    console.log(`[Startup] Cleaned up ${cleaned} orphaned system agent runs`)
+  }
+
   // Initialize Telegram after DB is ready
   await initTelegram()
 
@@ -293,6 +322,9 @@ async function gracefulShutdown(signal: string) {
 
   // Kill all running agent processes and mark tasks as cancelled
   await shutdownRegistry()
+
+  // Clean up cline instances
+  await cleanupClineInstances()
 
   // Stop Telegram poller
   const telegram = getTelegramService()

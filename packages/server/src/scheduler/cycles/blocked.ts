@@ -19,6 +19,7 @@ import * as queries from '../../db/queries'
 import { broadcast } from '../../sse'
 import { getRunningProcesses } from '../../agents/registry'
 import { getTelegramService } from '../../telegram'
+import { getActiveRuns } from '../active-runs'
 
 // Thresholds in minutes
 const STALE_THRESHOLD_MINUTES = 35 // Higher than max agent timeout (30 min)
@@ -191,6 +192,53 @@ export async function runBlockedCheckCycle(config: SchedulerConfig): Promise<voi
   const cancelledFromDeps = await cancelTasksWithFailedDeps()
   if (cancelledFromDeps > 0) {
     console.log(`[BlockedCheck] Cancelled ${cancelledFromDeps} tasks with failed/cancelled dependencies`)
+  }
+
+  // Third pass: clean up orphaned system agent runs
+  // Check for runs in DB that are 'running' but not in active runs map
+  await cleanupOrphanedSystemAgentRuns()
+}
+
+/**
+ * Clean up system agent runs that are marked as 'running' in the DB
+ * but are not in the active runs map (meaning the process died).
+ */
+async function cleanupOrphanedSystemAgentRuns(): Promise<void> {
+  try {
+    const dbRunning = await queries.getRuns({ status: 'running', limit: 50 })
+    const activeRuns = getActiveRuns()
+    const activeRunIds = new Set(activeRuns.map(r => r.run_id))
+
+    let cleaned = 0
+    for (const run of dbRunning) {
+      // If not in active runs map, it's orphaned
+      if (!activeRunIds.has(run.id)) {
+        const age = ((Date.now() - new Date(run.started_at).getTime()) / 60000).toFixed(0)
+
+        // Only clean up if older than 5 minutes (to avoid race with startup)
+        if (parseInt(age) < 5) continue
+
+        console.log(`[BlockedCheck] Marking orphaned ${run.agent_type} run ${run.id.slice(0, 8)} as failed (${age}min old)`)
+
+        await queries.failRun(run.id, `Orphaned - process not in active runs after ${age}min`)
+
+        broadcast('agent:failed', {
+          type: 'agent:failed',
+          run_id: run.id,
+          agent_type: run.agent_type,
+          error: 'Orphaned - process died',
+          timestamp: new Date().toISOString(),
+        })
+
+        cleaned++
+      }
+    }
+
+    if (cleaned > 0) {
+      console.log(`[BlockedCheck] Cleaned up ${cleaned} orphaned system agent runs`)
+    }
+  } catch (error) {
+    console.error('[BlockedCheck] Error cleaning orphaned system agent runs:', error)
   }
 }
 
