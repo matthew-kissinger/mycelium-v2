@@ -1,12 +1,15 @@
 import { spawn, type Subprocess } from 'bun'
 import { DEFAULT_AGENT_CONFIGS, type AgentType, type AgentExecuteResult } from '@mycelium/shared'
 import { registerProcess, unregisterProcess } from './registry'
+import { acquireClineInstance, releaseClineInstance } from './cline-instances'
+import { checkOpenRouterCredits } from './health'
 
 export interface DispatchOptions {
   agent: AgentType
   prompt: string
   cwd: string
   model?: string
+  provider?: 'openrouter' | 'cline'  // For agents with multiple auth (cline)
   timeout?: number
   taskId?: string  // Required for process registry tracking
   onOutput?: (chunk: string, stream?: 'stdout' | 'stderr') => void
@@ -21,7 +24,7 @@ export interface DispatchOptions {
  * Registers process with the registry for cleanup on cancel/shutdown.
  */
 export async function dispatch(options: DispatchOptions): Promise<AgentExecuteResult> {
-  const { agent, prompt, cwd, model, timeout, taskId, onOutput, onStart } = options
+  const { agent, prompt, cwd, model, provider, timeout, taskId, onOutput, onStart } = options
   const config = DEFAULT_AGENT_CONFIGS[agent]
 
   if (!config) {
@@ -36,12 +39,22 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
   const timeoutMs = (timeout ?? config.timeout_seconds) * 1000
   const startTime = Date.now()
 
-  // Build command args based on agent type
-  const args = buildAgentArgs(agent, prompt, model, cwd)
+  // For cline, acquire a dedicated instance to avoid gRPC conflicts
+  let clineAddress: string | null = null
+  let openRouterUsageBefore: number | null = null
+  if (agent === 'cline') {
+    clineAddress = await acquireClineInstance()
+    // Track OpenRouter usage for cost calculation
+    const credits = await checkOpenRouterCredits()
+    openRouterUsageBefore = credits?.usage ?? null
+  }
 
-  // Switch cline model before dispatch if a specific model is requested
-  if (agent === 'cline' && model) {
-    await switchClineModel(model)
+  // Build command args based on agent type
+  const args = buildAgentArgs(agent, prompt, model, cwd, clineAddress)
+
+  // Switch cline model/provider before dispatch if specified
+  if (agent === 'cline' && (model || provider)) {
+    await switchClineModel(model ?? 'moonshotai/kimi-k2.5', clineAddress, provider ?? 'openrouter')
   }
 
   let proc: Subprocess<'ignore', 'pipe', 'pipe'>
@@ -109,6 +122,10 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
       if (taskId) {
         unregisterProcess(taskId)
       }
+      // Release cline instance on timeout
+      if (clineAddress) {
+        releaseClineInstance(clineAddress)
+      }
       return {
         success: false,
         output: output + '\n[TIMEOUT]',
@@ -125,17 +142,44 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
       unregisterProcess(taskId)
     }
 
+    // Release cline instance on completion
+    if (clineAddress) {
+      releaseClineInstance(clineAddress)
+    }
+
+    // Calculate cost for per_use billing
+    let cost_usd: number | undefined
+    if (config.billing_type === 'per_use') {
+      // For cline, calculate from OpenRouter usage delta
+      if (agent === 'cline' && openRouterUsageBefore !== null) {
+        const creditsAfter = await checkOpenRouterCredits()
+        if (creditsAfter) {
+          cost_usd = creditsAfter.usage - openRouterUsageBefore
+        }
+      }
+      // Fallback to parsing output
+      if (cost_usd === undefined) {
+        cost_usd = parseCostFromOutput(output)
+      }
+    } else {
+      cost_usd = 0
+    }
+
     return {
       success: exitCode === 0,
       output: output || stderr,
       exit_code: exitCode,
       duration_seconds: duration,
-      cost_usd: config.billing_type === 'per_use' ? parseCostFromOutput(output) : 0,
+      cost_usd,
     }
   } catch (error) {
     // Unregister process on error
     if (taskId) {
       unregisterProcess(taskId)
+    }
+    // Release cline instance on error
+    if (clineAddress) {
+      releaseClineInstance(clineAddress)
     }
     return {
       success: false,
@@ -154,10 +198,10 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
  * - Claude: claude -p "prompt" --model <model> --dangerously-skip-permissions
  * - Codex: codex exec "prompt" --model <model> --full-auto
  * - Gemini: gemini "prompt" --model <model> --yolo
- * - Cline: cline task new "prompt" --yolo --mode act
+ * - Cline: cline task new "prompt" --yolo --mode act [--address <addr>]
  * - Cursor: agent --print --output-format json [--model <model>] "prompt"
  */
-function buildAgentArgs(agent: AgentType, prompt: string, model?: string, cwd?: string): string[] {
+function buildAgentArgs(agent: AgentType, prompt: string, model?: string, cwd?: string, clineAddress?: string | null): string[] {
   switch (agent) {
     case 'claude':
       // claude -p "prompt" --model sonnet --dangerously-skip-permissions
@@ -185,8 +229,9 @@ function buildAgentArgs(agent: AgentType, prompt: string, model?: string, cwd?: 
       ]
 
     case 'cline':
-      // cline task new "prompt" --yolo --mode act
+      // cline task new "prompt" --yolo --mode act [--address <addr>]
       return [
+        ...(clineAddress ? ['--address', clineAddress] : []),
         'task', 'new',
         prompt,
         '--yolo',
@@ -228,36 +273,94 @@ const CLINE_MODEL_MAP: Record<string, string> = {
   'devstral': 'mistralai/devstral-2512',
 }
 
-/** Current cline model to avoid redundant switches */
-let currentClineModel: string | null = null
+/** Track current model and provider per cline instance address */
+const clineModelByInstance = new Map<string, string>()
+const clineProviderByInstance = new Map<string, string>()
 
 /**
- * Switch cline's OpenRouter model before dispatch.
- * Uses `cline auth` to change the model non-interactively.
+ * Switch cline's model and optionally provider before dispatch.
+ * Uses `cline config set` for fast switching.
  */
-async function switchClineModel(model: string): Promise<void> {
+async function switchClineModel(
+  model: string,
+  instanceAddress?: string | null,
+  provider: 'openrouter' | 'cline' = 'openrouter'
+): Promise<void> {
   // Resolve short name to full OpenRouter ID
   const modelId = CLINE_MODEL_MAP[model] ?? model
+  const address = instanceAddress ?? 'default'
 
-  // Skip if already set to this model
-  if (currentClineModel === modelId) return
+  const currentModel = clineModelByInstance.get(address)
+  const currentProvider = clineProviderByInstance.get(address)
 
-  console.log(`[Dispatch] Switching cline model to ${modelId}`)
+  // Skip if already set correctly
+  if (currentModel === modelId && currentProvider === provider) return
+
+  console.log(`[Dispatch] Switching cline to ${provider}/${modelId} on ${address}`)
 
   try {
+    // Build config set args
+    const configArgs: string[] = []
+    if (currentProvider !== provider) {
+      configArgs.push(`act-mode-api-provider=${provider}`)
+    }
+    if (provider === 'openrouter' && currentModel !== modelId) {
+      configArgs.push(`act-mode-open-router-model-id=${modelId}`)
+    }
+
+    if (configArgs.length === 0) return
+
     const proc = spawn({
-      cmd: ['cline', 'auth', '-p', 'openrouter', '-m', modelId],
+      cmd: [
+        'cline',
+        ...(instanceAddress ? ['--address', instanceAddress] : []),
+        'config', 'set',
+        ...configArgs,
+      ],
       stdout: 'pipe',
       stderr: 'pipe',
       stdin: 'ignore',
     })
 
     await proc.exited
-    currentClineModel = modelId
-    console.log(`[Dispatch] Cline model switched to ${modelId}`)
+    clineModelByInstance.set(address, modelId)
+    clineProviderByInstance.set(address, provider)
+    console.log(`[Dispatch] Cline switched to ${provider}/${modelId} on ${address}`)
   } catch (error) {
-    console.error(`[Dispatch] Failed to switch cline model:`, error)
-    // Continue with current model rather than failing the task
+    console.error(`[Dispatch] Failed to switch cline config:`, error)
+    // Continue with current config rather than failing the task
+  }
+}
+
+/**
+ * Get current cline config for an instance.
+ */
+export async function getClineConfig(instanceAddress?: string | null): Promise<{
+  provider: string
+  model: string
+} | null> {
+  try {
+    const proc = spawn({
+      cmd: [
+        'cline',
+        ...(instanceAddress ? ['--address', instanceAddress] : []),
+        'config', 'list', '-F', 'plain',
+      ],
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    const output = await new Response(proc.stdout).text()
+    await proc.exited
+
+    const providerMatch = output.match(/act-mode-api-provider:\s*(\S+)/)
+    const modelMatch = output.match(/act-mode-open-router-model-id:\s*(\S+)/)
+
+    return {
+      provider: providerMatch?.[1] ?? 'unknown',
+      model: modelMatch?.[1] ?? 'unknown',
+    }
+  } catch {
+    return null
   }
 }
 

@@ -8,6 +8,10 @@ export type TaskStatus = z.infer<typeof TaskStatus>
 export const AgentType = z.enum(['claude', 'codex', 'gemini', 'cline', 'cursor'])
 export type AgentType = z.infer<typeof AgentType>
 
+// Provider types for agents with multiple auth options (e.g., cline)
+export const ProviderType = z.enum(['openrouter', 'cline'])
+export type ProviderType = z.infer<typeof ProviderType>
+
 // Parsed result from agent execution
 export const ParsedResult = z.object({
   summary: z.string().optional(),
@@ -33,6 +37,7 @@ export const Task = z.object({
   status: TaskStatus,
   agent: AgentType.optional(),
   model: z.string().optional(),
+  provider: ProviderType.optional(), // For agents with multiple auth (cline: openrouter vs cline account)
   repo_path: z.string(),
   prompt: z.string().optional(),
 
@@ -71,6 +76,7 @@ export const TaskCreate = z.object({
   prompt: z.string().optional(),
   agent: AgentType.optional(),
   model: z.string().optional(),
+  provider: ProviderType.optional(), // For cline: 'openrouter' or 'cline'
   depends_on: z.array(z.string()).default([]),
   timeout_seconds: z.number().optional(),
 })
@@ -81,6 +87,7 @@ export const TaskUpdate = z.object({
   status: TaskStatus.optional(),
   agent: AgentType.optional(),
   model: z.string().optional(),
+  provider: ProviderType.optional(),
   result: z.string().optional(),
   error: z.string().optional(),
   depends_on: z.array(z.string()).optional(),

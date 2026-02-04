@@ -55,12 +55,12 @@ const FALLBACK_MODEL_MAP: Record<string, Record<string, string | null>> = {
     'gemini-3-pro-preview': null,
   },
   cline: {
-    devstral: 'glm-4.7',
+    // Escalation chain: cheaper -> more capable
     'glm-4.7-flash': 'glm-4.7',
-    'glm-4.7': 'deepseek-v3.2',
-    'qwen3-coder': 'deepseek-v3.2',
-    'deepseek-v3.2': 'kimi-k2.5',
-    'kimi-k2.5': null,
+    'glm-4.7': 'deepseek/deepseek-v3.2',
+    'deepseek/deepseek-v3.2': 'qwen/qwen3-coder',
+    'qwen/qwen3-coder': 'moonshotai/kimi-k2.5',
+    'moonshotai/kimi-k2.5': null,
   },
   cursor: {
     'gemini-3-flash': 'composer-1',
@@ -78,7 +78,7 @@ const AGENT_DEFAULT_MODELS: Record<string, string> = {
   claude: 'sonnet',
   codex: 'gpt-5.2-codex',
   gemini: 'flash',
-  cline: 'glm-4.7',
+  cline: 'moonshotai/kimi-k2.5',
   cursor: 'composer-1',
 }
 

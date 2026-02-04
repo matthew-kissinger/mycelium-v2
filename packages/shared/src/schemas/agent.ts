@@ -22,7 +22,7 @@ export const DEFAULT_AGENT_CONFIGS: Record<string, AgentConfig> = {
   claude: {
     type: 'claude',
     command: 'claude',
-    timeout_seconds: 1800,
+    timeout_seconds: 2400, // 40 min - complex tasks need more time
     max_turns: 50,
     supports_streaming: true,
     billing_type: 'subscription',

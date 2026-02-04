@@ -12,6 +12,7 @@
 import { SchedulerConfig } from '@mycelium/shared'
 import * as queries from '../../db/queries'
 import { dispatch } from '../../agents/dispatch'
+import { extractError, recordSuccess, recordFailure, isAgentAvailable } from '../../agents/health'
 import { broadcast } from '../../sse'
 import { startTaskLog, appendLog, completeTaskLog, getTaskLogEntries } from '../../logs'
 import {
@@ -24,8 +25,8 @@ import { getTelegramService } from '../../telegram'
 import { formatTaskCompleted, formatTaskFailed, formatTaskRetrying, type TaskInfo, type TaskRetryInfo } from '../../telegram/messages'
 import { shouldRetry, buildRetryContext, parseRetryContext, resolveModel } from '../../agents/fallback'
 
-// Track currently running tasks (task_id -> start time)
-const runningTasks = new Map<string, number>()
+// Track currently running tasks (task_id -> {start time, agent})
+const runningTasks = new Map<string, { startTime: number; agent: string }>()
 
 /** Send task completion notification via Telegram */
 function notifyTaskComplete(taskInfo: TaskInfo): void {
@@ -66,6 +67,13 @@ async function handleRetry(
   error: string,
   durationSeconds: number | null,
 ): Promise<boolean> {
+  // Don't retry quota errors - upgrading model won't help, same quota applies
+  const extracted = extractError(agent, error)
+  if (extracted.errorType === 'quota') {
+    console.log(`[Dispatcher] Task ${taskId.slice(0, 8)} failed with quota error, skipping retry`)
+    return false
+  }
+
   const decision = shouldRetry(agent, model, task.retry_context)
 
   if (!decision.retry || !decision.fallbackModel) {
@@ -177,6 +185,7 @@ async function runTask(task: Awaited<ReturnType<typeof queries.getTask>>): Promi
   const taskId = task.id
   const agent = (task.agent ?? 'claude') as 'claude' | 'codex' | 'gemini' | 'cline' | 'cursor'
   const model = task.model ?? undefined
+  const provider = (task as any).provider as 'openrouter' | 'cline' | undefined
   const repoPath = task.repo_path
 
   // Build context-enriched prompt
@@ -214,7 +223,7 @@ ${mcpSection ? `\n${mcpSection}` : ''}`
   console.log(`[Dispatcher] Running task ${taskId.slice(0, 8)}: ${task.title}`)
 
   // Track running task
-  runningTasks.set(taskId, Date.now())
+  runningTasks.set(taskId, { startTime: Date.now(), agent })
 
   // Update task status to running
   const startTime = new Date().toISOString()
@@ -242,6 +251,7 @@ ${mcpSection ? `\n${mcpSection}` : ''}`
       prompt,
       cwd: repoPath,
       model,
+      provider,
       taskId,
       timeout: task.timeout_seconds ?? undefined,
       onStart: (pid) => {
@@ -285,6 +295,9 @@ ${mcpSection ? `\n${mcpSection}` : ''}`
       })
 
       console.log(`[Dispatcher] Task ${taskId.slice(0, 8)} completed successfully`)
+
+      // Record success in health tracking
+      recordSuccess(agent, model)
 
       // Auto-notify via Telegram
       notifyTaskComplete({
@@ -337,9 +350,12 @@ ${mcpSection ? `\n${mcpSection}` : ''}`
 
       if (!retried) {
         // No retry available - follow normal failure flow
+        // Extract meaningful error from agent output
+        const { error: cleanError } = recordFailure(agent, model, result.output)
+
         await queries.updateTask(taskId, {
           status: 'failed',
-          error: result.output,
+          error: cleanError,
           duration_seconds: result.duration_seconds,
           completed_at: completedTime,
         })
@@ -347,15 +363,15 @@ ${mcpSection ? `\n${mcpSection}` : ''}`
         broadcast('task:failed', {
           type: 'task:failed',
           task_id: taskId,
-          error: result.output.slice(0, 500),
+          error: cleanError,
           timestamp: completedTime,
         })
 
-        console.log(`[Dispatcher] Task ${taskId.slice(0, 8)} failed: ${result.output.slice(0, 100)}`)
+        console.log(`[Dispatcher] Task ${taskId.slice(0, 8)} failed: ${cleanError}`)
 
         notifyTaskFailed({
           id: taskId, title: task.title, status: 'failed', repo_path: repoPath,
-          agent, model, error: result.output, duration_seconds: result.duration_seconds,
+          agent, model, error: cleanError, duration_seconds: result.duration_seconds,
           created_at: task.created_at, completed_at: completedTime,
         })
 
@@ -369,6 +385,9 @@ ${mcpSection ? `\n${mcpSection}` : ''}`
     const completedTime = new Date().toISOString()
 
     console.error(`[Dispatcher] Task ${taskId.slice(0, 8)} dispatch error:`, error)
+
+    // Record failure in health tracking
+    recordFailure(agent, model, errorMsg)
 
     const retried = await handleRetry(
       taskId, task, agent, model, errorMsg, null,
@@ -429,8 +448,25 @@ export async function runDispatcherCycle(config: SchedulerConfig): Promise<void>
 
   console.log(`[Dispatcher] Found ${readyTasks.length} ready tasks`)
 
+  // Filter out tasks for unavailable agents (quota exceeded, etc.)
+  const availableTasks = readyTasks.filter((task) => {
+    const agent = task.agent ?? 'claude'
+    const model = task.model ?? undefined
+    const availability = isAgentAvailable(agent, model)
+    if (!availability.available) {
+      console.log(`[Dispatcher] Skipping task ${task.id.slice(0, 8)} - ${agent}/${model ?? 'default'} unavailable: ${availability.reason}`)
+      return false
+    }
+    return true
+  })
+
+  if (availableTasks.length === 0) {
+    console.log('[Dispatcher] No tasks with available agents')
+    return
+  }
+
   // Calculate concurrency limit
-  const limit = calculateConcurrencyLimit(config, readyTasks.length)
+  const limit = calculateConcurrencyLimit(config, availableTasks.length)
   const currentRunning = getRunningTaskCount()
   const availableSlots = limit - currentRunning
 
@@ -440,7 +476,7 @@ export async function runDispatcherCycle(config: SchedulerConfig): Promise<void>
   }
 
   // Take as many tasks as we have slots for
-  const tasksToRun = readyTasks.slice(0, availableSlots)
+  const tasksToRun = availableTasks.slice(0, availableSlots)
 
   console.log(`[Dispatcher] Running ${tasksToRun.length} tasks (${currentRunning + tasksToRun.length}/${limit} concurrent)`)
 

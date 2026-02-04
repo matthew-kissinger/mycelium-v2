@@ -1,4 +1,4 @@
-import { eq, desc, asc, and, inArray, isNull, ne, sql } from 'drizzle-orm'
+import { eq, desc, asc, and, inArray, isNull, ne, sql, lt } from 'drizzle-orm'
 import { db } from './index'
 import * as schema from './schema'
 
@@ -677,6 +677,38 @@ export async function failRun(id: string, error: string) {
     error,
     completed_at: new Date().toISOString(),
   })
+}
+
+/**
+ * Clean up orphaned system agent runs.
+ * Marks runs that are 'running' but older than threshold as failed.
+ * Called on startup and periodically by blocked check cycle.
+ */
+export async function cleanupOrphanedRuns(thresholdHours: number = 1): Promise<number> {
+  const cutoff = new Date(Date.now() - thresholdHours * 60 * 60 * 1000).toISOString()
+
+  // Get all running system agent runs older than threshold
+  const orphaned = await db.select()
+    .from(schema.system_agent_runs)
+    .where(and(
+      eq(schema.system_agent_runs.status, 'running'),
+      lt(schema.system_agent_runs.started_at, cutoff)
+    ))
+
+  let cleaned = 0
+  for (const run of orphaned) {
+    const age = ((Date.now() - new Date(run.started_at).getTime()) / 3600000).toFixed(1)
+    console.log(`[Cleanup] Marking orphaned ${run.agent_type} run ${run.id.slice(0, 8)} as failed (${age}h old)`)
+
+    await updateRun(run.id, {
+      status: 'failed',
+      error: `Orphaned - server restart or process died after ${age}h`,
+      completed_at: new Date().toISOString(),
+    })
+    cleaned++
+  }
+
+  return cleaned
 }
 
 /**
