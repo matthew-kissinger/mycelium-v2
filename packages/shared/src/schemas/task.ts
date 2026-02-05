@@ -5,12 +5,50 @@ export const TaskStatus = z.enum(['pending', 'running', 'done', 'failed', 'cance
 export type TaskStatus = z.infer<typeof TaskStatus>
 
 // Agent types we support
-export const AgentType = z.enum(['claude', 'codex', 'gemini', 'cline', 'cursor'])
+export const AgentType = z.enum([
+  // Original agents
+  'claude', 'codex', 'gemini', 'cline', 'cursor',
+  // New agents (Feb 2026)
+  'kiro', 'vibe', 'pi', 'opencode', 'copilot'
+])
 export type AgentType = z.infer<typeof AgentType>
 
-// Provider types for agents with multiple auth options (e.g., cline)
-export const ProviderType = z.enum(['openrouter', 'cline'])
+// Provider types - backends that can power agents
+export const ProviderType = z.enum([
+  // Multi-model providers (API-based)
+  'openrouter',     // 100+ models: Claude, GPT, Gemini, Llama, Qwen, DeepSeek, Mistral, Kimi
+  'groq',           // Ultra-fast: kimi-k2, llama-4, qwen3, gpt-oss (free tier)
+  'cerebras',       // Ultra-fast: llama-3.3-70b, qwen-3-235b, glm-4.7 (free tier)
+  'mistral',        // Mistral models direct: devstral, codestral, magistral
+  'google',         // Gemini models direct
+  'anthropic',      // Claude models direct
+  'openai',         // GPT models direct
+  // Agent-specific providers
+  'cline',          // Cline account billing
+  'opencode-zen',   // OpenCode free models (kimi-k2.5-free, glm-4.7-free, gpt-5-nano)
+  'github',         // GitHub Copilot subscription
+  'aws',            // AWS/Kiro (IAM Identity Center)
+  'cursor',         // Cursor subscription
+])
 export type ProviderType = z.infer<typeof ProviderType>
+
+// Agent-provider compatibility map
+// Defines which providers each agent supports and its default
+export const AGENT_PROVIDERS: Record<AgentType, { supported: ProviderType[], default: ProviderType }> = {
+  // Original agents (single provider each)
+  claude: { supported: ['anthropic'], default: 'anthropic' },
+  codex: { supported: ['openai'], default: 'openai' },
+  gemini: { supported: ['google'], default: 'google' },
+  cursor: { supported: ['cursor'], default: 'cursor' },
+  // Cline - multiple providers
+  cline: { supported: ['openrouter', 'cline'], default: 'openrouter' },
+  // New agents
+  kiro: { supported: ['aws'], default: 'aws' },
+  vibe: { supported: ['mistral'], default: 'mistral' },
+  pi: { supported: ['openrouter', 'groq', 'cerebras', 'mistral', 'google', 'anthropic', 'openai'], default: 'openrouter' },
+  opencode: { supported: ['opencode-zen', 'anthropic', 'openai', 'groq'], default: 'opencode-zen' },
+  copilot: { supported: ['github'], default: 'github' },
+}
 
 // Parsed result from agent execution
 export const ParsedResult = z.object({
@@ -43,7 +81,7 @@ export const Task = z.object({
 
   // Dependency management
   depends_on: z.array(z.string().uuid()).default([]),
-  sequenced: z.boolean().default(false),
+  sequenced: z.boolean().default(true),
 
   // Execution results
   result: z.string().optional(),

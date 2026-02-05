@@ -7,7 +7,10 @@ import { useTaskStore } from '../../stores/taskStore'
 import { useRepoStore } from '../../stores/repoStore'
 import { useUIStore } from '../../stores/uiStore'
 
-const AGENTS = ['claude', 'codex', 'gemini', 'cline', 'cursor'] as const
+const AGENTS = [
+  'claude', 'codex', 'gemini', 'cline', 'cursor',  // original
+  'kiro', 'vibe', 'pi', 'opencode', 'copilot',  // new (Feb 2026)
+] as const
 
 export function TaskCreateForm({ onClose }: { onClose: () => void }) {
   const createTask = useTaskStore((s) => s.createTask)

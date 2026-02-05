@@ -285,27 +285,6 @@ export const tools: Tool[] = [
   },
 
   // =========================================================================
-  // Sequencer
-  // =========================================================================
-  {
-    name: 'mycel_sequence',
-    description: 'Analyze pending tasks and wire up dependencies. Run Sequencer agent.',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {
-        repo_path: {
-          type: 'string',
-          description: 'Analyze tasks for specific repository only. If omitted, analyzes all.',
-        },
-        dry_run: {
-          type: 'boolean',
-          description: 'Preview changes without applying them',
-        },
-      },
-    },
-  },
-
-  // =========================================================================
   // Signals
   // =========================================================================
   {
@@ -480,21 +459,6 @@ export async function handleToolCall(
             description: args.description,
             language: args.language,
             private: args.private ?? false,
-          }),
-        }).then((r) => r.json())
-        break
-      }
-
-      // =====================================================================
-      // Sequencer
-      // =====================================================================
-      case 'mycel_sequence': {
-        result = await fetch(`${API_URL}/api/sequencer/trigger`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            repo_path: args.repo_path,
-            context: { dry_run: args.dry_run ?? false },
           }),
         }).then((r) => r.json())
         break

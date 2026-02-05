@@ -66,13 +66,14 @@ export function SystemView() {
     (_event: React.MouseEvent, node: Node) => {
       const nodeType = node.type
 
-      const panelTypeMap: Record<string, 'scheduler' | 'cycle' | 'taskPool' | 'agent' | 'alignment' | 'memory'> = {
+      const panelTypeMap: Record<string, 'scheduler' | 'cycle' | 'taskPool' | 'agent' | 'alignment' | 'memory' | 'repos'> = {
         scheduler: 'scheduler',
         cycle: 'cycle',
         taskPool: 'taskPool',
         agentSlots: 'agent',
         alignment: 'alignment',
         memory: 'memory',
+        repos: 'repos',
       }
 
       const panelType = panelTypeMap[nodeType || '']
@@ -98,6 +99,8 @@ export function SystemView() {
         return 'hsl(45 60% 50%)'
       case 'memory':
         return 'hsl(30 50% 50%)'
+      case 'repos':
+        return 'hsl(200 50% 50%)'
       default:
         return 'hsl(0 0% 50%)'
     }
@@ -126,14 +129,10 @@ export function SystemView() {
           gap={20}
           size={1}
         />
-        <Controls
-          showInteractive={false}
-          className="!bg-zinc-800 !border-zinc-700"
-        />
+        <Controls showInteractive={false} />
         <MiniMap
           nodeColor={getNodeColor}
           maskColor="rgba(0, 0, 0, 0.8)"
-          className="!bg-zinc-900 !border-zinc-700"
         />
       </ReactFlow>
     </div>

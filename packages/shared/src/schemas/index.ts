@@ -1,6 +1,7 @@
 export * from './task'
 export * from './repo'
 export * from './agent'
+export * from './agent-matrix'
 export * from './signal'
 export * from './memory'
 export * from './shepherd'

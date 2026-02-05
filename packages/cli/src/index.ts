@@ -13,7 +13,6 @@ import { registerSignalCommands } from './commands/signals.ts'
 import { registerMemoryCommands } from './commands/memory.ts'
 import { registerRepoCommands } from './commands/repos.ts'
 import { registerRunnerCommands } from './commands/runner.ts'
-import { registerSequenceCommands } from './commands/sequence.ts'
 import { registerGenesisCommands } from './commands/genesis.ts'
 import { registerSessionCommands } from './commands/sessions.ts'
 import { registerVersionCommand } from './commands/version.ts'
@@ -46,7 +45,6 @@ registerSignalCommands(program)   // align, signals, check, notify, inbox, statu
 registerMemoryCommands(program)   // memory, memory add, compact
 registerRepoCommands(program)     // repos, repos add/remove/health/discover/describe/paths
 registerRunnerCommands(program)   // runner, runner start/stop/config, config show/set
-registerSequenceCommands(program) // sequence [repo_path] [--dry-run]
 registerGenesisCommands(program)  // genesis, genesis create/auto/config
 registerSessionCommands(program)  // sessions, session <id>, trace <task_id>
 registerVersionCommand(program)   // version [--deps] [--outdated]

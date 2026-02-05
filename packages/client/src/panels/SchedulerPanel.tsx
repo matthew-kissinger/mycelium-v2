@@ -19,8 +19,6 @@ interface SchedulerConfig {
   discovery_interval_sec: number
   discovery_repos: string[]
   discovery_auto_create: string[]
-  sequencer_enabled: boolean
-  sequencer_interval_sec: number
   shepherd_enabled: boolean
   shepherd_batch_size: number
   armory_enabled: boolean
@@ -28,8 +26,7 @@ interface SchedulerConfig {
   digest_enabled: boolean
   digest_interval_sec: number
   compaction_enabled: boolean
-  compaction_day: number
-  compaction_hour: number
+  compaction_interval_sec: number
   auto_prune_enabled: boolean
   auto_prune_threshold: number
   auto_prune_keep: number
@@ -311,7 +308,7 @@ export function SchedulerPanel({
 
             {/* Compaction */}
             <div className="bg-zinc-800 rounded-lg p-3">
-              <h4 className="text-xs font-medium text-zinc-500 uppercase mb-3">Memory Compaction</h4>
+              <h4 className="text-xs font-medium text-zinc-500 uppercase mb-3">Memory Compaction (Haiku Agent)</h4>
               <div className="space-y-3">
                 <ConfigToggle
                   label="Enabled"
@@ -319,18 +316,13 @@ export function SchedulerPanel({
                   onChange={(v) => handleConfigChange('compaction_enabled', v)}
                 />
                 <ConfigInput
-                  label="Day (0=Sun, 1=Mon, ...)"
-                  value={getValue('compaction_day')}
-                  onChange={(v) => handleConfigChange('compaction_day', v)}
-                  min={0}
-                  max={6}
-                />
-                <ConfigInput
-                  label="Hour (0-23)"
-                  value={getValue('compaction_hour')}
-                  onChange={(v) => handleConfigChange('compaction_hour', v)}
-                  min={0}
-                  max={23}
+                  label="Interval"
+                  value={getValue('compaction_interval_sec')}
+                  onChange={(v) => handleConfigChange('compaction_interval_sec', v)}
+                  min={3600}
+                  max={86400}
+                  suffix="sec"
+                  hint={formatSeconds(getValue('compaction_interval_sec') as number)}
                 />
               </div>
             </div>

@@ -85,9 +85,6 @@ const SchedulerConfigUpdateSchema = z.object({
   discovery_interval_sec: z.number().int().positive().optional(),
   discovery_repos: z.array(z.string()).optional(),
   discovery_auto_create: z.array(z.string()).optional(),
-  // Sequencer
-  sequencer_enabled: z.boolean().optional(),
-  sequencer_interval_sec: z.number().int().positive().optional(),
   // Shepherd
   shepherd_enabled: z.boolean().optional(),
   shepherd_batch_size: z.number().int().positive().optional(),
@@ -99,8 +96,7 @@ const SchedulerConfigUpdateSchema = z.object({
   digest_interval_sec: z.number().int().positive().optional(),
   // Compaction
   compaction_enabled: z.boolean().optional(),
-  compaction_day: z.number().int().min(0).max(6).optional(),
-  compaction_hour: z.number().int().min(0).max(23).optional(),
+  compaction_interval_sec: z.number().int().positive().optional(),
   // Auto prune
   auto_prune_enabled: z.boolean().optional(),
   auto_prune_threshold: z.number().int().positive().optional(),

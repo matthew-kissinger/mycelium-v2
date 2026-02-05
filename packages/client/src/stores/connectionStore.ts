@@ -9,6 +9,8 @@ import { useSchedulerStore } from './schedulerStore'
 import { useTaskStore } from './taskStore'
 import { useSignalStore } from './signalStore'
 import { useMemoryStore } from './memoryStore'
+import { useRepoStore } from './repoStore'
+import { useInventoryStore } from './inventoryStore'
 
 interface ConnectionState {
   connected: boolean
@@ -80,9 +82,22 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     eventSource.addEventListener('system:agent_started', () => {
       useSchedulerStore.getState().fetchRunningSystemAgents()
     })
-    eventSource.addEventListener('agent:completed', () => {
+    eventSource.addEventListener('agent:completed', (event) => {
       useSchedulerStore.getState().fetchRunningSystemAgents()
       useTaskStore.getState().fetchStats()
+      // Refresh shepherd status when shepherd completes (updates unevaluated counts)
+      // Refresh inventory when armory completes
+      try {
+        const data = JSON.parse(event.data)
+        if (data.agent_type === 'shepherd') {
+          useSchedulerStore.getState().fetchShepherdStatus()
+        }
+        if (data.agent_type === 'armory') {
+          useInventoryStore.getState().fetchInventory()
+        }
+      } catch {
+        // Ignore parse errors
+      }
     })
     eventSource.addEventListener('agent:failed', () => {
       useSchedulerStore.getState().fetchRunningSystemAgents()
@@ -96,9 +111,29 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
       useSignalStore.getState().fetchSignals()
     })
 
-    // Memory events
+    // Memory events - fetch both counts and grouped details
     eventSource.addEventListener('memory:updated', () => {
       useMemoryStore.getState().fetchMemory()
+      useMemoryStore.getState().fetchMemoryDetails()
+    })
+    eventSource.addEventListener('memory:pattern_created', () => {
+      useMemoryStore.getState().fetchMemory()
+      useMemoryStore.getState().fetchMemoryDetails()
+    })
+    eventSource.addEventListener('memory:warning_created', () => {
+      useMemoryStore.getState().fetchMemory()
+      useMemoryStore.getState().fetchMemoryDetails()
+    })
+
+    // Repo events
+    eventSource.addEventListener('repo:added', () => {
+      useRepoStore.getState().fetchRepos()
+    })
+    eventSource.addEventListener('repo:updated', () => {
+      useRepoStore.getState().fetchRepos()
+    })
+    eventSource.addEventListener('repo:removed', () => {
+      useRepoStore.getState().fetchRepos()
     })
 
     // Error handling

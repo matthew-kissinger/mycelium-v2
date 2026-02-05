@@ -3,11 +3,9 @@ import { z } from 'zod'
 // Default intervals in seconds
 export const DEFAULT_DISPATCHER_INTERVAL = 60 // 1 minute
 export const DEFAULT_DISCOVERY_INTERVAL = 900 // 15 minutes
-export const DEFAULT_SEQUENCER_INTERVAL = 900 // 15 minutes
-export const DEFAULT_DIGEST_INTERVAL = 21600 // 6 hours
+export const DEFAULT_DIGEST_INTERVAL = 14400 // 4 hours (smart Haiku agent)
+export const DEFAULT_COMPACTION_INTERVAL = 14400 // 4 hours (smart Haiku agent)
 export const DEFAULT_HEALTH_CHECK_INTERVAL = 60 // 1 minute
-export const DEFAULT_COMPACTION_DAY = 1 // Monday
-export const DEFAULT_COMPACTION_HOUR = 11 // 11am local time
 
 // Scheduler configuration
 export const SchedulerConfig = z.object({
@@ -29,10 +27,6 @@ export const SchedulerConfig = z.object({
   discovery_repos: z.array(z.string()).default([]),
   discovery_auto_create: z.array(z.string()).default([]),
 
-  // Sequencer cycle
-  sequencer_enabled: z.boolean().default(true),
-  sequencer_interval_sec: z.number().int().positive().default(DEFAULT_SEQUENCER_INTERVAL),
-
   // Shepherd cycle (interval-based, checks for repos with batch_size+ unevaluated tasks)
   shepherd_enabled: z.boolean().default(true),
   shepherd_interval_sec: z.number().int().positive().default(900), // 15 minutes
@@ -46,10 +40,9 @@ export const SchedulerConfig = z.object({
   digest_enabled: z.boolean().default(true),
   digest_interval_sec: z.number().int().positive().default(DEFAULT_DIGEST_INTERVAL),
 
-  // Compaction cycle
+  // Compaction cycle (smart Haiku agent)
   compaction_enabled: z.boolean().default(true),
-  compaction_day: z.number().int().min(0).max(6).default(DEFAULT_COMPACTION_DAY),
-  compaction_hour: z.number().int().min(0).max(23).default(DEFAULT_COMPACTION_HOUR),
+  compaction_interval_sec: z.number().int().positive().default(DEFAULT_COMPACTION_INTERVAL),
 
   // Health check cycle (device monitoring)
   health_check_enabled: z.boolean().default(true),

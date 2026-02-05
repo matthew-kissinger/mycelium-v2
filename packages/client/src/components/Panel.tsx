@@ -113,7 +113,6 @@ function PanelContent({
       const cycleType = (data?.cycleType as string) || nodeId?.replace('-', '_') || ''
       const promptId = {
         discovery: 'discovery',
-        sequencer: 'sequencer',
         shepherd: 'shepherd',
       }[cycleType] as string | undefined
 
@@ -170,8 +169,13 @@ function PanelContent({
         <AgentPanel
           runningTasks={store.runningTasks}
           agentConfigs={store.agentConfigs}
+          agentHealth={store.agentHealth}
+          clineInfo={store.clineInfo}
+          agentStats={store.agentStats}
           loading={store.agentConfigsLoading}
           onFetchConfigs={store.fetchAgentConfigs}
+          onFetchHealth={store.fetchAgentHealth}
+          onFetchAgentStats={store.fetchAgentStats}
           onUpdateConfig={store.updateAgentConfig}
           onViewLogs={(taskId, taskTitle) => {
             useSystemStore.getState().openPanel('logs', 'logs', { taskId, taskTitle })

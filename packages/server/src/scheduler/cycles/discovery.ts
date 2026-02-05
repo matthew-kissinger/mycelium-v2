@@ -21,7 +21,7 @@ import {
 } from '../../prompts/discovery'
 import {
   buildMycelContext,
-  buildAgentsSection,
+  buildAgentsSectionWithCredits,
   buildSkillsSection,
   buildMcpSection,
 } from '../../prompts/context'
@@ -144,7 +144,8 @@ export async function runDiscoveryForRepo(
       role: 'discovery',
       agentId: 'discovery',
     })
-    const agentsSection = buildAgentsSection()
+    // Use async version to include live credits/quota info
+    const agentsSection = await buildAgentsSectionWithCredits()
     const skillsSection = buildSkillsSection([], repoPath)
     const mcpSection = buildMcpSection('claude')
 

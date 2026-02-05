@@ -1,23 +1,39 @@
 /**
  * Right Panel - Detail panel in three-column layout (no backdrop overlay)
+ * Uses React.lazy() for code splitting to reduce initial bundle size
  */
 
-import { useEffect } from 'react'
+import { useEffect, lazy, Suspense } from 'react'
 import { useUIStore } from '../stores/uiStore'
 import { useSystemStore } from '../stores/system'
 import type { PanelType } from '../flow/types'
-import {
-  SchedulerPanel,
-  CyclePanel,
-  TaskPoolPanel,
-  AgentPanel,
-  AlignmentPanel,
-  MemoryPanel,
-  PromptsPanel,
-  LiveLogViewer,
-  ReposPanel,
-  InventoryPanel,
-} from '../panels'
+
+// Lazy load panel components for code splitting
+const SchedulerPanel = lazy(() => import('../panels/SchedulerPanel').then(m => ({ default: m.SchedulerPanel })))
+const CyclePanel = lazy(() => import('../panels/CyclePanel').then(m => ({ default: m.CyclePanel })))
+const TaskPoolPanel = lazy(() => import('../panels/TaskPoolPanel').then(m => ({ default: m.TaskPoolPanel })))
+const AgentPanel = lazy(() => import('../panels/AgentPanel').then(m => ({ default: m.AgentPanel })))
+const AlignmentPanel = lazy(() => import('../panels/AlignmentPanel').then(m => ({ default: m.AlignmentPanel })))
+const MemoryPanel = lazy(() => import('../panels/MemoryPanel').then(m => ({ default: m.MemoryPanel })))
+const PromptsPanel = lazy(() => import('../panels/PromptsPanel').then(m => ({ default: m.PromptsPanel })))
+const LiveLogViewer = lazy(() => import('../panels/LogsPanel').then(m => ({ default: m.LiveLogViewer })))
+const ReposPanel = lazy(() => import('../panels/ReposPanel').then(m => ({ default: m.ReposPanel })))
+const InventoryPanel = lazy(() => import('../panels/InventoryPanel').then(m => ({ default: m.InventoryPanel })))
+
+// Loading fallback for lazy-loaded panels
+function PanelLoadingFallback() {
+  return (
+    <div className="flex items-center justify-center h-32">
+      <div className="flex items-center gap-2 text-zinc-500 text-sm">
+        <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span>Loading...</span>
+      </div>
+    </div>
+  )
+}
 
 export function RightPanel() {
   const { panel } = useUIStore()
@@ -49,7 +65,7 @@ export function RightPanel() {
   }
 
   return (
-    <aside className="w-[400px] border-l border-zinc-800 bg-zinc-900 flex flex-col overflow-hidden shrink-0">
+    <aside className="w-full lg:w-[400px] h-full border-l border-zinc-800 bg-zinc-900 flex flex-col overflow-hidden shrink-0">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
         <h2 className="text-sm font-semibold text-zinc-100 truncate">
@@ -67,7 +83,9 @@ export function RightPanel() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">
-        <PanelContent type={panel.type} data={panel.data} nodeId={panel.nodeId} />
+        <Suspense fallback={<PanelLoadingFallback />}>
+          <PanelContent type={panel.type} data={panel.data} nodeId={panel.nodeId} />
+        </Suspense>
       </div>
     </aside>
   )
@@ -95,8 +113,9 @@ function PanelContent({ type, data, nodeId }: { type: PanelType; data?: Record<s
       const cycleType = (data?.cycleType as string) || nodeId?.replace('-', '_') || ''
       const promptId = {
         discovery: 'discovery',
-        sequencer: 'sequencer',
         shepherd: 'shepherd',
+        digest: 'digest',
+        compaction: 'compaction',
       }[cycleType] as string | undefined
 
       return (
@@ -152,8 +171,13 @@ function PanelContent({ type, data, nodeId }: { type: PanelType; data?: Record<s
         <AgentPanel
           runningTasks={store.runningTasks}
           agentConfigs={store.agentConfigs}
+          agentHealth={store.agentHealth}
+          clineInfo={store.clineInfo}
+          agentStats={store.agentStats}
           loading={store.agentConfigsLoading}
           onFetchConfigs={store.fetchAgentConfigs}
+          onFetchHealth={store.fetchAgentHealth}
+          onFetchAgentStats={store.fetchAgentStats}
           onUpdateConfig={store.updateAgentConfig}
           onViewLogs={(taskId, taskTitle) => {
             useUIStore.getState().openPanel('logs', 'logs', { taskId, taskTitle })

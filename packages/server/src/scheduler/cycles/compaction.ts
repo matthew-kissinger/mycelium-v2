@@ -1,55 +1,52 @@
 /**
- * Compaction Cycle - clean memory
+ * Compaction Cycle - intelligent memory management
  *
- * Responsibilities:
- * - Check if it's the scheduled compaction time (Monday 11am by default)
- * - Spawn compaction agent to clean up old patterns/warnings
- * - Prune old completed tasks if configured
+ * Dispatches to Haiku to analyze patterns/warnings.
+ * Agent outputs the new memory directly - cycle replaces old with new.
+ *
+ * Also handles:
+ * - Session log TTL cleanup
+ * - Auto-pruning old completed tasks
  */
 
 import { SchedulerConfig } from '@mycelium/shared'
+import { existsSync, readFileSync } from 'fs'
+import { join } from 'path'
 import * as queries from '../../db/queries'
 import { dispatch } from '../../agents/dispatch'
 import { broadcast } from '../../sse'
-
-// Track last compaction to avoid running multiple times
-let lastCompactionDate: string | null = null
+import { buildMycelContext } from '../../prompts/context'
+import { buildCompactionPrompt, parseCompactionOutput, type CompactionContext, type CompactionOutput } from '../../prompts/compaction'
+import { registerActiveRun, unregisterActiveRun } from '../active-runs'
+import { getTelegramService } from '../../telegram'
 
 /**
  * Run the Compaction cycle.
- * Only runs once per scheduled day (e.g., Monday 11am).
+ * Runs every 4 hours, dispatches to Haiku for intelligent cleanup.
  */
 export async function runCompactionCycle(config: SchedulerConfig): Promise<void> {
-  // Session log TTL cleanup runs every cycle (hourly) regardless of compaction schedule
+  // Session log TTL cleanup runs every cycle regardless
   try {
     await queries.cleanExpiredSessionLogs()
   } catch (e) {
     console.error('[Compaction] Session log cleanup error:', e)
   }
 
+  console.log('[Compaction] Starting cycle...')
+
   const now = new Date()
-  const today = now.toISOString().split('T')[0]
-
-  // Check if we already ran today
-  if (lastCompactionDate === today) {
-    return
-  }
-
-  // Check if it's the right day and hour
-  const dayOfWeek = now.getDay() // 0 = Sunday, 1 = Monday, etc.
-  const hour = now.getHours()
-
-  if (dayOfWeek !== config.compaction_day || hour !== config.compaction_hour) {
-    return
-  }
-
-  console.log('[Compaction] Starting weekly compaction...')
-  lastCompactionDate = today
 
   // Create system agent run record
   const run = await queries.createRun({
     agent_type: 'compaction',
     context: { scheduled: true },
+  })
+
+  // Register active run
+  registerActiveRun({
+    run_id: run.id,
+    agent_type: 'compaction',
+    started_at: now.toISOString(),
   })
 
   // Broadcast event
@@ -61,21 +58,42 @@ export async function runCompactionCycle(config: SchedulerConfig): Promise<void>
   })
 
   try {
-    // Get all repos for compaction
+    // Auto-prune old tasks FIRST (fast, no agent needed)
+    let pruneCount = 0
+    if (config.auto_prune_enabled) {
+      pruneCount = await pruneOldTasks(config)
+    }
+
+    // Then compact memory per repo (slower, uses Haiku)
     const repos = await queries.getRepos()
 
-    // For each repo, run compaction
+    const repoResults: string[] = []
+    let totalRemoved = 0
+
+    // For each repo, run intelligent compaction
     for (const repo of repos) {
-      await compactRepoMemory(repo.path)
+      const result = await compactRepoMemory(repo.path, repo.name)
+      if (result) {
+        totalRemoved += result.removed
+        if (result.removed > 0 || result.changed) {
+          repoResults.push(`${repo.name}: -${result.removed}`)
+        }
+      }
     }
 
-    // Auto-prune old tasks if configured
-    if (config.auto_prune_enabled) {
-      await pruneOldTasks(config)
-    }
+    const parts: string[] = []
+    if (pruneCount > 0) parts.push(`pruned ${pruneCount} tasks`)
+    if (repoResults.length > 0) parts.push(repoResults.join(', '))
 
-    await queries.completeRun(run.id, `Compacted ${repos.length} repos`)
-    console.log('[Compaction] Completed')
+    const summary = parts.length > 0
+      ? `Compacted ${repos.length} repos (${parts.join('; ')})`
+      : `Compacted ${repos.length} repos (no changes needed)`
+
+    await queries.completeRun(run.id, summary)
+    console.log(`[Compaction] ${summary}`)
+
+    // Send Telegram notification
+    await sendCompactionNotification(pruneCount, totalRemoved, repos.length)
 
     broadcast('agent:completed', {
       type: 'agent:completed',
@@ -89,6 +107,9 @@ export async function runCompactionCycle(config: SchedulerConfig): Promise<void>
     await queries.failRun(run.id, errorMsg)
     console.error('[Compaction] Error:', error)
 
+    // Send error notification
+    await sendCompactionNotification(0, 0, 0, errorMsg)
+
     broadcast('agent:failed', {
       type: 'agent:failed',
       run_id: run.id,
@@ -96,11 +117,13 @@ export async function runCompactionCycle(config: SchedulerConfig): Promise<void>
       error: errorMsg,
       timestamp: new Date().toISOString(),
     })
+  } finally {
+    unregisterActiveRun(run.id)
   }
 }
 
 /**
- * Run compaction manually (bypasses day/hour check).
+ * Run compaction manually (for API trigger).
  */
 export async function runCompactionCycleManual(config: SchedulerConfig): Promise<void> {
   console.log('[Compaction] Starting manual compaction...')
@@ -125,16 +148,29 @@ export async function runCompactionCycleManual(config: SchedulerConfig): Promise
   })
 
   try {
-    const repos = await queries.getRepos()
-    for (const repo of repos) {
-      await compactRepoMemory(repo.path)
-    }
-
+    // Prune first (fast)
+    let pruneCount = 0
     if (config.auto_prune_enabled) {
-      await pruneOldTasks(config)
+      pruneCount = await pruneOldTasks(config)
     }
 
-    await queries.completeRun(run.id, `Compacted ${repos.length} repos`)
+    // Then compact memory (slower, uses Haiku)
+    const repos = await queries.getRepos()
+    let totalRemoved = 0
+
+    for (const repo of repos) {
+      const result = await compactRepoMemory(repo.path, repo.name)
+      if (result) {
+        totalRemoved += result.removed
+      }
+    }
+
+    const parts: string[] = []
+    if (pruneCount > 0) parts.push(`pruned ${pruneCount} tasks`)
+    if (totalRemoved > 0) parts.push(`memory: -${totalRemoved}`)
+    const summary = parts.length > 0 ? parts.join(', ') : 'no changes'
+
+    await queries.completeRun(run.id, `Compacted ${repos.length} repos (${summary})`)
     console.log('[Compaction] Manual compaction completed')
 
     broadcast('agent:completed', {
@@ -161,62 +197,206 @@ export async function runCompactionCycleManual(config: SchedulerConfig): Promise
 }
 
 /**
- * Compact memory for a single repo.
- * Could spawn an agent, or just do simple cleanup.
+ * Compact memory for a single repo using Haiku.
+ * Agent outputs new memory directly - we replace old with new.
  */
-async function compactRepoMemory(repoPath: string): Promise<void> {
-  console.log(`[Compaction] Compacting memory for ${repoPath}`)
-
-  // Get patterns and warnings
+async function compactRepoMemory(repoPath: string, repoName: string): Promise<{ removed: number; changed: boolean } | null> {
+  // Get current patterns and warnings
   const patterns = await queries.getPatterns({ repo_path: repoPath, limit: 200 })
   const warnings = await queries.getWarnings({ repo_path: repoPath, limit: 200 })
 
-  // Simple compaction: remove duplicates and old items
-  // More sophisticated compaction would use an agent
+  const patternsBefore = patterns.length
+  const warningsBefore = warnings.length
 
-  // Remove duplicate patterns (same content)
-  const seenPatterns = new Set<string>()
-  let removedPatterns = 0
+  // Skip if no memory to compact
+  if (patternsBefore === 0 && warningsBefore === 0) {
+    console.log(`[Compaction] ${repoName}: No memory to compact`)
+    return { removed: 0, changed: false }
+  }
 
-  for (const pattern of patterns) {
-    const normalized = pattern.content.trim().toLowerCase()
-    if (seenPatterns.has(normalized)) {
-      await queries.deletePattern(pattern.id)
-      removedPatterns++
-    } else {
-      seenPatterns.add(normalized)
+  // For very small memory sets, skip agent (not worth the API call)
+  if (patternsBefore < 3 && warningsBefore < 2) {
+    console.log(`[Compaction] ${repoName}: Memory too small to compact (${patternsBefore}p/${warningsBefore}w)`)
+    return { removed: 0, changed: false }
+  }
+
+  console.log(`[Compaction] ${repoName}: Analyzing ${patternsBefore} patterns, ${warningsBefore} warnings`)
+
+  // Build context
+  const context = await buildCompactionContext(repoPath, repoName, patterns, warnings)
+
+  // Build prompt
+  const mycelContext = buildMycelContext({
+    role: 'compaction',
+    agentId: 'compaction',
+  })
+  const prompt = buildCompactionPrompt(context, mycelContext)
+
+  // Dispatch to Haiku
+  const result = await dispatch({
+    agent: 'claude',
+    prompt,
+    cwd: repoPath,
+    model: 'haiku',
+    timeout: 300, // 5 min per repo should be plenty
+  })
+
+  if (!result.success) {
+    console.log(`[Compaction] ${repoName}: Agent failed - ${result.error || 'unknown error'}`)
+    return null
+  }
+
+  // Parse output
+  const output = parseCompactionOutput(result.output)
+
+  if (!output) {
+    console.log(`[Compaction] ${repoName}: Could not parse agent output`)
+    return null
+  }
+
+  // Apply the new memory state
+  const applied = await applyNewMemory(repoPath, patterns, warnings, output)
+
+  if (applied.removed > 0 || applied.added > 0) {
+    console.log(`[Compaction] ${repoName}: ${patternsBefore}p/${warningsBefore}w -> ${output.patterns.length}p/${output.warnings.length}w (removed ${applied.removed}, added ${applied.added})`)
+    if (output.notes) {
+      console.log(`[Compaction] ${repoName}: ${output.notes}`)
+    }
+  } else {
+    console.log(`[Compaction] ${repoName}: No changes needed`)
+  }
+
+  return { removed: applied.removed, changed: applied.removed > 0 || applied.added > 0 }
+}
+
+/**
+ * Build context for the Compaction agent.
+ */
+async function buildCompactionContext(
+  repoPath: string,
+  repoName: string,
+  patterns: Awaited<ReturnType<typeof queries.getPatterns>>,
+  warnings: Awaited<ReturnType<typeof queries.getWarnings>>
+): Promise<CompactionContext> {
+  // Get recent task titles for relevance assessment
+  const recentTasks = await queries.getTasks({ repo_path: repoPath, limit: 20 })
+  const recentTaskTitles = recentTasks.map((t) => t.title)
+
+  // Get tech stack from package.json
+  let techStack: string[] | undefined
+  const packageJsonPath = join(repoPath, 'package.json')
+  if (existsSync(packageJsonPath)) {
+    try {
+      const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'))
+      techStack = [
+        ...Object.keys(packageJson.dependencies || {}),
+        ...Object.keys(packageJson.devDependencies || {}),
+      ].slice(0, 30)
+    } catch {
+      // Ignore parse errors
     }
   }
 
-  // Remove duplicate warnings (same content)
-  const seenWarnings = new Set<string>()
-  let removedWarnings = 0
-
-  for (const warning of warnings) {
-    const normalized = warning.content.trim().toLowerCase()
-    if (seenWarnings.has(normalized)) {
-      await queries.deleteWarning(warning.id)
-      removedWarnings++
-    } else {
-      seenWarnings.add(normalized)
-    }
-  }
-
-  if (removedPatterns > 0 || removedWarnings > 0) {
-    console.log(`[Compaction] ${repoPath}: removed ${removedPatterns} duplicate patterns, ${removedWarnings} duplicate warnings`)
+  return {
+    repoPath,
+    repoName,
+    patterns: patterns.map((p) => ({
+      id: p.id,
+      content: p.content,
+      tags: typeof p.tags === 'string' ? JSON.parse(p.tags) : (p.tags ?? []),
+      source: p.source ?? undefined,
+      created_at: p.created_at,
+    })),
+    warnings: warnings.map((w) => ({
+      id: w.id,
+      content: w.content,
+      severity: w.severity,
+      created_at: w.created_at,
+    })),
+    recentTaskTitles,
+    techStack,
   }
 }
 
 /**
- * Prune old completed tasks to keep database manageable.
+ * Apply the new memory state from agent output.
+ * Delete old patterns/warnings, insert new ones.
  */
-async function pruneOldTasks(config: SchedulerConfig): Promise<void> {
+async function applyNewMemory(
+  repoPath: string,
+  oldPatterns: Awaited<ReturnType<typeof queries.getPatterns>>,
+  oldWarnings: Awaited<ReturnType<typeof queries.getWarnings>>,
+  output: CompactionOutput
+): Promise<{ removed: number; added: number }> {
+  let removed = 0
+  let added = 0
+
+  // Delete all old patterns for this repo
+  for (const pattern of oldPatterns) {
+    try {
+      await queries.deletePattern(pattern.id)
+      removed++
+    } catch (e) {
+      console.error(`[Compaction] Failed to delete pattern ${pattern.id}:`, e)
+    }
+  }
+
+  // Delete all old warnings for this repo
+  for (const warning of oldWarnings) {
+    try {
+      await queries.deleteWarning(warning.id)
+      removed++
+    } catch (e) {
+      console.error(`[Compaction] Failed to delete warning ${warning.id}:`, e)
+    }
+  }
+
+  // Insert new patterns
+  for (const pattern of output.patterns) {
+    try {
+      await queries.createPattern({
+        content: pattern.content,
+        source: 'compaction',
+        repo_path: repoPath,
+        tags: pattern.tags ?? [],
+      })
+      added++
+    } catch (e) {
+      console.error(`[Compaction] Failed to create pattern:`, e)
+    }
+  }
+
+  // Insert new warnings
+  for (const warning of output.warnings) {
+    try {
+      await queries.createWarning({
+        content: warning.content,
+        severity: warning.severity as 'low' | 'medium' | 'high',
+        repo_path: repoPath,
+      })
+      added++
+    } catch (e) {
+      console.error(`[Compaction] Failed to create warning:`, e)
+    }
+  }
+
+  // Net removed = old count - new count
+  const netRemoved = (oldPatterns.length + oldWarnings.length) - (output.patterns.length + output.warnings.length)
+
+  return { removed: Math.max(0, netRemoved), added }
+}
+
+/**
+ * Prune old completed tasks to keep database manageable.
+ * Returns number of tasks pruned.
+ */
+async function pruneOldTasks(config: SchedulerConfig): Promise<number> {
   // Get all done tasks
-  const doneTasks = await queries.getTasks({ status: 'done', limit: config.auto_prune_threshold + 100 })
+  const doneTasks = await queries.getTasks({ status: 'done', limit: config.auto_prune_threshold + 500 })
 
   if (doneTasks.length <= config.auto_prune_threshold) {
     console.log(`[Compaction] ${doneTasks.length} completed tasks, under threshold ${config.auto_prune_threshold}`)
-    return
+    return 0
   }
 
   // Sort by completed_at (most recent first)
@@ -236,4 +416,40 @@ async function pruneOldTasks(config: SchedulerConfig): Promise<void> {
   }
 
   console.log(`[Compaction] Pruned ${toDelete.length} old completed tasks`)
+  return toDelete.length
+}
+
+/**
+ * Send compaction notification via Telegram.
+ */
+async function sendCompactionNotification(
+  pruned: number,
+  memoryRemoved: number,
+  repoCount: number,
+  error?: string
+): Promise<void> {
+  const telegram = getTelegramService()
+  if (!telegram?.isConnected()) return
+
+  const lines: string[] = []
+
+  if (error) {
+    lines.push('🔴 <b>COMPACTION FAILED</b>')
+    lines.push('')
+    lines.push(error.slice(0, 200))
+  } else {
+    const hasChanges = pruned > 0 || memoryRemoved > 0
+    lines.push(hasChanges ? '🧹 <b>COMPACTION</b>' : '✓ <b>COMPACTION</b> (no changes)')
+
+    if (hasChanges) {
+      lines.push('')
+      if (pruned > 0) lines.push(`📋 Pruned ${pruned} old tasks`)
+      if (memoryRemoved > 0) lines.push(`🧠 Memory: -${memoryRemoved} items`)
+      lines.push(`📁 ${repoCount} repos processed`)
+    }
+  }
+
+  await telegram.sendMessage(lines.join('\n'), { parse_mode: 'HTML' }).catch((e) => {
+    console.error('[Compaction] Telegram send error:', e)
+  })
 }

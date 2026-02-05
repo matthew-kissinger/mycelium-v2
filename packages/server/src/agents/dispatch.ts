@@ -1,15 +1,18 @@
 import { spawn, type Subprocess } from 'bun'
-import { DEFAULT_AGENT_CONFIGS, type AgentType, type AgentExecuteResult } from '@mycelium/shared'
+import { DEFAULT_AGENT_CONFIGS, type AgentType, type AgentExecuteResult, type ProviderType } from '@mycelium/shared'
 import { registerProcess, unregisterProcess } from './registry'
 import { acquireClineInstance, releaseClineInstance } from './cline-instances'
 import { checkOpenRouterCredits } from './health'
+import { readFileSync, existsSync } from 'fs'
+import { homedir } from 'os'
+import { join } from 'path'
 
 export interface DispatchOptions {
   agent: AgentType
   prompt: string
   cwd: string
   model?: string
-  provider?: 'openrouter' | 'cline'  // For agents with multiple auth (cline)
+  provider?: ProviderType  // For agents with multiple providers
   timeout?: number
   taskId?: string  // Required for process registry tracking
   onOutput?: (chunk: string, stream?: 'stdout' | 'stderr') => void
@@ -39,6 +42,11 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
   const timeoutMs = (timeout ?? config.timeout_seconds) * 1000
   const startTime = Date.now()
 
+  // Special case: kiro needs prompt via stdin
+  if (agent === 'kiro') {
+    return dispatchKiro(prompt, cwd, taskId, onOutput, onStart, timeoutMs)
+  }
+
   // For cline, acquire a dedicated instance to avoid gRPC conflicts
   let clineAddress: string | null = null
   let openRouterUsageBefore: number | null = null
@@ -49,17 +57,26 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
     openRouterUsageBefore = credits?.usage ?? null
   }
 
+  // Track OpenRouter usage for pi when using openrouter provider
+  if (agent === 'pi' && (provider === 'openrouter' || !provider)) {
+    const credits = await checkOpenRouterCredits()
+    openRouterUsageBefore = credits?.usage ?? null
+  }
+
   // Build command args based on agent type
-  const args = buildAgentArgs(agent, prompt, model, cwd, clineAddress)
+  const args = buildAgentArgs(agent, prompt, model, cwd, clineAddress, provider)
 
   // Switch cline model/provider before dispatch if specified
   if (agent === 'cline' && (model || provider)) {
-    await switchClineModel(model ?? 'moonshotai/kimi-k2.5', clineAddress, provider ?? 'openrouter')
+    await switchClineModel(model ?? 'moonshotai/kimi-k2.5', clineAddress, provider as 'openrouter' | 'cline' ?? 'openrouter')
   }
 
   let proc: Subprocess<'ignore', 'pipe', 'pipe'>
   let output = ''
   let stderr = ''
+
+  // Build environment for agents that need special env vars
+  const env = buildAgentEnv(agent, provider)
 
   try {
     proc = spawn({
@@ -68,6 +85,7 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
       stdout: 'pipe',
       stderr: 'pipe',
       stdin: 'ignore',
+      env: { ...process.env, ...env },
     })
 
     // Register process for cleanup on cancel/shutdown
@@ -150,8 +168,8 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
     // Calculate cost for per_use billing
     let cost_usd: number | undefined
     if (config.billing_type === 'per_use') {
-      // For cline, calculate from OpenRouter usage delta
-      if (agent === 'cline' && openRouterUsageBefore !== null) {
+      // For agents using OpenRouter, calculate from usage delta
+      if ((agent === 'cline' || agent === 'pi') && openRouterUsageBefore !== null) {
         const creditsAfter = await checkOpenRouterCredits()
         if (creditsAfter) {
           cost_usd = creditsAfter.usage - openRouterUsageBefore
@@ -161,6 +179,8 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
       if (cost_usd === undefined) {
         cost_usd = parseCostFromOutput(output)
       }
+    } else if (config.billing_type === 'free') {
+      cost_usd = 0
     } else {
       cost_usd = 0
     }
@@ -200,8 +220,20 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
  * - Gemini: gemini "prompt" --model <model> --yolo
  * - Cline: cline task new "prompt" --yolo --mode act [--address <addr>]
  * - Cursor: agent --print --output-format json [--model <model>] "prompt"
+ * - Kiro: kiro-cli chat --no-interactive (piped prompt)
+ * - Vibe: vibe -p "prompt" --output text
+ * - Pi: pi -p "prompt" --provider <provider> --model <model>
+ * - OpenCode: opencode run "prompt" [-m model]
+ * - Copilot: copilot -p "prompt" --allow-all-tools
  */
-function buildAgentArgs(agent: AgentType, prompt: string, model?: string, cwd?: string, clineAddress?: string | null): string[] {
+function buildAgentArgs(
+  agent: AgentType,
+  prompt: string,
+  model?: string,
+  cwd?: string,
+  clineAddress?: string | null,
+  provider?: ProviderType
+): string[] {
   switch (agent) {
     case 'claude':
       // claude -p "prompt" --model sonnet --dangerously-skip-permissions
@@ -247,9 +279,120 @@ function buildAgentArgs(agent: AgentType, prompt: string, model?: string, cwd?: 
         prompt,
       ]
 
+    // New agents (Feb 2026)
+    case 'kiro':
+      // kiro-cli chat --no-interactive
+      // Note: prompt is piped via stdin, not as arg
+      return ['chat', '--no-interactive']
+
+    case 'vibe':
+      // vibe -p "prompt" --output text
+      return [
+        '-p', prompt,
+        '--output', 'text',
+      ]
+
+    case 'pi':
+      // pi -p "prompt" --provider <provider> --model <model>
+      return [
+        '-p', prompt,
+        ...(provider ? ['--provider', mapProviderToPi(provider)] : ['--provider', 'openrouter']),
+        ...(model ? ['--model', model] : []),
+      ]
+
+    case 'opencode':
+      // opencode run "prompt" [-m model]
+      return [
+        'run',
+        ...(model ? ['-m', model] : ['-m', 'opencode/kimi-k2.5-free']),
+        prompt,
+      ]
+
+    case 'copilot':
+      // copilot -p "prompt" --allow-all-tools
+      return [
+        '-p', prompt,
+        '--allow-all-tools',
+      ]
+
     default:
       return [prompt]
   }
+}
+
+/**
+ * Map ProviderType to pi CLI provider name.
+ */
+function mapProviderToPi(provider: ProviderType): string {
+  switch (provider) {
+    case 'openrouter': return 'openrouter'
+    case 'groq': return 'groq'
+    case 'cerebras': return 'cerebras'
+    case 'mistral': return 'mistral'
+    case 'google': return 'google'
+    case 'anthropic': return 'anthropic'
+    case 'openai': return 'openai'
+    default: return 'openrouter'
+  }
+}
+
+/**
+ * Build environment variables for agents that need them.
+ */
+function buildAgentEnv(agent: AgentType, provider?: ProviderType): Record<string, string> {
+  const env: Record<string, string> = {}
+  const configDir = join(homedir(), '.config', 'mk-agent')
+
+  // Copilot needs GH_TOKEN
+  if (agent === 'copilot') {
+    const token = getCopilotToken()
+    if (token) {
+      env.GH_TOKEN = token
+    }
+  }
+
+  // Pi needs API keys based on provider
+  if (agent === 'pi') {
+    const p = provider ?? 'openrouter'
+    if (p === 'openrouter') {
+      const keyPath = join(configDir, 'OPENROUTER_API_KEY')
+      if (existsSync(keyPath)) {
+        // File contains: export OPENROUTER_API_KEY=...
+        const content = readFileSync(keyPath, 'utf-8')
+        const match = content.match(/OPENROUTER_API_KEY=(.+)/)
+        if (match) env.OPENROUTER_API_KEY = match[1].trim()
+      }
+    } else if (p === 'mistral') {
+      const keyPath = join(configDir, 'MISTRAL_API_KEY')
+      if (existsSync(keyPath)) {
+        const content = readFileSync(keyPath, 'utf-8')
+        const match = content.match(/MISTRAL_API_KEY=(.+)/)
+        if (match) env.MISTRAL_API_KEY = match[1].trim()
+      }
+    } else if (p === 'groq') {
+      // Groq key is in ~/.groq/config.json
+      const apiKey = getGroqApiKey()
+      if (apiKey) env.GROQ_API_KEY = apiKey
+    } else if (p === 'cerebras') {
+      const keyPath = join(configDir, 'CEREBRAS_API_KEY')
+      if (existsSync(keyPath)) {
+        const content = readFileSync(keyPath, 'utf-8').trim()
+        env.CEREBRAS_API_KEY = content
+      }
+    }
+  }
+
+  // Vibe needs MISTRAL_API_KEY
+  if (agent === 'vibe') {
+    const keyPath = join(configDir, 'MISTRAL_API_KEY')
+    if (existsSync(keyPath)) {
+      const content = readFileSync(keyPath, 'utf-8')
+      const match = content.match(/MISTRAL_API_KEY=(.+)/)
+      if (match) env.MISTRAL_API_KEY = match[1].trim()
+    }
+  }
+
+  return env
 }
 
 // =============================================================================
@@ -384,4 +527,149 @@ function parseCostFromOutput(output: string): number | undefined {
   }
 
   return undefined
+}
+
+// =============================================================================
+// Groq API dispatch (no CLI available - requires TTY)
+// =============================================================================
+
+/**
+ * Get Groq API key from config file.
+ */
+function getGroqApiKey(): string | null {
+  const configPath = join(homedir(), '.groq', 'config.json')
+  if (!existsSync(configPath)) return null
+  try {
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'))
+    return config.apiKey ?? null
+  } catch {
+    return null
+  }
+}
+
+// =============================================================================
+// Kiro special handling (stdin for prompt)
+// =============================================================================
+
+/**
+ * Dispatch to Kiro with prompt via stdin.
+ * Kiro CLI doesn't accept prompt as arg, only via stdin.
+ */
+export async function dispatchKiro(
+  prompt: string,
+  cwd: string,
+  taskId?: string,
+  onOutput?: (chunk: string, stream?: 'stdout' | 'stderr') => void,
+  onStart?: (pid: number) => void,
+  timeoutMs?: number
+): Promise<AgentExecuteResult> {
+  const startTime = Date.now()
+  const timeout = timeoutMs ?? 1800000
+
+  try {
+    const proc = spawn({
+      cmd: ['kiro-cli', 'chat', '--no-interactive'],
+      cwd,
+      stdout: 'pipe',
+      stderr: 'pipe',
+      stdin: 'pipe',
+    })
+
+    if (taskId) {
+      registerProcess(taskId, proc, 'kiro', cwd)
+    }
+
+    if (proc.pid) {
+      onStart?.(proc.pid)
+    }
+
+    // Write prompt to stdin and close
+    // Bun's stdin is a FileSink, not a stream
+    proc.stdin.write(prompt)
+    proc.stdin.end()
+
+    let output = ''
+    let stderr = ''
+
+    const readStream = async (
+      reader: ReadableStreamDefaultReader<Uint8Array>,
+      target: 'stdout' | 'stderr'
+    ) => {
+      const decoder = new TextDecoder()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const chunk = decoder.decode(value)
+        if (target === 'stdout') {
+          output += chunk
+          onOutput?.(chunk, 'stdout')
+        } else {
+          stderr += chunk
+          onOutput?.(chunk, 'stderr')
+        }
+      }
+    }
+
+    const result = await Promise.race([
+      Promise.all([
+        readStream(proc.stdout.getReader(), 'stdout'),
+        readStream(proc.stderr.getReader(), 'stderr'),
+        proc.exited,
+      ]),
+      new Promise<'timeout'>((resolve) =>
+        setTimeout(() => resolve('timeout'), timeout)
+      ),
+    ])
+
+    if (result === 'timeout') {
+      proc.kill()
+      if (taskId) unregisterProcess(taskId)
+      return {
+        success: false,
+        output: output + '\n[TIMEOUT]',
+        exit_code: 124,
+        duration_seconds: (Date.now() - startTime) / 1000,
+      }
+    }
+
+    const exitCode = await proc.exited
+    if (taskId) unregisterProcess(taskId)
+
+    // Skip first ~30 lines of kiro output (banner/startup)
+    const lines = output.split('\n')
+    const cleanOutput = lines.slice(30).join('\n').trim()
+
+    return {
+      success: exitCode === 0,
+      output: cleanOutput || output,
+      exit_code: exitCode,
+      duration_seconds: (Date.now() - startTime) / 1000,
+      cost_usd: 0, // Subscription
+    }
+  } catch (error) {
+    if (taskId) unregisterProcess(taskId)
+    return {
+      success: false,
+      output: error instanceof Error ? error.message : String(error),
+      exit_code: 1,
+      duration_seconds: (Date.now() - startTime) / 1000,
+    }
+  }
+}
+
+// =============================================================================
+// Copilot environment setup
+// =============================================================================
+
+/**
+ * Get Copilot token for GH_TOKEN env var.
+ */
+function getCopilotToken(): string | null {
+  const tokenPath = join(homedir(), '.config', 'mk-agent', 'COPILOT_TOKEN')
+  if (!existsSync(tokenPath)) return null
+  try {
+    return readFileSync(tokenPath, 'utf-8').trim()
+  } catch {
+    return null
+  }
 }

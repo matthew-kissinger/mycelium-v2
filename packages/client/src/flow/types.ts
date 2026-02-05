@@ -25,9 +25,9 @@ export interface SchedulerNodeData extends BaseNodeData {
   }
 }
 
-/** Cycle node - scheduler cycles (discovery, sequencer, etc.) */
+/** Cycle node - scheduler cycles (discovery, dispatcher, etc.) */
 export interface CycleNodeData extends BaseNodeData {
-  cycleType: 'discovery' | 'sequencer' | 'dispatcher' | 'shepherd' | 'armory' | 'blocked_check' | 'digest' | 'compaction' | 'health_check'
+  cycleType: 'discovery' | 'dispatcher' | 'shepherd' | 'armory' | 'blocked_check' | 'digest' | 'compaction' | 'health_check'
   enabled: boolean
   running: boolean
   last_run?: string
@@ -83,6 +83,13 @@ export interface MemoryNodeData extends BaseNodeData {
   repos_with_memory: number
 }
 
+/** Repos node - registered repositories */
+export interface ReposNodeData extends BaseNodeData {
+  total: number
+  by_language: Record<string, number>
+  with_pending_tasks: number
+}
+
 // =============================================================================
 // Union Type for All Node Data
 // =============================================================================
@@ -94,6 +101,7 @@ export type SystemNodeData =
   | AgentSlotsNodeData
   | AlignmentNodeData
   | MemoryNodeData
+  | ReposNodeData
 
 // =============================================================================
 // Node Type Names
@@ -106,6 +114,7 @@ export type SystemNodeType =
   | 'agentSlots'
   | 'alignment'
   | 'memory'
+  | 'repos'
 
 // =============================================================================
 // Typed Node and Edge

@@ -26,9 +26,11 @@ interface UIState {
 
 let toastCounter = 0
 
+// Default sidebar to collapsed (mobile: hidden, desktop: narrow 48px)
+// User can expand via hamburger (mobile) or collapse toggle (desktop)
 export const useUIStore = create<UIState>((set) => ({
   panel: { type: null, nodeId: null },
-  sidebarCollapsed: false,
+  sidebarCollapsed: true,
   toasts: [],
 
   openPanel: (type, nodeId, data) => {

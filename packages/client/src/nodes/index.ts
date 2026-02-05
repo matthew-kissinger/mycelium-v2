@@ -8,6 +8,7 @@ import { TaskPoolNode } from './TaskPoolNode'
 import { AgentSlotsNode } from './AgentSlotsNode'
 import { AlignmentNode } from './AlignmentNode'
 import { MemoryNode } from './MemoryNode'
+import { ReposNode } from './ReposNode'
 
 export {
   SchedulerNode,
@@ -16,6 +17,7 @@ export {
   AgentSlotsNode,
   AlignmentNode,
   MemoryNode,
+  ReposNode,
 }
 
 // Node type registration map for React Flow
@@ -26,6 +28,7 @@ export const nodeTypes = {
   agentSlots: AgentSlotsNode,
   alignment: AlignmentNode,
   memory: MemoryNode,
+  repos: ReposNode,
 }
 
 // Type for node type keys

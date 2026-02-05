@@ -5,6 +5,7 @@
 import { useEffect } from 'react'
 import { useUIStore } from '../stores/uiStore'
 import { useSystemStore } from '../stores/system'
+import { useSchedulerStore } from '../stores/schedulerStore'
 import type { PanelType } from '../flow/types'
 
 interface SidebarItem {
@@ -60,11 +61,11 @@ export function LeftSidebar() {
     patternCount,
     warningCount,
     inventory,
-    shepherdStatus,
     groupedMemory,
     fetchRepos,
-    fetchShepherdStatus,
   } = useSystemStore()
+
+  const { shepherdStatus, fetchShepherdStatus } = useSchedulerStore()
 
   useEffect(() => {
     fetchRepos()
@@ -126,7 +127,12 @@ export function LeftSidebar() {
     if (shepherdSubItems.length > 0) {
       const readyCount = shepherdSubItems.filter((s) => s.isReady).length
       if (readyCount > 0) return `${readyCount} ready`
-      return `${shepherdStatus!.total_unevaluated} eval`
+      // Show max progress toward threshold (e.g., "3/5" for repo closest to ready)
+      const maxUnevaluated = Math.max(
+        ...Object.values(shepherdStatus!.repos).map((r) => r.unevaluated)
+      )
+      const bs = shepherdStatus!.batch_size
+      return `${maxUnevaluated}/${bs}`
     }
     const c = getCycle('shepherd')
     return formatNextRun(c?.next_run, c?.last_run)
@@ -150,17 +156,6 @@ export function LeftSidebar() {
           data: { cycleType: 'discovery' },
           getValue: () => {
             const c = getCycle('discovery')
-            return formatNextRun(c?.next_run, c?.last_run)
-          },
-        },
-        {
-          type: 'cycle',
-          label: 'Sequencer',
-          shortLabel: 'SEQ',
-          nodeId: 'sequencer',
-          data: { cycleType: 'sequencer' },
-          getValue: () => {
-            const c = getCycle('sequencer')
             return formatNextRun(c?.next_run, c?.last_run)
           },
         },
@@ -339,7 +334,7 @@ export function LeftSidebar() {
 
   return (
     <aside
-      className={`flex flex-col border-r border-zinc-800 bg-zinc-900 transition-all ${
+      className={`flex flex-col h-full bg-zinc-900 transition-all ${
         sidebarCollapsed ? 'w-12' : 'w-60'
       }`}
     >

@@ -3,7 +3,6 @@ import { z } from 'zod'
 // System agent types
 export const SystemAgentType = z.enum([
   'discovery',
-  'sequencer',
   'shepherd',
   'genesis',
   'armory',

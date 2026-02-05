@@ -13,7 +13,7 @@ export const tasks = sqliteTable('tasks', {
 
   // Dependencies (JSON array of task IDs)
   depends_on: text('depends_on').default('[]'),
-  sequenced: integer('sequenced', { mode: 'boolean' }).default(false),
+  sequenced: integer('sequenced', { mode: 'boolean' }).default(true),
 
   // Git/GitHub
   branch_name: text('branch_name'),
