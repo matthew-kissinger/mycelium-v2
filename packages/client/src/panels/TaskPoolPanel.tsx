@@ -12,10 +12,12 @@ interface TaskData {
   status: 'pending' | 'running' | 'done' | 'failed' | 'cancelled'
   agent?: string
   model?: string
+  provider?: 'openrouter' | 'cline'
   repo_path: string
   prompt?: string
   depends_on: string[]
   sequenced: boolean
+  timeout_seconds?: number
   result?: string
   parsed_result?: {
     summary?: string
@@ -105,9 +107,58 @@ export function TaskPoolPanel({
   onViewLogs?: (taskId: string, taskTitle: string) => void
 }) {
   const [activeTab, setActiveTab] = useState<'list' | 'graph'>('list')
+  const [detailTab, setDetailTab] = useState<'info' | 'context' | 'sessions'>('info')
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+
+  // Context and sessions state
+  const [taskContext, setTaskContext] = useState<Record<string, unknown> | null>(null)
+  const [taskContextLoading, setTaskContextLoading] = useState(false)
+  const [taskSessions, setTaskSessions] = useState<Array<{
+    id: string
+    agent?: string
+    model?: string
+    created_at: string
+    context_trace?: { layers?: Array<{ name: string; size: number }>; total_size?: number }
+    session_log?: Array<{ chunk: string; stream: string; timestamp: string }>
+  }> | null>(null)
+  const [taskSessionsLoading, setTaskSessionsLoading] = useState(false)
+
+  // Fetch context when switching to context tab
+  const fetchTaskContext = async (taskId: string) => {
+    setTaskContextLoading(true)
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/context`)
+      const data = await res.json()
+      setTaskContext(data)
+    } catch (error) {
+      console.error('Failed to fetch context:', error)
+    } finally {
+      setTaskContextLoading(false)
+    }
+  }
+
+  // Fetch sessions when switching to sessions tab
+  const fetchTaskSessions = async (taskId: string) => {
+    setTaskSessionsLoading(true)
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/sessions`)
+      const data = await res.json()
+      setTaskSessions(data.fruiting_sessions || [])
+    } catch (error) {
+      console.error('Failed to fetch sessions:', error)
+    } finally {
+      setTaskSessionsLoading(false)
+    }
+  }
+
+  // Reset detail state when task changes
+  useEffect(() => {
+    setDetailTab('info')
+    setTaskContext(null)
+    setTaskSessions(null)
+  }, [selectedTask?.id])
 
   // Fetch tasks on mount and when filters change
   useEffect(() => {
@@ -204,6 +255,12 @@ export function TaskPoolPanel({
               <span className="text-zinc-500">Model:</span>{' '}
               <span className="text-zinc-300">{selectedTask.model || 'default'}</span>
             </div>
+            {selectedTask.provider && (
+              <div>
+                <span className="text-zinc-500">Provider:</span>{' '}
+                <span className="text-zinc-300 capitalize">{selectedTask.provider}</span>
+              </div>
+            )}
             <div>
               <span className="text-zinc-500">Cost:</span>{' '}
               <span className="text-zinc-300">{formatCost(selectedTask.cost_usd)}</span>
@@ -223,62 +280,182 @@ export function TaskPoolPanel({
           </div>
         </div>
 
-        {/* Dependencies */}
-        {selectedTask.depends_on.length > 0 && (
-          <div className="bg-zinc-800 rounded-lg p-3">
-            <h4 className="text-xs font-medium text-zinc-500 uppercase mb-2">Dependencies ({selectedTask.depends_on.length})</h4>
-            <div className="space-y-1">
-              {selectedTask.depends_on.map((depId) => (
-                <div key={depId} className="text-xs text-zinc-400 font-mono">
-                  {depId.slice(0, 8)}...
+        {/* Detail Tabs */}
+        <div className="flex gap-1 bg-zinc-800 rounded-lg p-1">
+          <button
+            onClick={() => setDetailTab('info')}
+            className={`flex-1 px-3 py-1.5 rounded text-xs transition-colors ${
+              detailTab === 'info'
+                ? 'bg-zinc-700 text-zinc-100'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Info
+          </button>
+          <button
+            onClick={() => {
+              setDetailTab('context')
+              if (!taskContext) fetchTaskContext(selectedTask.id)
+            }}
+            className={`flex-1 px-3 py-1.5 rounded text-xs transition-colors ${
+              detailTab === 'context'
+                ? 'bg-zinc-700 text-zinc-100'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Context
+          </button>
+          <button
+            onClick={() => {
+              setDetailTab('sessions')
+              if (!taskSessions) fetchTaskSessions(selectedTask.id)
+            }}
+            className={`flex-1 px-3 py-1.5 rounded text-xs transition-colors ${
+              detailTab === 'sessions'
+                ? 'bg-zinc-700 text-zinc-100'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Sessions
+          </button>
+        </div>
+
+        {/* Info Tab Content */}
+        {detailTab === 'info' && (
+          <>
+            {/* Dependencies */}
+            {selectedTask.depends_on.length > 0 && (
+              <div className="bg-zinc-800 rounded-lg p-3">
+                <h4 className="text-xs font-medium text-zinc-500 uppercase mb-2">Dependencies ({selectedTask.depends_on.length})</h4>
+                <div className="space-y-1">
+                  {selectedTask.depends_on.map((depId) => (
+                    <div key={depId} className="text-xs text-zinc-400 font-mono">
+                      {depId.slice(0, 8)}...
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Prompt */}
-        {selectedTask.prompt && (
-          <div className="bg-zinc-800 rounded-lg p-3">
-            <h4 className="text-xs font-medium text-zinc-500 uppercase mb-2">Prompt</h4>
-            <pre className="text-xs text-zinc-300 whitespace-pre-wrap max-h-40 overflow-y-auto">
-              {selectedTask.prompt}
-            </pre>
-          </div>
-        )}
-
-        {/* Result or Error */}
-        {selectedTask.status === 'done' && selectedTask.result && (
-          <div className="bg-zinc-800 rounded-lg p-3">
-            <h4 className="text-xs font-medium text-zinc-500 uppercase mb-2">Result</h4>
-            {selectedTask.parsed_result?.summary && (
-              <p className="text-sm text-zinc-200 mb-2">{selectedTask.parsed_result.summary}</p>
-            )}
-            {selectedTask.parsed_result?.files_modified && selectedTask.parsed_result.files_modified.length > 0 && (
-              <div className="mb-2">
-                <span className="text-xs text-zinc-500">Files modified: </span>
-                <span className="text-xs text-zinc-300">{selectedTask.parsed_result.files_modified.length}</span>
               </div>
             )}
-            <details className="text-xs">
-              <summary className="text-zinc-400 cursor-pointer hover:text-zinc-200">Show full output</summary>
-              <pre className="mt-2 text-zinc-400 whitespace-pre-wrap max-h-60 overflow-y-auto">
-                {selectedTask.result}
-              </pre>
-            </details>
+
+            {/* Prompt */}
+            {selectedTask.prompt && (
+              <div className="bg-zinc-800 rounded-lg p-3">
+                <h4 className="text-xs font-medium text-zinc-500 uppercase mb-2">Prompt</h4>
+                <pre className="text-xs text-zinc-300 whitespace-pre-wrap max-h-40 overflow-y-auto">
+                  {selectedTask.prompt}
+                </pre>
+              </div>
+            )}
+
+            {/* Result or Error */}
+            {selectedTask.status === 'done' && selectedTask.result && (
+              <div className="bg-zinc-800 rounded-lg p-3">
+                <h4 className="text-xs font-medium text-zinc-500 uppercase mb-2">Result</h4>
+                {selectedTask.parsed_result?.summary && (
+                  <p className="text-sm text-zinc-200 mb-2">{selectedTask.parsed_result.summary}</p>
+                )}
+                {selectedTask.parsed_result?.files_modified && selectedTask.parsed_result.files_modified.length > 0 && (
+                  <div className="mb-2">
+                    <span className="text-xs text-zinc-500">Files modified: </span>
+                    <span className="text-xs text-zinc-300">{selectedTask.parsed_result.files_modified.length}</span>
+                  </div>
+                )}
+                <details className="text-xs">
+                  <summary className="text-zinc-400 cursor-pointer hover:text-zinc-200">Show full output</summary>
+                  <pre className="mt-2 text-zinc-400 whitespace-pre-wrap max-h-60 overflow-y-auto">
+                    {selectedTask.result}
+                  </pre>
+                </details>
+              </div>
+            )}
+
+            {selectedTask.status === 'failed' && selectedTask.error && (
+              <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+                <h4 className="text-xs font-medium text-red-400 uppercase mb-2">Error</h4>
+                <pre className="text-xs text-red-300 whitespace-pre-wrap max-h-40 overflow-y-auto">
+                  {selectedTask.error}
+                </pre>
+                {selectedTask.error_details?.exit_code !== undefined && (
+                  <div className="mt-2 text-xs text-red-400">
+                    Exit code: {selectedTask.error_details.exit_code}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Context Tab Content */}
+        {detailTab === 'context' && (
+          <div className="bg-zinc-800 rounded-lg p-3">
+            {taskContextLoading ? (
+              <div className="text-center py-4 text-zinc-500">Loading context...</div>
+            ) : taskContext ? (
+              <div className="space-y-3 text-xs">
+                <h4 className="text-zinc-500 uppercase mb-2">Assembled Context</h4>
+                <p className="text-zinc-400 mb-2">
+                  Context includes: task info, repo metadata, memory patterns, warnings, dependencies, and related tasks.
+                </p>
+                <pre className="text-zinc-300 whitespace-pre-wrap max-h-96 overflow-y-auto bg-zinc-900 p-2 rounded text-xs">
+                  {JSON.stringify(taskContext, null, 2)}
+                </pre>
+              </div>
+            ) : (
+              <div className="text-center py-4 text-zinc-500">No context available</div>
+            )}
           </div>
         )}
 
-        {selectedTask.status === 'failed' && selectedTask.error && (
-          <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
-            <h4 className="text-xs font-medium text-red-400 uppercase mb-2">Error</h4>
-            <pre className="text-xs text-red-300 whitespace-pre-wrap max-h-40 overflow-y-auto">
-              {selectedTask.error}
-            </pre>
-            {selectedTask.error_details?.exit_code !== undefined && (
-              <div className="mt-2 text-xs text-red-400">
-                Exit code: {selectedTask.error_details.exit_code}
-              </div>
+        {/* Sessions Tab Content */}
+        {detailTab === 'sessions' && (
+          <div className="space-y-3">
+            {taskSessionsLoading ? (
+              <div className="text-center py-4 text-zinc-500">Loading sessions...</div>
+            ) : taskSessions && taskSessions.length > 0 ? (
+              taskSessions.map((session) => (
+                <div key={session.id} className="bg-zinc-800 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs">
+                      <span className="text-zinc-300 capitalize">{session.agent}</span>
+                      {session.model && <span className="text-zinc-500">/{session.model}</span>}
+                    </div>
+                    <span className="text-xs text-zinc-500">{formatTimeAgo(session.created_at)}</span>
+                  </div>
+
+                  {/* Context Trace */}
+                  {session.context_trace && (
+                    <div className="mb-2">
+                      <h4 className="text-xs text-zinc-500 mb-1">Context Layers</h4>
+                      <div className="flex flex-wrap gap-1">
+                        {session.context_trace.layers?.map((layer, i) => (
+                          <span key={i} className="text-xs px-1.5 py-0.5 bg-zinc-700 rounded text-zinc-300">
+                            {layer.name}: {(layer.size / 1024).toFixed(1)}KB
+                          </span>
+                        ))}
+                      </div>
+                      {session.context_trace.total_size && (
+                        <div className="text-xs text-zinc-500 mt-1">
+                          Total: {(session.context_trace.total_size / 1024).toFixed(1)}KB
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Session Log Preview */}
+                  {session.session_log && session.session_log.length > 0 && (
+                    <details className="text-xs">
+                      <summary className="text-zinc-400 cursor-pointer hover:text-zinc-200">
+                        Output ({session.session_log.length} chunks)
+                      </summary>
+                      <pre className="mt-2 text-zinc-400 whitespace-pre-wrap max-h-40 overflow-y-auto bg-zinc-900 p-2 rounded">
+                        {session.session_log.slice(-10).map((log) => log.chunk).join('')}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              ))
+            ) : (
+              <div className="text-center py-4 text-zinc-500">No sessions recorded</div>
             )}
           </div>
         )}
@@ -459,9 +636,15 @@ export function TaskPoolPanel({
                   </span>
                 </div>
                 <div className="flex items-center gap-3 text-xs text-zinc-500">
-                  {task.agent && <span className="capitalize">{task.agent}</span>}
+                  {task.agent && (
+                    <span className="capitalize">
+                      {task.agent}
+                      {task.provider && <span className="text-zinc-600">/{task.provider}</span>}
+                    </span>
+                  )}
                   <span>{formatTimeAgo(task.created_at)}</span>
                   {task.cost_usd > 0 && <span>{formatCost(task.cost_usd)}</span>}
+                  {task.duration_seconds && <span>{formatDuration(task.duration_seconds)}</span>}
                   {task.depends_on.length > 0 && (
                     <span className="text-amber-500">{task.depends_on.length} deps</span>
                   )}

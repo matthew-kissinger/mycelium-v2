@@ -134,6 +134,57 @@ export function extractError(agent: string, output: string): {
     }
   }
 
+  // Groq rate limit (free tier)
+  if (output.includes('Rate limit reached') || (agent === 'groq' && output.includes('429'))) {
+    const waitMatch = output.match(/try again in (\d+\.?\d*)s/)
+    const waitMs = waitMatch ? parseFloat(waitMatch[1]) * 1000 : 60000
+    return {
+      error: 'Groq rate limit reached',
+      errorType: 'quota',
+      quotaResetMs: waitMs,
+    }
+  }
+
+  // Copilot auth error
+  if (output.includes('GH_TOKEN') || output.includes('authentication') && agent === 'copilot') {
+    return {
+      error: 'Copilot authentication failed - check GH_TOKEN',
+      errorType: 'api_error',
+    }
+  }
+
+  // Pi/OpenRouter API error
+  if (output.includes('OPENROUTER_API_KEY') || output.includes('API key')) {
+    return {
+      error: 'Missing or invalid API key',
+      errorType: 'api_error',
+    }
+  }
+
+  // Vibe/Mistral error
+  if (output.includes('MISTRAL_API_KEY') || (agent === 'vibe' && output.includes('Unauthorized'))) {
+    return {
+      error: 'Mistral API authentication failed',
+      errorType: 'api_error',
+    }
+  }
+
+  // Kiro AWS auth error
+  if (output.includes('SSO session') || output.includes('IAM Identity') || (agent === 'kiro' && output.includes('expired'))) {
+    return {
+      error: 'Kiro AWS SSO session expired - run kiro-cli login',
+      errorType: 'api_error',
+    }
+  }
+
+  // OpenCode free model errors
+  if (agent === 'opencode' && output.includes('model not found')) {
+    return {
+      error: 'OpenCode model not available',
+      errorType: 'api_error',
+    }
+  }
+
   // Generic error extraction - find first line that looks like an error
   const lines = output.split('\n')
   for (const line of lines) {
@@ -428,5 +479,44 @@ export function resetHealth(agent?: string, model?: string): void {
     healthState.delete(key)
   } else {
     healthState.clear()
+  }
+}
+
+/**
+ * Check Groq API rate limit status.
+ * Returns usage info if API key is configured.
+ */
+export async function checkGroqStatus(): Promise<{
+  available: boolean
+  remainingRequests?: number
+  resetAt?: string
+} | null> {
+  try {
+    const configPath = `${process.env.HOME}/.groq/config.json`
+    const config = await Bun.file(configPath).json()
+    const apiKey = config.apiKey
+
+    if (!apiKey) return null
+
+    // Make a minimal request to check rate limit headers
+    const response = await fetch('https://api.groq.com/openai/v1/models', {
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    })
+
+    if (!response.ok) {
+      return { available: false }
+    }
+
+    // Parse rate limit headers
+    const remaining = response.headers.get('x-ratelimit-remaining-requests')
+    const reset = response.headers.get('x-ratelimit-reset-requests')
+
+    return {
+      available: true,
+      remainingRequests: remaining ? parseInt(remaining) : undefined,
+      resetAt: reset ?? undefined,
+    }
+  } catch {
+    return null
   }
 }

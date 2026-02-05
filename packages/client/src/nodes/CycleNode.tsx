@@ -8,7 +8,6 @@ import type { CycleNodeData } from '../flow/types'
 
 const cycleLabels: Record<CycleNodeData['cycleType'], string> = {
   discovery: 'DSC',
-  sequencer: 'SEQ',
   dispatcher: 'DIS',
   shepherd: 'SHP',
   armory: 'ARM',

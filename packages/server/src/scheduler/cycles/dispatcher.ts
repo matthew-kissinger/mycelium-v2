@@ -17,7 +17,7 @@ import { broadcast } from '../../sse'
 import { startTaskLog, appendLog, completeTaskLog, getTaskLogEntries } from '../../logs'
 import {
   buildMycelContext,
-  buildAgentsSection,
+  buildAgentsSectionWithCredits,
   buildSkillsSection,
   buildMcpSection,
 } from '../../prompts/context'
@@ -197,7 +197,8 @@ async function runTask(task: Awaited<ReturnType<typeof queries.getTask>>): Promi
     taskId,
     taskTitle: task.title,
   })
-  const agentsSection = buildAgentsSection()
+  // Use async version to include live credits/quota info
+  const agentsSection = await buildAgentsSectionWithCredits()
   const skillsSection = buildSkillsSection([], repoPath)
   const mcpSection = buildMcpSection(agent)
 

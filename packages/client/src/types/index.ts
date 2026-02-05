@@ -224,7 +224,7 @@ export interface Inventory {
 /** Running system agent info */
 export interface RunningSystemAgent {
   id: string
-  agent_type: 'discovery' | 'sequencer' | 'shepherd' | 'armory'
+  agent_type: 'discovery' | 'shepherd' | 'armory'
   repo_path: string | null
   started_at: string
 }

@@ -29,7 +29,7 @@
 
 ## Features
 
-- **Multi-Agent Dispatch** - Route tasks to Claude, Codex, Gemini, Cline, or Cursor based on task type
+- **Multi-Agent Dispatch** - Route tasks to 11 agents (Claude, Codex, Gemini, Cline, Cursor, Kiro, Groq, Vibe, Pi, OpenCode, Copilot)
 - **Automatic Discovery** - Agents scan repos for TODOs, lint errors, outdated deps, test failures
 - **Dependency Chains** - Wire tasks with `--depends-on` for sequential execution
 - **Parallel Execution** - Independent tasks run concurrently (configurable limit)
@@ -51,6 +51,11 @@
   - `gemini` - [Gemini CLI](https://github.com/google/gemini-cli)
   - `cline` - [Cline](https://github.com/cline/cline)
   - `agent` - [Cursor Agent](https://cursor.com)
+  - `kiro-cli` - [Kiro CLI](https://kiro.dev) (AWS)
+  - `vibe` - [Mistral Vibe](https://mistral.ai)
+  - `pi` - [Pi Coding Agent](https://github.com/badlogic/pi-mono)
+  - `opencode` - [OpenCode](https://github.com/sst/opencode)
+  - `copilot` - [GitHub Copilot CLI](https://github.com/features/copilot)
 
 ### Installation
 
@@ -104,22 +109,22 @@ packages/
 
 | Cycle | Interval | Purpose |
 |-------|----------|---------|
-| Dispatcher | 60s | Run sequenced tasks with resolved deps |
-| Discovery | 15min | Scan repos, create tasks |
-| Sequencer | 15min | Wire task dependencies |
+| Dispatcher | 60s | Run tasks with resolved deps |
+| Discovery | 15min | Scan repos, create tasks with deps |
 | Shepherd | 15min | Evaluate completed tasks, merge/reject |
+| Digest | 4h | Smart status summaries (Haiku agent) |
+| Compaction | 4h | Semantic memory cleanup (Haiku agent) |
 | Health Check | 60s | Monitor device connectivity |
 | Blocked Check | 15min | Detect stuck/orphaned tasks |
 
 ### Task Flow
 
 ```
-1. Discovery creates task (sequenced=false)
-2. Sequencer analyzes + wires deps (sequenced=true)
-3. Dispatcher runs tasks when deps resolve
-4. On success: Telegram notification
-5. On failure: Retry with fallback model, or cancel dependents
-6. Shepherd evaluates results per repo
+1. Discovery creates tasks (with --depends-on for dependencies)
+2. Dispatcher runs tasks when deps resolve
+3. On success: Telegram notification
+4. On failure: Retry with fallback model, or cancel dependents
+5. Shepherd evaluates results per repo
 ```
 
 ## CLI Usage
@@ -212,6 +217,12 @@ mycel repos health
 | Gemini | `gemini` | Free tier + paid | Fast iteration, general tasks |
 | Cline | `cline` | OpenRouter/Cline | Strong reasoning, multi-file work |
 | Cursor | `agent` | Subscription | Multi-file composition |
+| Kiro | `kiro-cli` | Subscription (AWS) | AWS integration, enterprise |
+| Groq | API | Free | Ultra-fast inference |
+| Vibe | `vibe` | Per-use (Mistral) | Mistral models |
+| Pi | `pi` | Per-use | Multi-provider flexibility |
+| OpenCode | `opencode` | Free | Free models (kimi, glm, gpt-5-nano) |
+| Copilot | `copilot` | Subscription | GitHub integration |
 
 ### Cline Provider Selection
 

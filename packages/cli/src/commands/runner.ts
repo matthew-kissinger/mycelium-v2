@@ -56,8 +56,7 @@ interface SchedulerConfig {
   digest_enabled?: boolean
   digest_interval_sec?: number
   compaction_enabled?: boolean
-  compaction_day?: number
-  compaction_hour?: number
+  compaction_interval_sec?: number
   auto_prune_enabled?: boolean
   auto_prune_threshold?: number
   auto_prune_keep?: number
@@ -172,13 +171,10 @@ function displayConfig(config: SchedulerConfig): void {
   console.log(`  Interval: ${formatDuration(config.digest_interval_sec ?? 21600)}`)
   console.log('')
 
-  // Compaction settings
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-  const compactionDay = config.compaction_day ?? 0
-  console.log('Compaction:')
+  // Compaction settings (Haiku agent)
+  console.log('Compaction (Haiku Agent):')
   console.log(`  Enabled: ${config.compaction_enabled ?? true}`)
-  console.log(`  Day: ${days[compactionDay] ?? 'Mon'}`)
-  console.log(`  Hour: ${config.compaction_hour ?? 11}:00`)
+  console.log(`  Interval: ${formatDuration(config.compaction_interval_sec ?? 14400)}`)
   console.log('')
 
   // Auto-prune settings

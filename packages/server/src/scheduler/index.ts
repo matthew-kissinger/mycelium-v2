@@ -4,7 +4,6 @@
  * Cycles:
  * - Dispatcher: Run ready tasks (every 60s)
  * - Discovery: Scan repos for work (every 15min)
- * - Sequencer: Wire task dependencies (every 15min)
  * - Shepherd: Evaluate completed batches (every 15min)
  * - Blocked Check: Detect stuck tasks (every 15min)
  * - Digest: Send status summaries (every 6h)
@@ -18,7 +17,6 @@ import { broadcast } from '../sse'
 // Import cycle handlers
 import { runDispatcherCycle } from './cycles/dispatcher'
 import { runDiscoveryCycle } from './cycles/discovery'
-import { runSequencerCycle } from './cycles/sequencer'
 import { runShepherdCycle } from './cycles/shepherd'
 import { runBlockedCheckCycle } from './cycles/blocked'
 import { runDigestCycle } from './cycles/digest'
@@ -30,7 +28,6 @@ import { runHealthCheckCycle } from './cycles/health'
 export type CycleName =
   | 'dispatcher'
   | 'discovery'
-  | 'sequencer'
   | 'shepherd'
   | 'armory'
   | 'digest'
@@ -71,7 +68,6 @@ export function getSchedulerStatus(): SchedulerStatus {
     const defaultCycles: CycleState[] = [
       { name: 'dispatcher', enabled: true, running: false, runs_completed: 0, errors: 0 },
       { name: 'discovery', enabled: true, running: false, runs_completed: 0, errors: 0 },
-      { name: 'sequencer', enabled: true, running: false, runs_completed: 0, errors: 0 },
       { name: 'shepherd', enabled: true, running: false, runs_completed: 0, errors: 0 },
       { name: 'armory', enabled: true, running: false, runs_completed: 0, errors: 0 },
       { name: 'digest', enabled: true, running: false, runs_completed: 0, errors: 0 },
@@ -152,15 +148,6 @@ function initializeScheduler(config: SchedulerConfig): void {
     errors: 0,
   })
 
-  // Sequencer cycle
-  cycles.set('sequencer', {
-    name: 'sequencer',
-    enabled: config.sequencer_enabled,
-    running: false,
-    runs_completed: 0,
-    errors: 0,
-  })
-
   // Shepherd cycle (interval-based, checks for repos with unevaluated tasks)
   cycles.set('shepherd', {
     name: 'shepherd',
@@ -231,11 +218,10 @@ function computeNextRun(cycleName: CycleName): string | undefined {
   const intervalMap: Record<string, number | undefined> = {
     dispatcher: config.dispatcher_interval_sec,
     discovery: config.discovery_interval_sec,
-    sequencer: config.sequencer_interval_sec,
     shepherd: config.shepherd_interval_sec,
     blocked_check: 15 * 60,
     digest: config.digest_interval_sec,
-    compaction: 60 * 60,
+    compaction: config.compaction_interval_sec,
     armory: 60 * 60,
     health_check: config.health_check_interval_sec,
   }
@@ -307,11 +293,10 @@ function startCycles(): void {
 
   startCycle('dispatcher', () => runDispatcherCycle(config), config.dispatcher_interval_sec)
   startCycle('discovery', () => runDiscoveryCycle(config), config.discovery_interval_sec)
-  startCycle('sequencer', () => runSequencerCycle(config), config.sequencer_interval_sec)
   startCycle('shepherd', () => runShepherdCycle(config), config.shepherd_interval_sec)
   startCycle('blocked_check', () => runBlockedCheckCycle(config), 15 * 60)
   startCycle('digest', () => runDigestCycle(config), config.digest_interval_sec)
-  startCycle('compaction', () => runCompactionCycle(config), 60 * 60)
+  startCycle('compaction', () => runCompactionCycle(config), config.compaction_interval_sec)
   startCycle('health_check', () => runHealthCheckCycle(config), config.health_check_interval_sec)
 
   // Armory cycle - check every hour if batch threshold met
@@ -456,7 +441,6 @@ export function getRunningTaskCount(): number {
 // Export cycle handlers for direct access (e.g., from API routes)
 export { runDispatcherCycle } from './cycles/dispatcher'
 export { runDiscoveryCycle } from './cycles/discovery'
-export { runSequencerCycle } from './cycles/sequencer'
 export { runShepherdCycle } from './cycles/shepherd'
 export { runArmoryCycle } from './cycles/armory'
 export { runBlockedCheckCycle } from './cycles/blocked'

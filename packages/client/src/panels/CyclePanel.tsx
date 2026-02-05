@@ -18,8 +18,6 @@ interface SchedulerConfig {
   discovery_interval_sec: number
   discovery_repos: string[]
   discovery_auto_create: string[]
-  sequencer_enabled: boolean
-  sequencer_interval_sec: number
   shepherd_enabled: boolean
   shepherd_batch_size: number
   armory_enabled: boolean
@@ -27,8 +25,7 @@ interface SchedulerConfig {
   digest_enabled: boolean
   digest_interval_sec: number
   compaction_enabled: boolean
-  compaction_day: number
-  compaction_hour: number
+  compaction_interval_sec: number
   auto_prune_enabled: boolean
   auto_prune_threshold: number
   auto_prune_keep: number
@@ -105,11 +102,6 @@ export function CyclePanel({
           discovery_enabled: config.discovery_enabled,
           discovery_interval_sec: config.discovery_interval_sec,
         }
-      case 'sequencer':
-        return {
-          sequencer_enabled: config.sequencer_enabled,
-          sequencer_interval_sec: config.sequencer_interval_sec,
-        }
       case 'shepherd':
         return {
           shepherd_enabled: config.shepherd_enabled,
@@ -128,8 +120,7 @@ export function CyclePanel({
       case 'compaction':
         return {
           compaction_enabled: config.compaction_enabled,
-          compaction_day: config.compaction_day,
-          compaction_hour: config.compaction_hour,
+          compaction_interval_sec: config.compaction_interval_sec,
         }
       case 'blocked_check':
         return {
@@ -161,10 +152,10 @@ export function CyclePanel({
         return config.dispatcher_interval_sec
       case 'discovery':
         return config.discovery_interval_sec
-      case 'sequencer':
-        return config.sequencer_interval_sec
       case 'digest':
         return config.digest_interval_sec
+      case 'compaction':
+        return config.compaction_interval_sec
       default:
         return undefined
     }
@@ -230,30 +221,6 @@ export function CyclePanel({
                 type="number"
                 value={localConfig.discovery_interval_sec ?? config?.discovery_interval_sec ?? 900}
                 onChange={(e) => setLocalConfig({ ...localConfig, discovery_interval_sec: parseInt(e.target.value) || 900 })}
-                className="w-full px-3 py-2 bg-zinc-700 rounded border border-zinc-600 text-zinc-100"
-              />
-            </label>
-          </div>
-        )
-
-      case 'sequencer':
-        return (
-          <div className="space-y-3">
-            <label className="flex items-center justify-between">
-              <span className="text-zinc-400 text-sm">Enabled</span>
-              <input
-                type="checkbox"
-                checked={localConfig.sequencer_enabled ?? config?.sequencer_enabled ?? true}
-                onChange={(e) => setLocalConfig({ ...localConfig, sequencer_enabled: e.target.checked })}
-                className="w-4 h-4 rounded bg-zinc-700 border-zinc-600"
-              />
-            </label>
-            <label className="block">
-              <span className="text-zinc-400 text-sm block mb-1">Interval (seconds)</span>
-              <input
-                type="number"
-                value={localConfig.sequencer_interval_sec ?? config?.sequencer_interval_sec ?? 900}
-                onChange={(e) => setLocalConfig({ ...localConfig, sequencer_interval_sec: parseInt(e.target.value) || 900 })}
                 className="w-full px-3 py-2 bg-zinc-700 rounded border border-zinc-600 text-zinc-100"
               />
             </label>
@@ -347,26 +314,14 @@ export function CyclePanel({
               />
             </label>
             <label className="block">
-              <span className="text-zinc-400 text-sm block mb-1">Day of Week (0=Sun, 1=Mon, ...)</span>
+              <span className="text-zinc-400 text-sm block mb-1">Interval (seconds)</span>
               <input
                 type="number"
-                min={0}
-                max={6}
-                value={localConfig.compaction_day ?? config?.compaction_day ?? 1}
-                onChange={(e) => setLocalConfig({ ...localConfig, compaction_day: parseInt(e.target.value) || 1 })}
+                value={localConfig.compaction_interval_sec ?? config?.compaction_interval_sec ?? 14400}
+                onChange={(e) => setLocalConfig({ ...localConfig, compaction_interval_sec: parseInt(e.target.value) || 14400 })}
                 className="w-full px-3 py-2 bg-zinc-700 rounded border border-zinc-600 text-zinc-100"
               />
-            </label>
-            <label className="block">
-              <span className="text-zinc-400 text-sm block mb-1">Hour (0-23)</span>
-              <input
-                type="number"
-                min={0}
-                max={23}
-                value={localConfig.compaction_hour ?? config?.compaction_hour ?? 11}
-                onChange={(e) => setLocalConfig({ ...localConfig, compaction_hour: parseInt(e.target.value) || 11 })}
-                className="w-full px-3 py-2 bg-zinc-700 rounded border border-zinc-600 text-zinc-100"
-              />
+              <p className="text-xs text-zinc-500 mt-1">Haiku agent runs semantic deduplication every interval</p>
             </label>
           </div>
         )

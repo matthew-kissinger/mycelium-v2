@@ -7,7 +7,6 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { SystemView } from './components/SystemView'
-import { Header } from './components/Header'
 import { AppLayout } from './layout/AppLayout'
 import { RightPanel } from './layout/RightPanel'
 import { ToastContainer } from './components/ToastContainer'
@@ -82,10 +81,8 @@ function AppContent() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
-      <Header stats={stats} />
-
-      <AppLayout rightPanel={<RightPanel />}>
+    <div className="flex h-screen bg-zinc-950 text-zinc-100">
+      <AppLayout rightPanel={<RightPanel />} stats={stats}>
         <SystemView />
       </AppLayout>
 

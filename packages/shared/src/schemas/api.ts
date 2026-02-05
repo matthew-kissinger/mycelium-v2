@@ -44,7 +44,7 @@ export const TaskCreateRequest = z.object({
   agent: AgentType.optional(),
   model: z.string().optional(),
   depends_on: z.array(z.string().uuid()).default([]),
-  sequenced: z.boolean().default(false),
+  sequenced: z.boolean().default(true),
 })
 export type TaskCreateRequest = z.infer<typeof TaskCreateRequest>
 

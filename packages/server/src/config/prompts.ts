@@ -13,11 +13,12 @@ import { join } from 'path'
 import {
   DISCOVERY_AGENT_PROMPT,
   AUTONOMOUS_DISCOVERY_PROMPT,
-  SEQUENCER_SYSTEM_PROMPT,
   SHEPHERD_SYSTEM_PROMPT,
   GENESIS_AGENT_PROMPT,
   AUTO_GENESIS_PROMPT,
   ARMORY_AGENT_PROMPT,
+  DIGEST_AGENT_PROMPT,
+  COMPACTION_AGENT_PROMPT,
 } from '../prompts'
 
 import {
@@ -70,13 +71,6 @@ const PROMPT_DEFINITIONS: Record<string, {
     templateVariables: ['MYCEL_CONTEXT', 'AGENTS_SECTION', 'repo_path', 'repo_name'],
     getContent: () => AUTONOMOUS_DISCOVERY_PROMPT,
   },
-  sequencer: {
-    name: 'Sequencer Agent',
-    description: 'Analyzes task dependencies and wires them together',
-    agent: 'sequencer',
-    templateVariables: ['MYCEL_CONTEXT'],
-    getContent: () => SEQUENCER_SYSTEM_PROMPT,
-  },
   shepherd: {
     name: 'Shepherd Agent',
     description: 'Evaluates completed tasks, builds memory, decides on branch merges',
@@ -104,6 +98,20 @@ const PROMPT_DEFINITIONS: Record<string, {
     agent: 'armory',
     templateVariables: ['MYCEL_CONTEXT'],
     getContent: () => ARMORY_AGENT_PROMPT,
+  },
+  digest: {
+    name: 'Digest Agent',
+    description: 'Analyzes trends, detects anomalies, provides intelligent status summaries (Haiku)',
+    agent: 'digest',
+    templateVariables: ['MYCEL_CONTEXT', 'period_hours'],
+    getContent: () => DIGEST_AGENT_PROMPT,
+  },
+  compaction: {
+    name: 'Compaction Agent',
+    description: 'Semantic memory deduplication and pattern consolidation (Haiku)',
+    agent: 'compaction',
+    templateVariables: ['MYCEL_CONTEXT', 'repo_name'],
+    getContent: () => COMPACTION_AGENT_PROMPT,
   },
 }
 

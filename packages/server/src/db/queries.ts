@@ -110,7 +110,7 @@ export async function createTask(input: TaskCreateInput) {
     repo_path: input.repo_path,
     prompt: input.prompt ?? null,
     depends_on: JSON.stringify(input.depends_on ?? []),
-    sequenced: false,
+    sequenced: true,
     timeout_seconds: input.timeout_seconds ?? null,
     created_at: now,
   }
@@ -245,18 +245,6 @@ export async function getUnreviewedTasks(limit = 50) {
     .limit(limit)
 }
 
-/**
- * Get unsequenced tasks (pending tasks that haven't gone through Sequencer)
- */
-export async function getUnsequencedTasks(limit = 50) {
-  return db.select().from(schema.tasks)
-    .where(and(
-      eq(schema.tasks.status, 'pending'),
-      eq(schema.tasks.sequenced, false)
-    ))
-    .orderBy(desc(schema.tasks.created_at))
-    .limit(limit)
-}
 
 // ============================================================================
 // Repos
@@ -460,6 +448,17 @@ export async function deletePattern(id: string) {
   await db.delete(schema.memory_patterns).where(eq(schema.memory_patterns.id, id))
 }
 
+export async function updatePattern(id: string, updates: { content?: string; repo_path?: string | null; tags?: string[] }) {
+  const updateData: Record<string, unknown> = {}
+  if (updates.content !== undefined) updateData.content = updates.content
+  if (updates.repo_path !== undefined) updateData.repo_path = updates.repo_path
+  if (updates.tags !== undefined) updateData.tags = JSON.stringify(updates.tags)
+
+  if (Object.keys(updateData).length > 0) {
+    await db.update(schema.memory_patterns).set(updateData).where(eq(schema.memory_patterns.id, id))
+  }
+}
+
 /**
  * Parse pattern for API response (deserialize JSON fields)
  */
@@ -541,6 +540,16 @@ export async function deleteWarning(id: string) {
   await db.delete(schema.memory_warnings).where(eq(schema.memory_warnings.id, id))
 }
 
+export async function updateWarning(id: string, updates: { content?: string; severity?: string }) {
+  const updateData: Record<string, unknown> = {}
+  if (updates.content !== undefined) updateData.content = updates.content
+  if (updates.severity !== undefined) updateData.severity = updates.severity
+
+  if (Object.keys(updateData).length > 0) {
+    await db.update(schema.memory_warnings).set(updateData).where(eq(schema.memory_warnings.id, id))
+  }
+}
+
 // Get all patterns (both global and repo-specific) with repo info
 export async function getAllPatterns(limit = 500) {
   return db.select().from(schema.memory_patterns)
@@ -580,7 +589,7 @@ export async function getReposWithMemory() {
 // System Agent Runs
 // ============================================================================
 
-export type SystemAgentType = 'discovery' | 'sequencer' | 'shepherd' | 'armory' | 'genesis' | 'digest' | 'compaction'
+export type SystemAgentType = 'discovery' | 'shepherd' | 'armory' | 'genesis' | 'digest' | 'compaction'
 export type SystemAgentStatus = 'running' | 'completed' | 'failed' | 'blocked'
 
 export interface SystemAgentRunCreateInput {

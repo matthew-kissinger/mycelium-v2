@@ -18,9 +18,10 @@ import devicesRoutes from './routes/devices'
 import {
   systemAgentsRoutes,
   discoveryRoutes,
-  sequencerRoutes,
   shepherdRoutes,
   schedulerRoutes,
+  compactionRoutes,
+  digestRoutes,
 } from './routes/system-agents'
 import { getSchedulerStatus } from './scheduler'
 import { getRuns, parseRun, cleanupOrphanedRuns } from './db/queries'
@@ -107,9 +108,10 @@ app.route('/api', notifyRoutes)  // For /api/notify, /api/align, /api/inbox, /ap
 // System agent routes
 app.route('/api/system-agents', systemAgentsRoutes)
 app.route('/api/discovery', discoveryRoutes)
-app.route('/api/sequencer', sequencerRoutes)
 app.route('/api/shepherd', shepherdRoutes)
 app.route('/api/scheduler', schedulerRoutes)
+app.route('/api/compaction', compactionRoutes)
+app.route('/api/digest', digestRoutes)
 
 // New routes
 app.route('/api/queue', queueRoutes)

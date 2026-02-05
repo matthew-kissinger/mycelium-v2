@@ -13,6 +13,7 @@ import type {
   AgentSlotsNodeData,
   AlignmentNodeData,
   MemoryNodeData,
+  ReposNodeData,
   AgentSlotData,
 } from '../flow/types'
 import {
@@ -33,6 +34,7 @@ interface FlowState {
   updateRunningTaskNodes: (tasks: AgentSlotData[]) => void
   updateSignalNodes: (pending: number, total: number) => void
   updateMemoryNodes: (patterns: number, warnings: number, repos: number) => void
+  updateReposNodes: (total: number, byLanguage: Record<string, number>, withPending: number) => void
   updateCycleRunning: (runningTypes: Set<string>) => void
 }
 
@@ -52,12 +54,12 @@ export const useFlowStore = create<FlowState>((set) => ({
         running: status.running,
         started_at: status.started_at,
       })
+      // Only map edges that exist in the visible graph
+      // Note: armory/blocked/digest/compaction/health nodes are hidden, so no edges for them
       const edgeMap: Record<string, string[]> = {
         discovery: ['e-scheduler-discovery', 'e-discovery-taskpool'],
-        sequencer: ['e-scheduler-sequencer', 'e-sequencer-taskpool'],
         dispatcher: ['e-taskpool-dispatcher', 'e-dispatcher-agents'],
         shepherd: ['e-agents-shepherd', 'e-shepherd-memory'],
-        armory: ['e-agents-armory', 'e-armory-memory'],
       }
       for (const cycle of status.cycles) {
         const nodeId = cycle.name === 'blocked_check' ? 'blocked-check'
@@ -132,12 +134,22 @@ export const useFlowStore = create<FlowState>((set) => ({
     })
   },
 
+  updateReposNodes: (total, byLanguage, withPending) => {
+    set((state) => {
+      const nodes = updateNodeData<ReposNodeData>(state.nodes, 'repos', {
+        total,
+        by_language: byLanguage,
+        with_pending_tasks: withPending,
+      })
+      return { nodes }
+    })
+  },
+
   updateCycleRunning: (runningTypes) => {
     set((state) => {
       let nodes = state.nodes
       const cycleNodeMap: Record<string, string> = {
         discovery: 'discovery',
-        sequencer: 'sequencer',
         shepherd: 'shepherd',
         armory: 'armory',
         dispatcher: 'dispatcher',

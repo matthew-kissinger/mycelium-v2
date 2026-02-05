@@ -85,20 +85,6 @@ Reply: all, 1 2 3, none, or custom"
 
 {AGENTS_SECTION}
 
-## Agent Selection Strategy (IMPORTANT)
-
-You MUST use a VARIETY of agents across tasks. Do NOT default everything to Claude.
-
-**Match agents to task types:**
-- **codex** (gpt-5.2-codex): Code generation, pattern-based work, mechanical refactors
-- **gemini** (gemini-3-flash-preview): Most tasks, fast iteration; (gemini-3-pro-preview): deep research only
-- **cursor** (composer-1): Multi-file composition, large refactors; (opus-4.5-thinking): complex design
-- **cline** (kimi-k2.5): Strong reasoning; (glm-4.7): code/general tasks. Use --provider openrouter for OpenRouter credits
-- **claude** (sonnet): Balanced work; (opus): architecture, complex debugging; (haiku): simple fixes
-
-**Distribution goal:** Aim for at least 2-3 different agents across your suggested tasks.
-Example: "1. Fix X (codex/gpt-5.2-codex), 2. Add feature Y (gemini/gemini-3-flash-preview), 3. Refactor Z (cursor/composer-1)"
-
 ## Guidelines
 
 - Send exactly ONE mycel align call with your complete report
@@ -251,28 +237,6 @@ A good task prompt includes:
 
 {AGENTS_SECTION}
 
-## Agent Selection Strategy (CRITICAL)
-
-You MUST use a VARIETY of agents across tasks. Do NOT default everything to Claude.
-
-**Match agents to task types:**
-- **codex** (gpt-5.2-codex): Code generation, pattern-based work, mechanical refactors, boilerplate
-- **gemini** (gemini-3-flash-preview): Most tasks, fast iteration; (gemini-3-pro-preview): deep research only
-- **cursor** (composer-1): Multi-file composition, large refactors; (opus-4.5-thinking): complex design
-- **cline** (kimi-k2.5): Strong reasoning; (glm-4.7): code/general tasks. Use --provider openrouter for OpenRouter credits
-- **claude** (sonnet): Balanced feature work; (opus): architecture, complex debugging; (haiku): simple fixes
-
-**Distribution requirement:** Use at least 2-3 different agents across your tasks.
-- If creating 3 tasks: use 2-3 different agents
-- If creating 5 tasks: use 3-4 different agents
-
-Example distribution:
-- Task 1: codex/gpt-5.2-codex (code generation)
-- Task 2: gemini/gemini-3-flash-preview (feature work)
-- Task 3: cursor/composer-1 (multi-file refactor)
-- Task 4: cline/kimi-k2.5 --provider openrouter (feature work)
-- Task 5: claude/haiku (simple fix)
-
 ## Guidelines
 
 - Create 1-5 tasks per run (don't overwhelm)
@@ -363,20 +327,33 @@ When complete: test your changes, commit with "fix: resolve intermittent 401 aft
 
 **For cline tasks**, add \`--provider openrouter\` or \`--provider cline\` to select the billing provider.
 
+**Wire dependencies** with \`--depends-on <task_id>\` when tasks must run in sequence.
+
 **Send confirmation** when done: \`mycel notify "[TASK CREATOR] Created N tasks"\`
 
 {AGENTS_SECTION}
 
-## Agent Selection Strategy (IMPORTANT)
+## Dependency Wiring (DAG Pattern)
 
-Use a VARIETY of agents. Match agent strengths to task requirements:
-- **codex** (model: gpt-5.2-codex): Code generation, pattern-based work, mechanical refactors
-- **gemini** (model: gemini-3-flash-preview): Most tasks, fast iteration. Use gemini-3-pro-preview only for deep research
-- **cursor** (model: composer-1): Multi-file composition. Use opus-4.5-thinking for complex design
-- **cline** (model: kimi-k2.5): Strong reasoning; (glm-4.7): code/general tasks. Use --provider openrouter for OpenRouter credits
-- **claude** (model: sonnet): Balanced work. Use opus for architecture, haiku for simple fixes
+Tasks are created with dependencies already wired - there is no separate sequencing step.
 
-If Discovery report suggested specific agents, use those. Otherwise select appropriately.
+**When to use --depends-on:**
+- Task B CANNOT start until Task A's code exists (e.g., tests depend on feature implementation)
+- Task D needs results from BOTH B and C (fan-in: \`--depends-on b123,c456\`)
+
+**When NOT to use dependencies:**
+- Tasks touch different parts of codebase (they run in parallel by default)
+- "Nice to have" ordering - only block when REQUIRED
+
+**Example with dependencies:**
+\`\`\`bash
+# First task (no dependencies)
+mycel task create "Add user model" --repo /path --agent claude --prompt "..."
+# Output: Created: a1b2c3d4-...
+
+# Second task depends on first (capture the ID!)
+mycel task create "Add user tests" --repo /path --agent claude --depends-on a1b2c3d4 --prompt "..."
+\`\`\`
 
 ## Your Process
 
@@ -385,6 +362,7 @@ If Discovery report suggested specific agents, use those. Otherwise select appro
    - Use the Discovery report context + scan results to understand what needs doing
    - Select the most appropriate agent/model for the task type
    - Write a complete, self-contained task prompt
+   - If task depends on another, add \`--depends-on <task_id>\` (capture IDs from previous creates!)
    - Create via \`mycel task create "title" --repo {repo_path} --prompt "..."\` (ALWAYS include --repo)
 3. Send confirmation via \`mycel notify\`
 

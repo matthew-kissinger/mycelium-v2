@@ -9,7 +9,6 @@
  * - Default configuration
  */
 
-export * from './sequencer';
 export * from './discovery';
 
 // Re-export shepherd with renamed buildContinuationPrompt
@@ -42,6 +41,26 @@ export {
 } from './genesis';
 
 export * from './armory';
+
+// Digest agent (Haiku smart agent)
+export {
+  DIGEST_AGENT_PROMPT,
+  DIGEST_COMPLETE_MARKER,
+  type DigestContext,
+  type DigestOutput,
+  buildDigestPrompt,
+  parseDigestOutput,
+} from './digest';
+
+// Compaction agent (Haiku smart agent)
+export {
+  COMPACTION_AGENT_PROMPT,
+  COMPACTION_COMPLETE_MARKER,
+  type CompactionContext,
+  type CompactionOutput,
+  buildCompactionPrompt,
+  parseCompactionOutput,
+} from './compaction';
 
 // Context injection utilities
 export * from './context';

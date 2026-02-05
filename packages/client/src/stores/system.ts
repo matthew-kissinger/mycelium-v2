@@ -14,6 +14,7 @@ import type {
   AgentSlotsNodeData,
   AlignmentNodeData,
   MemoryNodeData,
+  ReposNodeData,
   PanelState,
   AgentSlotData,
 } from '../flow/types'
@@ -41,6 +42,7 @@ import type {
   BrowseResult,
   ShepherdStatus,
 } from '../types'
+import type { AgentHealthEntry, ClineInfo, AgentStatsResponse } from './agentStore'
 import type { MemoryPattern, MemoryWarning, SchedulerConfig } from '@mycelium/shared'
 
 // Re-export domain stores for direct access
@@ -77,6 +79,10 @@ interface SystemState {
   totalSignalCount: number
   agentConfigs: Record<string, AgentConfigData>
   agentConfigsLoading: boolean
+  agentHealth: Record<string, AgentHealthEntry>
+  clineInfo: ClineInfo | null
+  agentStats: AgentStatsResponse | null
+  agentStatsLoading: boolean
   patterns: MemoryPattern[]
   warnings: MemoryWarning[]
   memoryLoading: boolean
@@ -113,6 +119,7 @@ interface SystemState {
   updateRunningTasks: (tasks: AgentSlotData[]) => void
   updateSignalCounts: (pending: number, total: number) => void
   updateMemoryCounts: (patterns: number, warnings: number, repos: number) => void
+  updateReposNode: (repos: import('@mycelium/shared').Repo[]) => void
 
   openPanel: (type: PanelState['type'], nodeId: string, data?: Record<string, unknown>) => void
   closePanel: () => void
@@ -136,6 +143,8 @@ interface SystemState {
 
   fetchAgentConfigs: () => Promise<void>
   updateAgentConfig: (agentName: string, updates: Partial<AgentConfigData>) => Promise<void>
+  fetchAgentHealth: () => Promise<void>
+  fetchAgentStats: () => Promise<void>
 
   fetchMemoryDetails: () => Promise<void>
   deletePattern: (id: string) => Promise<void>
@@ -192,6 +201,10 @@ export const useSystemStore = create<SystemState>((set, get) => ({
   totalSignalCount: 0,
   agentConfigs: {},
   agentConfigsLoading: false,
+  agentHealth: {},
+  clineInfo: null,
+  agentStats: null,
+  agentStatsLoading: false,
   patterns: [],
   warnings: [],
   memoryLoading: false,
@@ -303,6 +316,23 @@ export const useSystemStore = create<SystemState>((set, get) => ({
     })
   },
 
+  updateReposNode: (repos: import('@mycelium/shared').Repo[]) => {
+    set((state) => {
+      // Count repos by language
+      const byLanguage: Record<string, number> = {}
+      for (const repo of repos) {
+        const lang = repo.language || 'unknown'
+        byLanguage[lang] = (byLanguage[lang] || 0) + 1
+      }
+      const nodes = updateNodeData<ReposNodeData>(state.nodes, 'repos', {
+        total: repos.length,
+        by_language: byLanguage,
+        with_pending_tasks: 0, // TODO: calculate from tasks
+      })
+      return { nodes }
+    })
+  },
+
   openPanel: (type, nodeId, data) => {
     set({ panel: { type, nodeId, data } })
     // Also update uiStore so RightPanel in three-column layout works
@@ -342,7 +372,6 @@ export const useSystemStore = create<SystemState>((set, get) => ({
     try {
       const endpoints: Record<string, string> = {
         discovery: '/discovery/trigger',
-        sequencer: '/sequencer/trigger',
         shepherd: '/shepherd/trigger',
         armory: '/inventory/armory',
         dispatcher: '/queue/run-next',
@@ -471,7 +500,7 @@ export const useSystemStore = create<SystemState>((set, get) => ({
       set((state) => {
         let nodes = state.nodes
         const runningTypes = new Set(agents.map(a => a.agent_type))
-        for (const cycleType of ['discovery', 'sequencer', 'shepherd', 'armory'] as const) {
+        for (const cycleType of ['discovery', 'shepherd', 'armory'] as const) {
           nodes = updateNodeData<CycleNodeData>(nodes, cycleType, {
             running: runningTypes.has(cycleType),
           })
@@ -492,6 +521,7 @@ export const useSystemStore = create<SystemState>((set, get) => ({
       get().fetchMemory(),
       get().fetchRunningSystemAgents(),
       get().fetchShepherdStatus(),
+      get().fetchRepos(),
     ])
   },
 
@@ -543,6 +573,33 @@ export const useSystemStore = create<SystemState>((set, get) => ({
       throw error
     } finally {
       set({ agentConfigsLoading: false })
+    }
+  },
+
+  fetchAgentHealth: async () => {
+    try {
+      const response = await fetchAPI<{
+        agent_health: Record<string, AgentHealthEntry>
+        cline: ClineInfo
+      }>('/health')
+      set({
+        agentHealth: response.agent_health || {},
+        clineInfo: response.cline || null,
+      })
+    } catch (error) {
+      console.error('Failed to fetch agent health:', error)
+    }
+  },
+
+  fetchAgentStats: async () => {
+    try {
+      set({ agentStatsLoading: true })
+      const response = await fetchAPI<AgentStatsResponse>('/memory/agent-stats')
+      set({ agentStats: response })
+    } catch (error) {
+      console.error('Failed to fetch agent stats:', error)
+    } finally {
+      set({ agentStatsLoading: false })
     }
   },
 
@@ -857,6 +914,7 @@ export const useSystemStore = create<SystemState>((set, get) => ({
       set({ reposLoading: true })
       const repos = await fetchAPI<import('@mycelium/shared').Repo[]>('/repos')
       set({ repos })
+      get().updateReposNode(repos)
     } catch (error) {
       console.error('Failed to fetch repos:', error)
     } finally {

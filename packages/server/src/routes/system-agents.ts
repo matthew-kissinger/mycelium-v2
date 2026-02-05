@@ -14,7 +14,6 @@ import {
   getActiveRuns,
 } from '../scheduler'
 import { runDiscoveryForRepo } from '../scheduler/cycles/discovery'
-import { runSequencerForRepo } from '../scheduler/cycles/sequencer'
 
 // =============================================================================
 // System Agent Runs Routes (/api/system-agents)
@@ -122,70 +121,6 @@ discoveryRoutes.post('/trigger', zValidator('json', TriggerRequestSchema), async
 
   return c.json({
     message: 'Discovery agent triggered',
-    run: placeholderRun,
-  }, 201)
-})
-
-// =============================================================================
-// Sequencer Routes (/api/sequencer)
-// =============================================================================
-
-export const sequencerRoutes = new Hono()
-
-// POST /api/sequencer/trigger - Manually trigger sequencer
-sequencerRoutes.post('/trigger', zValidator('json', TriggerRequestSchema), async (c) => {
-  const data = c.req.valid('json')
-
-  // Get unsequenced tasks (optionally filtered by repo)
-  const unsequencedTasks = await queries.getUnsequencedTasks(50)
-  let tasks = unsequencedTasks
-
-  if (data.repo_path) {
-    tasks = tasks.filter(t => t.repo_path === data.repo_path)
-    if (tasks.length === 0) {
-      return c.json({ error: 'No unsequenced tasks for this repo' }, 400)
-    }
-  }
-
-  if (tasks.length === 0) {
-    return c.json({ error: 'No unsequenced tasks' }, 400)
-  }
-
-  // Group by repo
-  const tasksByRepo = new Map<string, typeof tasks>()
-  for (const task of tasks) {
-    const existing = tasksByRepo.get(task.repo_path) ?? []
-    existing.push(task)
-    tasksByRepo.set(task.repo_path, existing)
-  }
-
-  // Create placeholder run
-  const repoPath = data.repo_path ?? tasks[0].repo_path
-  const placeholderRun = {
-    id: crypto.randomUUID(),
-    agent_type: 'sequencer' as const,
-    status: 'running' as const,
-    repo_path: repoPath,
-    context: { task_count: tasks.length },
-    started_at: new Date().toISOString(),
-  }
-
-  // Broadcast start event
-  broadcast('system:agent_started', {
-    id: placeholderRun.id,
-    agent_type: 'sequencer',
-    repo_path: repoPath,
-  })
-
-  // Run sequencer for each repo asynchronously
-  for (const [rp, repoTasks] of tasksByRepo) {
-    runSequencerForRepo(rp, repoTasks).catch((err) => {
-      console.error('[Sequencer] Manual trigger error:', err)
-    })
-  }
-
-  return c.json({
-    message: 'Sequencer agent triggered',
     run: placeholderRun,
   }, 201)
 })
@@ -318,6 +253,97 @@ shepherdRoutes.post('/reset-counter', async (c) => {
 })
 
 // =============================================================================
+// Compaction Routes (/api/compaction)
+// =============================================================================
+
+export const compactionRoutes = new Hono()
+
+// POST /api/compaction/trigger - Manually trigger compaction
+compactionRoutes.post('/trigger', async (c) => {
+  const { runCompactionCycleManual } = await import('../scheduler/cycles/compaction')
+  const config = getSchedulerConfig()
+
+  // Run async (don't wait)
+  runCompactionCycleManual(config).catch((e) => {
+    console.error('[API] Compaction trigger error:', e)
+  })
+
+  return c.json({
+    message: 'Compaction triggered',
+    config: {
+      auto_prune_enabled: config.auto_prune_enabled,
+      auto_prune_threshold: config.auto_prune_threshold,
+      auto_prune_keep: config.auto_prune_keep,
+    },
+  }, 202)
+})
+
+// POST /api/compaction/prune - Just prune old tasks (no Haiku compaction)
+compactionRoutes.post('/prune', async (c) => {
+  const config = getSchedulerConfig()
+  const { getTasks, deleteTask } = await import('../db/queries')
+
+  // Get all done tasks
+  const doneTasks = await getTasks({ status: 'done', limit: config.auto_prune_threshold + 500 })
+
+  if (doneTasks.length <= config.auto_prune_threshold) {
+    return c.json({
+      message: 'No pruning needed',
+      done_count: doneTasks.length,
+      threshold: config.auto_prune_threshold,
+    })
+  }
+
+  // Sort by completed_at (most recent first)
+  const sorted = doneTasks.sort((a, b) => {
+    const aTime = a.completed_at ?? a.created_at
+    const bTime = b.completed_at ?? b.created_at
+    return bTime.localeCompare(aTime)
+  })
+
+  // Keep the most recent N, delete the rest
+  const toDelete = sorted.slice(config.auto_prune_keep)
+
+  let deleted = 0
+  for (const task of toDelete) {
+    try {
+      await deleteTask(task.id)
+      deleted++
+    } catch (e) {
+      console.error(`[Prune] Failed to delete task ${task.id}:`, e)
+    }
+  }
+
+  return c.json({
+    message: `Pruned ${deleted} tasks`,
+    before: doneTasks.length,
+    after: config.auto_prune_keep,
+    deleted,
+  })
+})
+
+// =============================================================================
+// Digest Routes (/api/digest)
+// =============================================================================
+
+export const digestRoutes = new Hono()
+
+// POST /api/digest/trigger - Manually trigger digest
+digestRoutes.post('/trigger', async (c) => {
+  const { runDigestCycle } = await import('../scheduler/cycles/digest')
+  const config = getSchedulerConfig()
+
+  // Run async (don't wait)
+  runDigestCycle(config).catch((e) => {
+    console.error('[API] Digest trigger error:', e)
+  })
+
+  return c.json({
+    message: 'Digest triggered',
+  }, 202)
+})
+
+// =============================================================================
 // Scheduler Routes (/api/scheduler)
 // =============================================================================
 
@@ -352,8 +378,7 @@ const ConfigUpdateSchema = z.object({
   digest_enabled: z.boolean().optional(),
   digest_interval_sec: z.number().int().positive().optional(),
   compaction_enabled: z.boolean().optional(),
-  compaction_day: z.number().int().min(0).max(6).optional(),
-  compaction_hour: z.number().int().min(0).max(23).optional(),
+  compaction_interval_sec: z.number().int().positive().optional(),
   auto_prune_enabled: z.boolean().optional(),
   auto_prune_threshold: z.number().int().positive().optional(),
   auto_prune_keep: z.number().int().positive().optional(),

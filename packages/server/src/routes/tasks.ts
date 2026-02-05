@@ -254,7 +254,7 @@ app.post('/', zValidator('json', TaskCreate), async (c) => {
     repo_path: data.repo_path,
     prompt: data.prompt ?? null,
     depends_on: JSON.stringify(resolvedDeps),
-    sequenced: false,
+    sequenced: true,
     created_at: now,
   }
 
@@ -412,7 +412,8 @@ app.post('/:id/run', async (c) => {
     provider,
   }).catch(console.error)
 
-  return c.json({ message: 'Task started', id, agent })
+  const updatedTask = await queries.getTask(id)
+  return c.json({ message: 'Task started', task: parseTask(updatedTask!) })
 })
 
 // =============================================================================
@@ -630,7 +631,7 @@ app.post('/:id/clone', async (c) => {
     repo_path: task.repo_path,
     prompt: task.prompt,
     depends_on: '[]', // Reset dependencies for clone
-    sequenced: false,
+    sequenced: true,
     created_at: now,
   }
 

@@ -1,8 +1,8 @@
 import { z } from 'zod'
 import { AgentType } from './task'
 
-// Billing type: per_use = pay-per-token (e.g. Cline via OpenRouter), subscription = monthly plan
-export const BillingType = z.enum(['per_use', 'subscription'])
+// Billing type: per_use = pay-per-token, subscription = monthly plan, free = no cost
+export const BillingType = z.enum(['per_use', 'subscription', 'free'])
 export type BillingType = z.infer<typeof BillingType>
 
 // Agent configuration
@@ -58,6 +58,47 @@ export const DEFAULT_AGENT_CONFIGS: Record<string, AgentConfig> = {
     max_turns: 30,
     supports_streaming: false,
     billing_type: 'subscription',
+  },
+  // New agents (Feb 2026)
+  kiro: {
+    type: 'kiro',
+    command: 'kiro-cli',  // or 'q' alias
+    timeout_seconds: 1800,
+    max_turns: 30,
+    supports_streaming: true,
+    billing_type: 'subscription',  // AWS/Kiro account
+  },
+  vibe: {
+    type: 'vibe',
+    command: 'vibe',
+    timeout_seconds: 1800,
+    max_turns: 30,
+    supports_streaming: true,
+    billing_type: 'per_use',  // Mistral credits
+  },
+  pi: {
+    type: 'pi',
+    command: 'pi',
+    timeout_seconds: 1800,
+    max_turns: 30,
+    supports_streaming: true,
+    billing_type: 'per_use',  // Depends on provider (OpenRouter, etc.)
+  },
+  opencode: {
+    type: 'opencode',
+    command: 'opencode',
+    timeout_seconds: 1800,
+    max_turns: 30,
+    supports_streaming: false,
+    billing_type: 'free',  // OpenCode Zen free models
+  },
+  copilot: {
+    type: 'copilot',
+    command: 'copilot',
+    timeout_seconds: 1800,
+    max_turns: 30,
+    supports_streaming: false,
+    billing_type: 'subscription',  // GitHub Copilot plan
   },
 }
 

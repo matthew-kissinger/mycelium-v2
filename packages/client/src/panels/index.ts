@@ -1,5 +1,8 @@
 /**
  * Panel components - extracted from Panel.tsx
+ *
+ * Note: RightPanel.tsx uses React.lazy() to load these components for code splitting.
+ * Direct imports here are kept for backwards compatibility and non-lazy use cases.
  */
 
 export { SchedulerPanel } from './SchedulerPanel'

@@ -3,8 +3,8 @@ import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ReactFlowProvider } from '@xyflow/react'
 import App from './App'
-import './index.css'
 import '@xyflow/react/dist/style.css'
+import './index.css'
 
 const queryClient = new QueryClient({
   defaultOptions: {

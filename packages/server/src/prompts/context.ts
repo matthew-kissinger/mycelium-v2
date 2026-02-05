@@ -10,7 +10,7 @@
 import { existsSync, readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
-import { DEFAULT_AGENT_CONFIGS } from '@mycelium/shared'
+import { DEFAULT_AGENT_CONFIGS, AGENT_PROVIDERS, type AgentType, type ProviderType } from '@mycelium/shared'
 
 // =============================================================================
 // MYCEL_CONTEXT - CLI instructions for agents
@@ -81,7 +81,7 @@ Blocking is RARE (~1 in 20). Only block when:
 mycel align "${agentPrefix}: BLOCKING - About to [describe action]. This will [explain consequences]. Reply 'proceed' to continue or 'abort' to stop." --wait --timeout 10800
 \`\`\`
 
-**For other SYSTEM agents (Discovery, Genesis, Digest, Sequencer, Compaction):**
+**For other SYSTEM agents (Discovery, Genesis, Digest, Compaction):**
 Use async align only. These agents propose work and exit - continuation handles responses.
 
 ### Notifications
@@ -144,95 +144,57 @@ kill $SERVER_PID
 }
 
 // =============================================================================
-// AGENTS_SECTION - Dynamic agent/model availability
+// AGENTS_SECTION - Comprehensive agent/provider/model matrix
 // =============================================================================
 
+import { AGENT_MATRIX, type AgentCapabilities, getFreeModels } from '@mycelium/shared'
+
+/**
+ * Get available agents from the matrix.
+ * Re-exported for backwards compatibility.
+ */
+export function getAvailableAgents(): Record<string, AgentCapabilities> {
+  const result: Record<string, AgentCapabilities> = {}
+  for (const agent of AGENT_MATRIX) {
+    result[agent.agent] = agent
+  }
+  return result
+}
+
+// Keep old interface for backwards compat but mark deprecated
+/** @deprecated Use AGENT_MATRIX from agent-matrix.ts instead */
 interface AgentInfo {
   command: string
   available: boolean
   models: string[]
   defaultModel: string
+  providers: ProviderType[]
+  defaultProvider: ProviderType
+  billing: 'subscription' | 'per_use' | 'free'
   strengths: Record<string, string>
+  notes?: string
 }
 
-/**
- * Get information about available agents.
- * Checks which agents are installed and their configurations.
- */
-export function getAvailableAgents(): Record<string, AgentInfo> {
-  const agents: Record<string, AgentInfo> = {}
-
-  // Claude
-  agents.claude = {
-    command: 'claude',
-    available: true,  // Assume available, real check would use `which`
-    models: ['opus', 'sonnet', 'haiku'],
-    defaultModel: 'sonnet',
-    strengths: {
-      opus: 'Architecture, complex debugging, nuanced decisions',
-      sonnet: 'Balanced - good for most tasks',
-      haiku: 'Simple fixes, docs, quick iterations',
-    },
-  }
-
-  // Codex (OpenAI)
-  agents.codex = {
-    command: 'codex',
+// Legacy AGENT_INFO - converted from AGENT_MATRIX for backwards compat
+const AGENT_INFO: Record<AgentType, AgentInfo> = Object.fromEntries(
+  AGENT_MATRIX.map(ac => [ac.agent, {
+    command: ac.command,
     available: true,
-    models: ['gpt-5.2-codex', 'gpt-5.2-codex-high', 'gpt-5.2-codex-fast'],
-    defaultModel: 'gpt-5.2-codex',
-    strengths: {
-      'gpt-5.2-codex': 'Balanced code generation, most tasks',
-      'gpt-5.2-codex-high': 'Higher quality, complex refactors',
-      'gpt-5.2-codex-fast': 'Quick edits, low latency',
-    },
-  }
+    models: ac.providers.flatMap(p => p.models.map(m => m.short ?? m.id)),
+    defaultModel: ac.providers[0]?.models[0]?.id ?? 'default',
+    providers: ac.providers.map(p => p.provider),
+    defaultProvider: ac.providers[0]?.provider ?? 'anthropic' as ProviderType,
+    billing: ac.providers[0]?.billing ?? 'subscription',
+    strengths: Object.fromEntries(
+      ac.providers.flatMap(p => p.models.map(m => [m.short ?? m.id, m.strengths.join(', ')]))
+    ),
+    notes: ac.notes,
+  }])
+) as Record<AgentType, AgentInfo>
 
-  // Gemini (Google)
-  agents.gemini = {
-    command: 'gemini',
-    available: true,
-    models: ['gemini-3-pro-preview', 'gemini-3-flash-preview', 'flash'],
-    defaultModel: 'flash',
-    strengths: {
-      'gemini-3-pro-preview': 'Deep research, complex analysis',
-      'gemini-3-flash-preview': 'Fast iteration, most tasks',
-      'flash': 'Alias for default flash model',
-    },
-  }
+// Export for legacy code
+const legacyAgentInfo = AGENT_INFO
 
-  // Cline (OpenRouter - model switched dynamically)
-  agents.cline = {
-    command: 'cline',
-    available: true,
-    models: ['moonshotai/kimi-k2.5', 'qwen/qwen3-coder', 'deepseek/deepseek-v3.2', 'glm-4.7', 'glm-4.7-flash'],
-    defaultModel: 'moonshotai/kimi-k2.5',
-    strengths: {
-      'moonshotai/kimi-k2.5': 'Top coder, strong reasoning, 262K context ($0.45/$2.50)',
-      'qwen/qwen3-coder': '480B MoE, top SWE-bench, 262K context ($0.22/$0.95)',
-      'deepseek/deepseek-v3.2': 'Best value, near-frontier quality, 164K context ($0.25/$0.38)',
-      'glm-4.7': 'Strong function-calling, 203K context ($0.40/$1.50)',
-      'glm-4.7-flash': 'Fast GLM variant for simple tasks ($0.07/$0.40)',
-    },
-  }
-
-  // Cursor (supports --model flag)
-  agents.cursor = {
-    command: 'agent',
-    available: true,
-    models: ['composer-1', 'opus-4.5-thinking', 'sonnet-4.5', 'gpt-5.2-codex', 'gemini-3-flash'],
-    defaultModel: 'composer-1',
-    strengths: {
-      'composer-1': 'Multi-file composition, large refactors (default)',
-      'opus-4.5-thinking': 'Complex design, architecture, deep reasoning',
-      'sonnet-4.5': 'Balanced feature work',
-      'gpt-5.2-codex': 'Code generation, mechanical tasks',
-      'gemini-3-flash': 'Fast iteration, simple features',
-    },
-  }
-
-  return agents
-}
 
 /**
  * Credit and cost information for agents section.
@@ -311,93 +273,116 @@ export async function getAgentCreditsInfo(): Promise<AgentCreditsInfo> {
 
 /**
  * Build the AGENTS_SECTION for prompts.
- * Lists available agents and their models with selection guidance.
+ * Compact matrix of all valid agent/provider/model combinations.
  */
 export function buildAgentsSection(creditsInfo?: AgentCreditsInfo): string {
-  const agents = getAvailableAgents()
-
   const lines: string[] = [
-    '## Available Agents and Models',
-    '',
-    'You MUST select an agent/model combination from this list:',
+    '## Agent-Provider-Model Matrix',
     '',
   ]
 
-  // Add credits summary if available
+  // Credits summary
   if (creditsInfo) {
-    lines.push('### Current Credits/Quota')
+    lines.push('### Credits Status')
+    const parts: string[] = []
     if (creditsInfo.openrouter) {
-      lines.push(`- **OpenRouter** (cline): $${creditsInfo.openrouter.remaining.toFixed(2)} remaining of $${creditsInfo.openrouter.limit}`)
+      parts.push(`OpenRouter: $${creditsInfo.openrouter.remaining.toFixed(2)}/$${creditsInfo.openrouter.limit}`)
     }
-    if (creditsInfo.cline) {
-      lines.push(`- **Cline Account**: $${creditsInfo.cline.balance.toFixed(2)} balance`)
+    if (creditsInfo.gemini?.quotaStatus === 'exceeded') {
+      parts.push(`Gemini: QUOTA EXCEEDED`)
     }
-    if (creditsInfo.gemini) {
-      if (creditsInfo.gemini.quotaStatus === 'exceeded') {
-        lines.push(`- **Gemini**: QUOTA EXCEEDED (resets ${creditsInfo.gemini.quotaResetAt || 'soon'}) - avoid gemini tasks`)
-      } else {
-        lines.push(`- **Gemini**: Free tier available`)
-      }
-    }
-    lines.push('- **Claude/Codex/Cursor**: Subscription (unlimited)')
+    parts.push('Subscription agents: Unlimited')
+    lines.push(parts.join(' | '))
     lines.push('')
   }
 
-  for (const [name, info] of Object.entries(agents)) {
-    if (!info.available) continue
+  // Provider requirement explanation
+  lines.push('### When to Use --provider')
+  lines.push('')
+  lines.push('**Single-provider agents** (NO --provider needed):')
+  lines.push('- claude, codex, cursor, kiro, copilot, gemini, vibe, opencode')
+  lines.push('')
+  lines.push('**Multi-provider agents** (MUST specify --provider):')
+  lines.push('- `cline`: --provider openrouter (default) or --provider cline')
+  lines.push('- `pi`: --provider groq|cerebras|openrouter|mistral|google|anthropic|openai')
+  lines.push('')
 
-    lines.push(`### ${name}`)
-    lines.push(`Models: ${info.models.join(', ')} (default: ${info.defaultModel})`)
+  // Compact matrix table
+  lines.push('### Valid Combinations')
+  lines.push('')
+  lines.push('| Agent | Provider | Billing | Models (top 3) | Best For |')
+  lines.push('|-------|----------|---------|----------------|----------|')
 
-    for (const [model, strength] of Object.entries(info.strengths)) {
-      lines.push(`  - **${model}**: ${strength}`)
+  for (const ac of AGENT_MATRIX) {
+    for (const pm of ac.providers) {
+      const topModels = pm.models.slice(0, 3).map(m => m.short ?? m.id).join(', ')
+      const bestFor = pm.models[0]?.strengths.slice(0, 2).join(', ') ?? ''
+      const billing = pm.billing === 'subscription' ? 'sub' : pm.billing === 'free' ? 'FREE' : '$/tok'
+      lines.push(`| ${ac.agent} | ${pm.provider} | ${billing} | ${topModels} | ${bestFor} |`)
     }
-
-    lines.push('')
-  }
-
-  // Add free models section if available
-  if (creditsInfo?.openrouter?.freeModels?.length) {
-    lines.push('### Free Models (OpenRouter - $0 cost)')
-    lines.push('Use these for simple tasks to save credits:')
-    for (const model of creditsInfo.openrouter.freeModels) {
-      lines.push(`  - cline/${model}`)
-    }
-    lines.push('')
-  }
-
-  lines.push('**Model selection guidance:**')
-  lines.push('- Simple fixes, docs, single-file: claude/haiku, gemini/flash, cline/glm-4.7-flash, or FREE models')
-  lines.push('- Feature work, multi-file: claude/sonnet, codex/gpt-5.2-codex, cline/kimi-k2.5, cursor/composer-1')
-  lines.push('- Architecture, complex reasoning: claude/opus, cursor/opus-4.5-thinking, gemini/gemini-3-pro-preview')
-  lines.push('- Bulk mechanical work: codex/gpt-5.2-codex-fast, cursor/gpt-5.2-codex, cline/deepseek-v3.2')
-  lines.push('- Cost-sensitive tasks: Use FREE models first, then cline/devstral ($0.05/$0.22)')
-  lines.push('')
-  lines.push('**Cost optimization:**')
-  lines.push('- Prefer subscription agents (claude, codex, cursor) for complex work - no per-use cost')
-  lines.push('- Use FREE OpenRouter models for simple/mechanical tasks')
-  lines.push('- Reserve paid cline models for tasks needing specific capabilities')
-  if (creditsInfo?.gemini?.quotaStatus === 'exceeded') {
-    lines.push('- **AVOID GEMINI** - quota exceeded, tasks will fail')
   }
   lines.push('')
-  lines.push('**Cline Provider Selection:**')
-  lines.push('Cline supports two billing providers - specify in task creation:')
-  lines.push('- `provider: openrouter` - Use OpenRouter credits (more model variety)')
-  lines.push('- `provider: cline` - Use Cline account credits')
-  if (creditsInfo?.openrouter && creditsInfo?.cline) {
-    lines.push(`- OpenRouter has $${creditsInfo.openrouter.remaining.toFixed(2)}, Cline has $${creditsInfo.cline.balance.toFixed(2)}`)
+
+  // Free options (prioritize these)
+  lines.push('### Free Options (Prefer These for Simple Tasks)')
+  lines.push('')
+  const freeModels = getFreeModels()
+  const freeByAgent = new Map<string, string[]>()
+  for (const fm of freeModels) {
+    const key = `${fm.agent}/${fm.provider}`
+    if (!freeByAgent.has(key)) freeByAgent.set(key, [])
+    freeByAgent.get(key)!.push(fm.model.id)
+  }
+  for (const [key, models] of freeByAgent) {
+    lines.push(`- **${key}**: ${models.slice(0, 4).join(', ')}${models.length > 4 ? '...' : ''}`)
   }
   lines.push('')
-  lines.push('**Task Format with Provider:**')
+
+  // Task complexity guide
+  lines.push('### Task-to-Agent Mapping')
+  lines.push('')
+  lines.push('| Task Type | Agent | Provider | Model | Why |')
+  lines.push('|-----------|-------|----------|-------|-----|')
+  lines.push('| Simple fix | pi | groq | kimi-k2-instruct | Free, ultra-fast |')
+  lines.push('| Simple fix | pi | cerebras | llama-3.3-70b | Free, ultra-fast |')
+  lines.push('| Simple fix | opencode | - | kimi-k2.5-free | Free, capable |')
+  lines.push('| Docs/comments | claude | - | haiku | Sub, fast |')
+  lines.push('| Feature | claude | - | sonnet | Sub, balanced |')
+  lines.push('| Feature | cursor | - | composer-1 | Sub, multi-file |')
+  lines.push('| Refactor | codex | - | gpt-5.2-codex | Sub, code-focused |')
+  lines.push('| Complex | claude | - | opus | Sub, best reasoning |')
+  lines.push('| Complex | cursor | - | opus-4.5-thinking | Sub, extended thinking |')
+  lines.push('| Bulk/mechanical | cline | openrouter | deepseek-v3.2 | Cheap $0.25/$0.38 |')
+  lines.push('| Research | copilot | - | default | GitHub MCP built-in |')
+  if (creditsInfo?.gemini?.quotaStatus !== 'exceeded') {
+    lines.push('| Exploration | gemini | - | flash | Free quota |')
+  }
+  lines.push('')
+
+  // Task creation format
+  lines.push('### Task Creation Format')
+  lines.push('')
+  lines.push('```bash')
+  lines.push('# Single-provider agents (NO --provider)')
+  lines.push('mycel task create "title" --agent claude --model sonnet --repo /path')
+  lines.push('mycel task create "title" --agent cursor --model composer-1 --repo /path')
+  lines.push('mycel task create "title" --agent opencode --model opencode/kimi-k2.5-free --repo /path')
+  lines.push('mycel task create "title" --agent gemini --model flash --repo /path')
+  lines.push('')
+  lines.push('# Multi-provider agents (MUST include --provider)')
+  lines.push('mycel task create "title" --agent cline --provider openrouter --model kimi-k2.5 --repo /path')
+  lines.push('mycel task create "title" --agent pi --provider groq --model kimi-k2-instruct --repo /path')
+  lines.push('mycel task create "title" --agent pi --provider cerebras --model llama-3.3-70b --repo /path')
   lines.push('```')
-  lines.push('mycel task create "title" --agent cline --model moonshotai/kimi-k2.5 --provider openrouter')
-  lines.push('```')
   lines.push('')
-  lines.push('**Notes:**')
-  lines.push('- Cline switches models dynamically (specify any OpenRouter model ID)')
-  lines.push('- Cursor supports per-task model selection via --model flag')
-  lines.push('- Use at least 2-3 different agents across tasks for diversity')
+
+  // Pi provider quick ref
+  lines.push('### Pi Provider Reference')
+  lines.push('`pi` is a multi-provider agent. You MUST specify --provider:')
+  lines.push('- **groq**: Free, ultra-fast (kimi-k2-instruct, llama-3.3-70b)')
+  lines.push('- **cerebras**: Free, ultra-fast (llama-3.3-70b, qwen-3-235b)')
+  lines.push('- **openrouter**: 100+ models, some free (deepseek-v3.2, qwen3-coder)')
+  lines.push('- **mistral/google/anthropic/openai**: Direct API access')
 
   return lines.join('\n')
 }

@@ -5,7 +5,7 @@
 import { create } from 'zustand'
 import { fetchAPI } from './api'
 import { useUIStore } from './uiStore'
-import type { SchedulerStatus, SchedulerConfig, RunningSystemAgent } from '../types'
+import type { SchedulerStatus, SchedulerConfig, RunningSystemAgent, ShepherdStatus } from '../types'
 
 interface SchedulerState {
   scheduler: SchedulerStatus | null
@@ -14,6 +14,7 @@ interface SchedulerState {
   schedulerConfig: SchedulerConfig | null
   schedulerConfigLoading: boolean
   runningSystemAgents: RunningSystemAgent[]
+  shepherdStatus: ShepherdStatus | null
 
   // Actions
   fetchSchedulerStatus: () => Promise<void>
@@ -23,6 +24,7 @@ interface SchedulerState {
   fetchSchedulerConfig: () => Promise<void>
   updateSchedulerConfig: (updates: Partial<SchedulerConfig>) => Promise<void>
   fetchRunningSystemAgents: () => Promise<void>
+  fetchShepherdStatus: () => Promise<void>
 }
 
 export const useSchedulerStore = create<SchedulerState>((set, get) => ({
@@ -32,6 +34,7 @@ export const useSchedulerStore = create<SchedulerState>((set, get) => ({
   schedulerConfig: null,
   schedulerConfigLoading: false,
   runningSystemAgents: [],
+  shepherdStatus: null,
 
   fetchSchedulerStatus: async () => {
     try {
@@ -74,7 +77,6 @@ export const useSchedulerStore = create<SchedulerState>((set, get) => ({
     try {
       const endpoints: Record<string, string> = {
         discovery: '/discovery/trigger',
-        sequencer: '/sequencer/trigger',
         shepherd: '/shepherd/trigger',
         armory: '/inventory/armory',
         dispatcher: '/queue/run-next',
@@ -123,6 +125,15 @@ export const useSchedulerStore = create<SchedulerState>((set, get) => ({
       set({ runningSystemAgents: health.running_system_agents || [] })
     } catch (error) {
       console.error('Failed to fetch running system agents:', error)
+    }
+  },
+
+  fetchShepherdStatus: async () => {
+    try {
+      const status = await fetchAPI<ShepherdStatus>('/shepherd/status')
+      set({ shepherdStatus: status })
+    } catch (error) {
+      console.error('Failed to fetch shepherd status:', error)
     }
   },
 }))
