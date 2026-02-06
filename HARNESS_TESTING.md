@@ -1,6 +1,7 @@
 # Agent Harness Testing Guide
 
 > Test primitives against ALL harnesses before marking phases complete.
+> Source of truth: `packages/server/src/agents/dispatch.ts`
 
 ## Quick Auth Check
 
@@ -10,7 +11,12 @@ claude --version && echo "Claude: OK" || echo "Claude: NEEDS AUTH"
 codex --version && echo "Codex: OK" || echo "Codex: NEEDS AUTH"
 gemini --version && echo "Gemini: OK" || echo "Gemini: NEEDS AUTH"
 cline --version && echo "Cline: OK" || echo "Cline: NEEDS AUTH"
-agent --version && echo "Cursor: OK" || echo "Cursor: NEEDS AUTH"  # Cursor Agent CLI
+agent --version && echo "Cursor: OK" || echo "Cursor: NEEDS AUTH"
+kiro-cli --version && echo "Kiro: OK" || echo "Kiro: NEEDS AUTH"
+vibe --version && echo "Vibe: OK" || echo "Vibe: NEEDS AUTH"
+pi --version && echo "Pi: OK" || echo "Pi: NEEDS AUTH"
+opencode --version && echo "OpenCode: OK" || echo "OpenCode: NEEDS AUTH"
+copilot --version && echo "Copilot: OK" || echo "Copilot: NEEDS AUTH"
 ```
 
 ## Harness Configurations
@@ -18,15 +24,10 @@ agent --version && echo "Cursor: OK" || echo "Cursor: NEEDS AUTH"  # Cursor Agen
 ### Claude
 ```typescript
 {
-  name: 'claude',
   command: 'claude',
-  buildArgs: (prompt, model) => [
-    '-p', prompt,
-    ...(model ? ['--model', model] : []),
-    '--dangerously-skip-permissions'
-  ],
-  defaultTimeout: 1800,  // 30 min
-  supportsStreaming: true,
+  args: ['-p', prompt, '--model', model, '--dangerously-skip-permissions'],
+  defaultTimeout: 2400,  // 40 min
+  billing: 'subscription',
   models: ['opus', 'sonnet', 'haiku'],
   defaultModel: 'sonnet'
 }
@@ -35,67 +36,113 @@ agent --version && echo "Cursor: OK" || echo "Cursor: NEEDS AUTH"  # Cursor Agen
 ### Codex
 ```typescript
 {
-  name: 'codex',
   command: 'codex',
-  buildArgs: (prompt, model) => [
-    '-q', prompt,
-    ...(model ? ['--model', model] : []),
-    '--full-auto'
-  ],
+  args: ['exec', prompt, '--model', model, '--full-auto'],
   defaultTimeout: 1800,  // 30 min
-  supportsStreaming: true,
-  models: ['gpt-5.2-codex', 'o3-mini'],
-  defaultModel: 'gpt-5.2-codex',
-  // CRITICAL: Must set cwd explicitly
-  requiresCwd: true
+  billing: 'subscription',
+  models: ['gpt-5.3-codex', 'gpt-5.2-codex', 'gpt-5.2-codex-high', 'gpt-5.2-codex-fast'],
+  defaultModel: 'gpt-5.2-codex'
 }
 ```
 
 ### Gemini
 ```typescript
 {
-  name: 'gemini',
   command: 'gemini',
-  buildArgs: (prompt, model) => [
-    '-p', prompt,
-    ...(model ? ['--model', model] : [])
-  ],
-  defaultTimeout: 900,  // 15 min
-  supportsStreaming: true,
-  models: ['gemini-3-flash-preview', 'gemini-3-pro'],
-  defaultModel: 'gemini-3-flash-preview'
+  args: [prompt, '--model', model, '--yolo'],
+  defaultTimeout: 1800,
+  billing: 'subscription',  // Google AI Pro subscription
+  // IMPORTANT: CLI requires -preview suffix. 'gemini-3-pro' and 'gemini-3-flash' are INVALID.
+  models: ['gemini-3-pro-preview', 'gemini-3-flash-preview', 'flash', 'gemini-2.5-pro', 'gemini-2.5-flash'],
+  defaultModel: 'flash'
 }
 ```
 
 ### Cline
 ```typescript
 {
-  name: 'cline',
   command: 'cline',
-  buildArgs: (prompt) => ['--task', prompt],
-  defaultTimeout: 600,  // 10 min
-  supportsStreaming: false,
-  // Zombie cleanup required
-  killPattern: (cwd) => `pkill -f "cline.*${cwd}"`
+  args: ['--address', addr, 'task', 'new', prompt, '--yolo', '--mode', 'act'],
+  defaultTimeout: 1800,
+  billing: 'per_use',
+  // Model set via: cline config set act-mode-open-router-model-id=<model>
+  // Provider set via: cline config set act-mode-api-provider=<provider>
+  // Multi-instance pool: max 4 concurrent, each with unique gRPC address
 }
 ```
 
 ### Cursor (Agent CLI)
 ```typescript
 {
-  name: 'cursor',
-  command: 'agent',  // NOT 'cursor' - uses Cursor Agent CLI
-  buildArgs: (prompt, model, cwd) => [
-    '--print',           // Non-interactive mode
-    '--force',           // Auto-approve commands
-    '--workspace', cwd,  // Set working directory
-    ...(model ? ['--model', model] : []),
-    prompt               // Positional prompt argument
-  ],
-  defaultTimeout: 600,  // 10 min - hard internal limit
-  supportsStreaming: true,  // Supports --stream-partial-output
-  models: ['gpt-5', 'sonnet-4', 'sonnet-4-thinking'],
-  defaultModel: 'sonnet-4'
+  command: 'agent',  // NOT 'cursor'
+  args: ['--print', '--output-format', 'json', '--model', model, prompt],
+  defaultTimeout: 1800,
+  billing: 'subscription',
+  models: ['opus-4.6-thinking', 'composer-1', 'sonnet-4.5', 'gpt-5.2-codex', 'gemini-3-flash'],
+  defaultModel: 'opus-4.6-thinking'
+}
+```
+
+### Kiro (AWS)
+```typescript
+{
+  command: 'kiro-cli',
+  args: ['chat', '--no-interactive', '--trust-all-tools'],
+  // SPECIAL: Prompt piped via stdin (Bun FileSink), not as arg
+  // proc.stdin.write(prompt); proc.stdin.end()
+  // NOTE: No --model CLI flag. Model routed by AWS.
+  defaultTimeout: 1800,
+  billing: 'subscription',
+  models: ['default', 'claude-opus-4.6', 'claude-sonnet-4.5', 'claude-haiku-4.5'],
+}
+```
+
+### Vibe (Mistral)
+```typescript
+{
+  command: 'vibe',
+  args: ['-p', prompt, '--output', 'text'],
+  // NOTE: No --model CLI flag. Model auto-selected by Mistral.
+  defaultTimeout: 1800,
+  billing: 'per_use',
+  models: ['default', 'devstral-latest', 'devstral-small-latest', 'codestral-latest'],
+  // Env: MISTRAL_API_KEY
+}
+```
+
+### Pi (Multi-provider)
+```typescript
+{
+  command: 'pi',
+  args: ['-p', prompt, '--provider', provider, '--model', model],
+  defaultTimeout: 1800,
+  billing: 'varies',
+  providers: ['openrouter', 'groq', 'cerebras', 'mistral', 'google', 'anthropic', 'openai'],
+  // Env: OPENROUTER_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, etc.
+}
+```
+
+### OpenCode
+```typescript
+{
+  command: 'opencode',
+  args: ['run', '-m', model, prompt],
+  defaultTimeout: 3600,  // 1hr - free models are slow
+  billing: 'free',
+  models: ['opencode/kimi-k2.5-free', 'opencode/glm-4.7-free', 'opencode/gpt-5-nano'],
+  defaultModel: 'opencode/kimi-k2.5-free'
+}
+```
+
+### Copilot (GitHub)
+```typescript
+{
+  command: 'copilot',
+  args: ['-p', prompt, '--model', model, '--allow-all-tools'],
+  defaultTimeout: 1800,
+  billing: 'subscription',
+  models: ['claude-opus-4.6', 'claude-sonnet-4.5', 'gpt-5.2', 'gemini-3-pro-preview'],
+  // Env: GH_TOKEN (PAT with Copilot Requests permission)
 }
 ```
 
@@ -110,8 +157,8 @@ git init && echo "# Test" > README.md && git add . && git commit -m "init"
 
 # Test each harness with simple prompt
 claude -p "Create a file called test.txt with 'hello world'" --dangerously-skip-permissions
-codex -q "Create a file called test.txt with 'hello world'" --full-auto
-gemini -p "Create a file called test.txt with 'hello world'"
+codex exec "Create a file called test.txt with 'hello world'" --full-auto
+gemini "Create a file called test.txt with 'hello world'" --yolo
 
 # Verify output
 cat test.txt
@@ -145,34 +192,14 @@ const result = await dispatch({
 console.log(result.exit_code)  // Should be 124 (timeout)
 ```
 
-### 4. Cost Parsing Test
-
-```typescript
-// Run task and verify cost extraction
-const result = await dispatch({
-  agent: 'claude',
-  prompt: 'Say hello',
-  cwd: '/tmp/mycel-test'
-})
-
-console.log('Cost:', result.cost_usd)  // Should be number or undefined
-```
-
-### 5. Cline Zombie Test
+### 4. Cline Multi-Instance Test
 
 ```bash
-# Start Cline task
-cline --task "Count to 100 slowly" &
-CLINE_PID=$!
-
-# Wait a bit
-sleep 5
-
-# Kill and verify cleanup
-kill $CLINE_PID
-
-# Check for zombie processes
-ps aux | grep cline  # Should be empty
+# Verify multiple cline instances can run concurrently
+# Each gets unique gRPC address from the pool (max 4)
+mycel task create "task 1" --agent cline --provider openrouter --repo /tmp/mycel-test
+mycel task create "task 2" --agent cline --provider openrouter --repo /tmp/mycel-test
+# Both should dispatch to different cline instances
 ```
 
 ## Log Locations
@@ -184,6 +211,9 @@ ps aux | grep cline  # Should be empty
 | Gemini | `~/.gemini/sessions/` | `<session-id>/` |
 | Cline | VS Code logs | Extension output |
 | Cursor | IDE internal | Not accessible |
+| Kiro | `~/.local/share/kiro-cli/` | AWS SSO sessions |
+| Pi | Varies by provider | Provider-specific |
+| OpenCode | `~/.local/share/opencode/` | Session logs |
 
 ## Common Issues
 
@@ -191,29 +221,31 @@ ps aux | grep cline  # Should be empty
 **Problem**: Codex commits to current directory instead of task repo
 **Solution**: Always set `cwd` explicitly in spawn options
 
-### Cline Zombies
-**Problem**: `cline-host` and `cline-core` persist after timeout
-**Solution**: Use `pkill -f` with workspace path pattern
+### Cline gRPC Conflicts
+**Problem**: Multiple tasks on same cline instance cause gRPC session conflicts
+**Solution**: Multi-instance pool (max 4) gives each task a dedicated instance
 
 ### Gemini Rate Limits
-**Problem**: 429 errors on rapid requests
-**Solution**: Add backoff delay between Gemini tasks
+**Problem**: 429 errors on rapid requests (daily quota)
+**Solution**: Health tracking auto-backs off, parses quota reset time from error
 
-### Cursor 10-min Limit
-**Problem**: Tasks always fail after 10 minutes
-**Solution**: Hard limit in Cursor - split large tasks
+### Kiro Stdin
+**Problem**: Bun spawn stdin is FileSink, not a stream
+**Solution**: `proc.stdin.write(prompt); proc.stdin.end()` (NOT getWriter)
+
+### Copilot Auth
+**Problem**: GH_TOKEN not set or missing Copilot Requests permission
+**Solution**: Set GH_TOKEN env var from `~/.config/mk-agent/COPILOT_TOKEN`
 
 ## Validation Matrix
 
 Before merging dispatch changes:
 
-| Test | Claude | Codex | Gemini | Cline | Cursor |
-|------|--------|-------|--------|-------|--------|
-| Basic exec | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Streaming | [ ] | [ ] | [ ] | N/A | N/A |
-| Timeout | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Cost parse | [ ] | [ ] | [ ] | N/A | N/A |
-| Zombie clean | N/A | N/A | N/A | [ ] | N/A |
-| CWD handling | [ ] | [ ] | [ ] | [ ] | [ ] |
+| Test | Claude | Codex | Gemini | Cline | Cursor | Kiro | Vibe | Pi | OpenCode | Copilot |
+|------|--------|-------|--------|-------|--------|------|------|----|----------|---------|
+| Basic exec | [x] | [x] | [x] | [x] | [x] | [x] | [x] | [x] | [x] | [x] |
+| Streaming | [x] | [x] | [x] | N/A | N/A | [x] | [x] | [x] | N/A | N/A |
+| Timeout | [x] | [x] | [x] | [x] | [x] | [ ] | [ ] | [ ] | [ ] | [ ] |
+| CWD handling | [x] | [x] | [x] | [x] | [x] | [x] | [x] | [x] | [x] | [x] |
 
 Fill in [x] when tested and working.

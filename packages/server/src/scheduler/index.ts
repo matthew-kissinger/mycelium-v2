@@ -23,6 +23,7 @@ import { runDigestCycle } from './cycles/digest'
 import { runCompactionCycle } from './cycles/compaction'
 import { runArmoryCycle, shouldRunArmory } from './cycles/armory'
 import { runHealthCheckCycle } from './cycles/health'
+import { getTaskStats } from '../db/queries'
 
 // Cycle names
 export type CycleName =
@@ -331,6 +332,32 @@ function stopCycles(): void {
 }
 
 /**
+ * Auto-trigger discovery if there are no pending or running tasks.
+ * Runs async so it doesn't block scheduler startup.
+ */
+async function autoTriggerDiscoveryIfEmpty(config: SchedulerConfig): Promise<void> {
+  if (!schedulerState) return
+
+  const discoveryState = schedulerState.cycles.get('discovery')
+  if (!discoveryState?.enabled) return
+
+  try {
+    const stats = await getTaskStats()
+    const activeTasks = stats.pending + stats.running
+
+    if (activeTasks === 0) {
+      console.log('[Scheduler] No active tasks, triggering discovery immediately')
+      // Run discovery immediately (don't await - let it run in background)
+      runCycle('discovery', () => runDiscoveryCycle(config))
+    } else {
+      console.log(`[Scheduler] ${activeTasks} active tasks, waiting for scheduled discovery`)
+    }
+  } catch (error) {
+    console.error('[Scheduler] Failed to check task stats for auto-discovery:', error)
+  }
+}
+
+/**
  * Start the scheduler.
  */
 export function startScheduler(configOverrides?: Partial<SchedulerConfig>): SchedulerStatus {
@@ -363,6 +390,10 @@ export function startScheduler(configOverrides?: Partial<SchedulerConfig>): Sche
   })
 
   console.log('[Scheduler] Started')
+
+  // Auto-trigger discovery if no active tasks
+  autoTriggerDiscoveryIfEmpty(config)
+
   return getSchedulerStatus()
 }
 

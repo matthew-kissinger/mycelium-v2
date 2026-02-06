@@ -850,6 +850,33 @@ export async function getTaskStats() {
   return stats
 }
 
+/**
+ * Get task distribution by agent (counts per agent across all tasks).
+ * Returns map of agent -> { total, done, failed, pending, running }.
+ */
+export async function getTaskDistributionByAgent(): Promise<Record<string, { total: number; done: number; failed: number; pending: number; running: number }>> {
+  const allTasks = await db.select({
+    agent: schema.tasks.agent,
+    status: schema.tasks.status,
+  }).from(schema.tasks)
+
+  const dist: Record<string, { total: number; done: number; failed: number; pending: number; running: number }> = {}
+
+  for (const task of allTasks) {
+    const agent = task.agent ?? 'claude'
+    if (!dist[agent]) {
+      dist[agent] = { total: 0, done: 0, failed: 0, pending: 0, running: 0 }
+    }
+    dist[agent].total++
+    if (task.status === 'done') dist[agent].done++
+    else if (task.status === 'failed') dist[agent].failed++
+    else if (task.status === 'pending') dist[agent].pending++
+    else if (task.status === 'running') dist[agent].running++
+  }
+
+  return dist
+}
+
 // ============================================================================
 // Devices
 // ============================================================================

@@ -1,6 +1,6 @@
 # Agent-Provider-Model Matrix
 
-**Generated:** 2026-02-04
+**Generated:** 2026-02-05
 **Source of truth:** `packages/shared/src/schemas/agent-matrix.ts`
 
 ---
@@ -13,7 +13,7 @@
 | codex | openai | sub | gpt-5.2-codex | `codex` |
 | cursor | cursor | sub | composer-1 | `agent` |
 | kiro | aws | sub | default | `kiro-cli` |
-| copilot | github | sub | gemini-3-pro-preview | `copilot` |
+| copilot | github | sub | claude-opus-4.6 | `copilot` |
 | gemini | google | free | flash | `gemini` |
 | opencode | opencode-zen | free | kimi-k2.5-free | `opencode` |
 | cline | openrouter, cline | $/tok | kimi-k2.5 | `cline` |
@@ -38,6 +38,7 @@
 #### codex (openai)
 | Model | Context | Best For |
 |-------|---------|----------|
+| gpt-5.3-codex | 400K | Latest, most capable codex |
 | gpt-5.2-codex | 400K | Balanced code generation |
 | gpt-5.2-codex-high | 400K | Complex refactors |
 | gpt-5.2-codex-fast | 400K | Quick edits |
@@ -45,42 +46,61 @@
 #### cursor (cursor)
 | Model | Context | Best For |
 |-------|---------|----------|
+| opus-4.6-thinking | 200K | Default, best reasoning, architecture |
+| opus-4.6 | 200K | Non-thinking opus, fast reasoning |
 | composer-1 | 200K | Multi-file composition, large refactors |
-| opus-4.5-thinking | 200K | Complex design, architecture |
+| sonnet-4.5-thinking | 200K | Balanced with thinking |
 | sonnet-4.5 | 200K | Balanced feature work |
 | gpt-5.2-codex | 400K | Mechanical tasks |
+| gpt-5.2-codex-xhigh | 400K | Highest quality codex |
 | gemini-3-flash | 1M | Fast iteration |
+| grok | 128K | Alternative perspective |
 
 #### kiro (aws)
-| Model | Cost | Best For |
-|-------|------|----------|
-| default | 1.0x | Auto-routing |
-| claude-haiku-4.5 | 0.4x | Fast, cost-effective |
-| claude-sonnet-4.0 | 1.3x | Stable |
-| claude-sonnet-4.5 | 1.3x | Complex coding |
-| claude-opus-4.5 | 2.2x | Most intelligent |
 
-#### copilot (github)
+**Note:** No `--model` CLI flag. Model routed by AWS.
+
 | Model | Best For |
 |-------|----------|
-| gemini-3-pro-preview | Default, balanced |
-| claude-sonnet-4.5 | Code quality |
+| default | Auto-routing, balanced |
+| claude-opus-4.6 | Most intelligent, latest |
+| claude-opus-4.5 | Complex coding |
+| claude-sonnet-4.5 | Balanced, fast |
+| claude-sonnet-4.0 | Stable, predictable |
+| claude-haiku-4.5 | Fast, cost-effective |
+
+#### copilot (github)
+
+**Note:** Supports `--model` flag.
+
+| Model | Best For |
+|-------|----------|
+| claude-opus-4.6 | Default, most capable |
+| claude-sonnet-4.5 | Code quality, balanced |
+| claude-sonnet-4 | Stable |
 | claude-haiku-4.5 | Fast |
-| claude-opus-4.5 | Complex tasks |
-| gpt-5, gpt-5.1, gpt-5.2 | OpenAI alternatives |
+| gpt-5.2 | Latest OpenAI |
+| gpt-5.1, gpt-5.1-codex-mini, gpt-5-mini | OpenAI alternatives |
+| gpt-4.1 | Legacy, reliable |
+| gemini-3-pro-preview | Large context |
 
 ---
 
 ### Free Agents (Rate-limited)
 
 #### gemini (google)
+
+**Note:** CLI requires `-preview` suffix for Gemini 3 models. `gemini-3-pro` and `gemini-3-flash` are NOT valid gemini CLI model IDs.
+
 | Model | Context | Notes |
 |-------|---------|-------|
-| gemini-3-pro-preview | 1M | Deep research |
-| gemini-3-flash-preview | 1M | Fast |
-| flash | 1M | Alias for default |
+| gemini-3-pro-preview | 1M | Deep research, complex analysis |
+| gemini-3-flash-preview | 1M | Fast iteration, most tasks |
+| flash | 1M | Alias for default flash |
+| gemini-2.5-pro | 1M | Large context, stable |
+| gemini-2.5-flash | 1M | Fast, large context |
 
-**Note:** Free tier with daily quota limits. Quota errors include reset time.
+Free tier with daily quota limits. Quota errors include reset time.
 
 #### opencode (opencode-zen)
 | Model | Context | Notes |
@@ -130,10 +150,14 @@
 - `meta-llama/llama-3.3-70b-instruct:free` - General
 
 #### vibe (mistral)
+
+**Note:** No `--model` CLI flag. Model auto-selected by Mistral.
+
 | Model | Notes |
 |-------|-------|
 | default | Auto-selects best model |
 | devstral-latest | Coding agent |
+| devstral-small-latest | Fast coding |
 | codestral-latest | Code generation |
 
 #### pi (multi-provider)
@@ -164,7 +188,7 @@
 | Feature | cursor | - | composer-1 | Sub, multi-file |
 | Refactor | codex | - | gpt-5.2-codex | Sub, code-focused |
 | Complex | claude | - | opus | Sub, best reasoning |
-| Complex | cursor | - | opus-4.5-thinking | Sub, extended thinking |
+| Complex | cursor | - | opus-4.6-thinking | Sub, extended thinking |
 | Bulk/mechanical | cline | openrouter | deepseek-v3.2 | Cheap $0.25/$0.38 |
 | Research | copilot | - | default | GitHub MCP built-in |
 | Exploration | gemini | - | flash | Free quota |

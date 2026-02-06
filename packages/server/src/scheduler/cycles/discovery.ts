@@ -86,7 +86,7 @@ async function buildContext(
     })),
     patterns: patterns.map((p) => p.content),
     warnings: warnings.map((w) => w.content),
-    agentsAvailable: ['claude', 'codex', 'gemini', 'cursor', 'cline'],
+    agentsAvailable: ['claude', 'codex', 'gemini', 'cursor', 'cline', 'kiro', 'vibe', 'pi', 'opencode', 'copilot'],
     autonomous: isAuto,
   }
 }

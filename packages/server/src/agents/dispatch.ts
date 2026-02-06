@@ -224,7 +224,7 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
  * - Vibe: vibe -p "prompt" --output text
  * - Pi: pi -p "prompt" --provider <provider> --model <model>
  * - OpenCode: opencode run "prompt" [-m model]
- * - Copilot: copilot -p "prompt" --allow-all-tools
+ * - Copilot: copilot -p "prompt" [--model <model>] --allow-all-tools
  */
 function buildAgentArgs(
   agent: AgentType,
@@ -283,7 +283,7 @@ function buildAgentArgs(
     case 'kiro':
       // kiro-cli chat --no-interactive
       // Note: prompt is piped via stdin, not as arg
-      return ['chat', '--no-interactive']
+      return ['chat', '--no-interactive', '--trust-all-tools']
 
     case 'vibe':
       // vibe -p "prompt" --output text
@@ -309,9 +309,10 @@ function buildAgentArgs(
       ]
 
     case 'copilot':
-      // copilot -p "prompt" --allow-all-tools
+      // copilot -p "prompt" [--model <model>] --allow-all-tools
       return [
         '-p', prompt,
+        ...(model ? ['--model', model] : []),
         '--allow-all-tools',
       ]
 
@@ -568,7 +569,7 @@ export async function dispatchKiro(
 
   try {
     const proc = spawn({
-      cmd: ['kiro-cli', 'chat', '--no-interactive'],
+      cmd: ['kiro-cli', 'chat', '--no-interactive', '--trust-all-tools'],
       cwd,
       stdout: 'pipe',
       stderr: 'pipe',
