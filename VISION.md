@@ -9,24 +9,22 @@ Like the underground fungal networks that connect trees in a forest, Mycelium co
 ## Core Loop
 
 ```
-     Discovery
+     Discovery (claude/opus)
          |
-    finds work in repos
+    finds work in repos, wires deps
          |
          v
     +---------+
-    |  Tasks  |  pending -> sequenced -> running -> done
-    +---------+
-         |
-    Sequencer wires dependencies
-         |
+    |  Tasks  |  pending -----> running -----> done
+    +---------+        \           |
+         |           --depends-on  retry (fallback chain)
     Dispatcher assigns to agents
          |
-    +----+----+----+----+----+
-    |    |    |    |    |    |
- Claude Codex Gemini Cline Cursor
-    |    |    |    |    |    |
-    +----+----+----+----+----+
+    +----+----+----+----+----+----+----+----+----+----+
+    |    |    |    |    |    |    |    |    |    |    |
+ Claude Codex Gemini Cline Cursor Kiro Vibe Pi OpenCode Copilot
+    |    |    |    |    |    |    |    |    |    |    |
+    +----+----+----+----+----+----+----+----+----+----+
          |
     Shepherd evaluates results
          |
@@ -75,7 +73,6 @@ Like the underground fungal networks that connect trees in a forest, Mycelium co
 
 ## Not Yet Built
 
-- Cross-repo task coordination
-- Agent performance benchmarking
+- Agent performance benchmarking (success rates by agent/model/task-type)
 - Automated testing of generated code
 - Multi-user access control

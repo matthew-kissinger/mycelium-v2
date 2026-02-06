@@ -26,7 +26,7 @@ import {
 import { getSchedulerStatus } from './scheduler'
 import { getRuns, parseRun, cleanupOrphanedRuns } from './db/queries'
 import { createSSEResponse, getClientCount, getClientInfo, shutdown as shutdownSSE } from './sse'
-import { shutdownRegistry, getRunningProcessCount, cleanupClineInstances, getHealthSummary, checkOpenRouterCredits, checkClineCredits, getClineProvider, getOpenRouterFreeModels } from './agents'
+import { shutdownRegistry, getRunningProcessCount, cleanupClineInstances, getHealthSummary, checkOpenRouterCredits, checkClineCredits, getClineProvider, getOpenRouterFreeModels, checkAllProviderStatus } from './agents'
 import { db, schema } from './db'
 import { sql } from 'drizzle-orm'
 import { initTelegramService, getTelegramService, shutdownTelegramService } from './telegram'
@@ -45,12 +45,13 @@ app.get('/api/health', async (c) => {
   const runningSystemAgents = await getRuns({ status: 'running' })
 
   // Get agent health and quota info (async API calls in parallel)
-  const [agentHealth, openrouterCredits, clineCredits, clineProvider, freeModels] = await Promise.all([
+  const [agentHealth, openrouterCredits, clineCredits, clineProvider, freeModels, providerStatus] = await Promise.all([
     Promise.resolve(getHealthSummary()),
     checkOpenRouterCredits(),
     checkClineCredits(),
     getClineProvider(),
     getOpenRouterFreeModels(),
+    checkAllProviderStatus(),
   ])
 
   return c.json({
@@ -69,6 +70,7 @@ app.get('/api/health', async (c) => {
     sse_clients: getClientCount(),
     running_agents: getRunningProcessCount(),
     agent_health: agentHealth,
+    providers: providerStatus,
     cline: {
       provider: clineProvider,
       openrouter_credits: openrouterCredits,

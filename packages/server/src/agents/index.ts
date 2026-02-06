@@ -27,5 +27,9 @@ export {
   checkClineCredits,
   getClineProvider,
   getOpenRouterFreeModels,
+  checkGroqStatus,
+  checkCerebrasStatus,
+  checkMistralStatus,
+  checkAllProviderStatus,
   resetHealth,
 } from './health'

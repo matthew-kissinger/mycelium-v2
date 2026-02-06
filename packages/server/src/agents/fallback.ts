@@ -28,6 +28,7 @@ export interface RetryContext {
 export interface RetryDecision {
   retry: boolean
   fallbackModel: string | null
+  fallbackAgent?: string  // Set when falling back to a different agent
 }
 
 // =============================================================================
@@ -47,12 +48,15 @@ const FALLBACK_MODEL_MAP: Record<string, Record<string, string | null>> = {
   codex: {
     'gpt-5.2-codex-fast': 'gpt-5.2-codex',
     'gpt-5.2-codex': 'gpt-5.2-codex-high',
-    'gpt-5.2-codex-high': null,
+    'gpt-5.2-codex-high': 'gpt-5.3-codex',
+    'gpt-5.3-codex': null,
   },
   gemini: {
     flash: 'gemini-3-flash-preview',
     'gemini-3-flash-preview': 'gemini-3-pro-preview',
     'gemini-3-pro-preview': null,
+    'gemini-2.5-flash': 'gemini-3-flash-preview',
+    'gemini-2.5-pro': null,
   },
   cline: {
     // Escalation chain: cheaper -> more capable
@@ -66,9 +70,21 @@ const FALLBACK_MODEL_MAP: Record<string, Record<string, string | null>> = {
     'gemini-3-flash': 'composer-1',
     'gpt-5.2-codex': 'composer-1',
     'sonnet-4.5': 'composer-1',
-    'composer-1': 'opus-4.5-thinking',
-    'opus-4.5-thinking': null,
+    'composer-1': 'opus-4.6-thinking',
+    'opus-4.6-thinking': null,
+    'opus-4.5-thinking': null,  // Legacy
   },
+}
+
+/**
+ * Cross-agent fallback: when an agent exhausts its model chain, try a different agent.
+ * Maps agent -> { agent, model } for the fallback target.
+ */
+const CROSS_AGENT_FALLBACK: Record<string, { agent: string; model: string }> = {
+  codex: { agent: 'cursor', model: 'composer-1' },         // Same capability tier (subscription)
+  pi: { agent: 'opencode', model: 'opencode/kimi-k2.5-free' }, // Free alternative
+  opencode: { agent: 'gemini', model: 'flash' },           // Free alternative
+  vibe: { agent: 'cline', model: 'mistralai/devstral-2512' }, // Same Mistral backend via OpenRouter
 }
 
 /**
@@ -79,7 +95,12 @@ const AGENT_DEFAULT_MODELS: Record<string, string> = {
   codex: 'gpt-5.2-codex',
   gemini: 'flash',
   cline: 'moonshotai/kimi-k2.5',
-  cursor: 'composer-1',
+  cursor: 'opus-4.6-thinking',
+  kiro: 'default',
+  vibe: 'default',
+  pi: 'moonshotai/kimi-k2.5',
+  opencode: 'opencode/kimi-k2.5-free',
+  copilot: 'claude-opus-4.6',
 }
 
 // =============================================================================
@@ -103,7 +124,8 @@ export function getFallbackModel(agent: string, model: string | null | undefined
 
 /**
  * Determine whether a failed task should be retried.
- * Returns the decision and the fallback model to use.
+ * First tries in-agent model escalation, then cross-agent fallback.
+ * Returns the decision, fallback model, and optionally a different agent.
  */
 export function shouldRetry(
   agent: string,
@@ -112,19 +134,30 @@ export function shouldRetry(
 ): RetryDecision {
   const existing = parseRetryContext(retryContextStr)
 
-  // Already retried max times
-  if (existing && existing.attempt >= existing.max_retries) {
+  // Allow up to 2 retries to support cross-agent fallback after in-agent exhaustion
+  const maxRetries = 2
+  if (existing && existing.attempt >= maxRetries) {
     return { retry: false, fallbackModel: null }
   }
 
   const resolvedModel = model ?? AGENT_DEFAULT_MODELS[agent] ?? null
   const fallbackModel = getFallbackModel(agent, resolvedModel)
 
-  if (!fallbackModel) {
-    return { retry: false, fallbackModel: null }
+  if (fallbackModel) {
+    return { retry: true, fallbackModel }
   }
 
-  return { retry: true, fallbackModel }
+  // In-agent fallback exhausted - try cross-agent fallback
+  const crossFallback = CROSS_AGENT_FALLBACK[agent]
+  if (crossFallback) {
+    // Don't cross-agent fallback if we already did (check history)
+    if (existing?.history.some(h => h.agent === crossFallback.agent)) {
+      return { retry: false, fallbackModel: null }
+    }
+    return { retry: true, fallbackModel: crossFallback.model, fallbackAgent: crossFallback.agent }
+  }
+
+  return { retry: false, fallbackModel: null }
 }
 
 /**
@@ -156,7 +189,7 @@ export function buildRetryContext(
   }
 
   const ctx: RetryContext = {
-    max_retries: 1,
+    max_retries: 2,
     attempt: 1,
     original_agent: agent,
     original_model: resolvedModel,

@@ -9,7 +9,7 @@
  * - Trigger Shepherd when tasks complete
  */
 
-import { SchedulerConfig } from '@mycelium/shared'
+import { SchedulerConfig, type AgentType } from '@mycelium/shared'
 import * as queries from '../../db/queries'
 import { dispatch } from '../../agents/dispatch'
 import { extractError, recordSuccess, recordFailure, isAgentAvailable } from '../../agents/health'
@@ -27,6 +27,24 @@ import { shouldRetry, buildRetryContext, parseRetryContext, resolveModel } from 
 
 // Track currently running tasks (task_id -> {start time, agent})
 const runningTasks = new Map<string, { startTime: number; agent: string }>()
+
+/**
+ * Subscription agents to use as defaults for unassigned tasks.
+ * Rotates through them to maximize paid subscriptions.
+ * Free agents are for simple tasks assigned explicitly by discovery.
+ */
+const DEFAULT_AGENTS = ['claude', 'cursor', 'codex', 'gemini', 'copilot', 'kiro'] as const
+let defaultAgentIndex = 0
+
+/**
+ * Pick a subscription agent for tasks with no assigned agent.
+ * Round-robins through subscription agents to maximize paid usage.
+ */
+function pickDefaultAgent(): string {
+  const agent = DEFAULT_AGENTS[defaultAgentIndex % DEFAULT_AGENTS.length]
+  defaultAgentIndex++
+  return agent
+}
 
 /** Send task completion notification via Telegram */
 function notifyTaskComplete(taskInfo: TaskInfo): void {
@@ -84,8 +102,9 @@ async function handleRetry(
   const existing = parseRetryContext(task.retry_context)
   const attempt = existing ? existing.attempt : 0
 
-  // Reset task to pending with upgraded model
-  await queries.updateTask(taskId, {
+  // Reset task to pending with upgraded model (and optionally different agent)
+  const retryAgent = decision.fallbackAgent ?? agent
+  const updateFields: Record<string, unknown> = {
     status: 'pending',
     model: decision.fallbackModel,
     error: null,
@@ -95,9 +114,13 @@ async function handleRetry(
     duration_seconds: null,
     cost_usd: null,
     retry_context: retryContext,
-  })
+  }
+  if (decision.fallbackAgent) {
+    updateFields.agent = decision.fallbackAgent
+  }
+  await queries.updateTask(taskId, updateFields as any)
 
-  console.log(`[Dispatcher] Task ${taskId.slice(0, 8)} retrying with ${agent}/${decision.fallbackModel} (was ${resolveModel(agent, model)})`)
+  console.log(`[Dispatcher] Task ${taskId.slice(0, 8)} retrying with ${retryAgent}/${decision.fallbackModel} (was ${resolveModel(agent, model)})`)
 
   notifyTaskRetrying({
     id: taskId,
@@ -106,7 +129,7 @@ async function handleRetry(
     failed_agent: agent,
     failed_model: resolveModel(agent, model),
     error,
-    retry_agent: agent,
+    retry_agent: retryAgent,
     retry_model: decision.fallbackModel,
     attempt,
   })
@@ -114,6 +137,8 @@ async function handleRetry(
   broadcast('task:retrying', {
     type: 'task:retrying',
     task_id: taskId,
+    failed_agent: agent,
+    retry_agent: retryAgent,
     failed_model: resolveModel(agent, model),
     retry_model: decision.fallbackModel,
     attempt: attempt + 1,
@@ -183,7 +208,7 @@ async function runTask(task: Awaited<ReturnType<typeof queries.getTask>>): Promi
   if (!task) return
 
   const taskId = task.id
-  const agent = (task.agent ?? 'claude') as 'claude' | 'codex' | 'gemini' | 'cline' | 'cursor'
+  const agent = (task.agent ?? pickDefaultAgent()) as AgentType
   const model = task.model ?? undefined
   const provider = (task as any).provider as 'openrouter' | 'cline' | undefined
   const repoPath = task.repo_path
@@ -451,7 +476,7 @@ export async function runDispatcherCycle(config: SchedulerConfig): Promise<void>
 
   // Filter out tasks for unavailable agents (quota exceeded, etc.)
   const availableTasks = readyTasks.filter((task) => {
-    const agent = task.agent ?? 'claude'
+    const agent = task.agent ?? pickDefaultAgent()
     const model = task.model ?? undefined
     const availability = isAgentAvailable(agent, model)
     if (!availability.available) {

@@ -76,8 +76,9 @@ export function extractError(agent: string, output: string): {
     }
   }
 
-  // Timeout
-  if (output.includes('[TIMEOUT]') || output.includes('timeout')) {
+  // Timeout - only match the explicit [TIMEOUT] marker from dispatch.ts
+  // Do NOT match the word 'timeout' generically (it appears in --timeout flags, prompt context, etc.)
+  if (output.includes('[TIMEOUT]')) {
     return {
       error: 'Task timed out',
       errorType: 'timeout',
@@ -126,6 +127,32 @@ export function extractError(agent: string, output: string): {
     }
   }
 
+  // Codex usage limit (429) - parse resets_at for quota backoff
+  if (output.includes('usage_limit_reached') || (agent === 'codex' && output.includes('429'))) {
+    const resetsMatch = output.match(/resets_at['":\s]+(\d{4}-\d{2}-\d{2}T[\d:.]+Z?)/)
+    let quotaResetMs: number | undefined
+    if (resetsMatch) {
+      const resetTime = new Date(resetsMatch[1]).getTime()
+      if (!isNaN(resetTime)) {
+        quotaResetMs = Math.max(0, resetTime - Date.now())
+      }
+    }
+    return {
+      error: 'Codex usage limit reached (429)',
+      errorType: 'quota',
+      quotaResetMs,
+    }
+  }
+
+  // Codex model not supported
+  if (agent === 'codex' && output.includes('model is not supported')) {
+    const modelMatch = output.match(/model['":\s]+([^\s'"]+)['":\s]+is not supported/)
+    return {
+      error: modelMatch ? `Codex model "${modelMatch[1]}" not supported` : 'Codex model not supported',
+      errorType: 'api_error',
+    }
+  }
+
   // OpenRouter rate limit
   if (output.includes('rate limit') || output.includes('429')) {
     return {
@@ -169,6 +196,14 @@ export function extractError(agent: string, output: string): {
     }
   }
 
+  // Kiro tool approval error (missing --trust-all-tools)
+  if (output.includes('Tool approval required') && output.includes('--trust-all-tools')) {
+    return {
+      error: 'Kiro requires --trust-all-tools flag for non-interactive mode',
+      errorType: 'api_error',
+    }
+  }
+
   // Kiro AWS auth error
   if (output.includes('SSO session') || output.includes('IAM Identity') || (agent === 'kiro' && output.includes('expired'))) {
     return {
@@ -182,6 +217,16 @@ export function extractError(agent: string, output: string): {
     return {
       error: 'OpenCode model not available',
       errorType: 'api_error',
+    }
+  }
+
+  // Cerebras rate limit (free tier)
+  if (output.includes('cerebras') && output.includes('429') ||
+      (agent === 'pi' && output.includes('Too Many Requests') && output.includes('cerebras'))) {
+    return {
+      error: 'Cerebras rate limit reached',
+      errorType: 'quota',
+      quotaResetMs: 60000, // Default 1 min backoff; bucket refills continuously
     }
   }
 
@@ -519,4 +564,114 @@ export async function checkGroqStatus(): Promise<{
   } catch {
     return null
   }
+}
+
+/**
+ * Check Cerebras API rate limit status.
+ * Uses /v1/models endpoint and parses rate limit headers.
+ * Cerebras returns: x-ratelimit-limit-requests-day, x-ratelimit-remaining-requests-day,
+ *   x-ratelimit-remaining-tokens-minute, x-ratelimit-reset-requests-day
+ */
+export async function checkCerebrasStatus(): Promise<{
+  available: boolean
+  remainingRequestsDay?: number
+  limitRequestsDay?: number
+  remainingTokensMinute?: number
+  resetRequestsDay?: string
+} | null> {
+  try {
+    const keyPath = `${process.env.HOME}/.config/mk-agent/CEREBRAS_API_KEY`
+    const apiKey = (await Bun.file(keyPath).text()).trim()
+
+    if (!apiKey) return null
+
+    const response = await fetch('https://api.cerebras.ai/v1/models', {
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    })
+
+    if (!response.ok) {
+      return { available: false }
+    }
+
+    const remainingDay = response.headers.get('x-ratelimit-remaining-requests-day')
+    const limitDay = response.headers.get('x-ratelimit-limit-requests-day')
+    const remainingTokens = response.headers.get('x-ratelimit-remaining-tokens-minute')
+    const resetDay = response.headers.get('x-ratelimit-reset-requests-day')
+
+    return {
+      available: true,
+      remainingRequestsDay: remainingDay ? parseInt(remainingDay) : undefined,
+      limitRequestsDay: limitDay ? parseInt(limitDay) : undefined,
+      remainingTokensMinute: remainingTokens ? parseInt(remainingTokens) : undefined,
+      resetRequestsDay: resetDay ?? undefined,
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Check Mistral API availability.
+ * Mistral does not expose a billing API, but we can verify the key is valid
+ * and the service is reachable by hitting /v1/models.
+ */
+export async function checkMistralStatus(): Promise<{
+  available: boolean
+  modelCount?: number
+} | null> {
+  try {
+    const keyPath = `${process.env.HOME}/.config/mk-agent/MISTRAL_API_KEY`
+    const content = (await Bun.file(keyPath).text()).trim()
+    const match = content.match(/MISTRAL_API_KEY=(.+)/)
+    const apiKey = match ? match[1].trim() : content
+
+    if (!apiKey) return null
+
+    const response = await fetch('https://api.mistral.ai/v1/models', {
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    })
+
+    if (!response.ok) {
+      return { available: false }
+    }
+
+    const data = await response.json() as any
+    return {
+      available: true,
+      modelCount: data.data?.length,
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Aggregate provider status check.
+ * Runs all provider checks in parallel and returns a summary.
+ * Cached for 60 seconds to avoid hammering APIs on every /api/health call.
+ */
+interface ProviderStatus {
+  groq: Awaited<ReturnType<typeof checkGroqStatus>>
+  cerebras: Awaited<ReturnType<typeof checkCerebrasStatus>>
+  mistral: Awaited<ReturnType<typeof checkMistralStatus>>
+  fetchedAt: number
+}
+
+let providerStatusCache: ProviderStatus | null = null
+
+export async function checkAllProviderStatus(): Promise<Omit<ProviderStatus, 'fetchedAt'>> {
+  // Return cached if fresh (60 seconds)
+  if (providerStatusCache && Date.now() - providerStatusCache.fetchedAt < 60000) {
+    const { fetchedAt, ...rest } = providerStatusCache
+    return rest
+  }
+
+  const [groq, cerebras, mistral] = await Promise.all([
+    checkGroqStatus(),
+    checkCerebrasStatus(),
+    checkMistralStatus(),
+  ])
+
+  providerStatusCache = { groq, cerebras, mistral, fetchedAt: Date.now() }
+  return { groq, cerebras, mistral }
 }

@@ -1,6 +1,6 @@
 # Mycelium v2
 
-**Autonomous agent orchestration system** - coordinates multiple AI coding agents (Claude, Codex, Gemini, Cline, Cursor) to work on your codebase.
+**Autonomous agent orchestration system** - coordinates 10 AI coding agents across 12 providers to work on your codebase.
 
 ```
                     Discovery Agent
@@ -8,19 +8,20 @@
                     finds work in repos
                           |
                           v
-    +--------------------------------------------------+
-    |                  Task Queue                       |
-    |  [pending] -> [sequenced] -> [running] -> [done] |
-    +--------------------------------------------------+
+    +------------------------------------------+
+    |              Task Queue                   |
+    |  [pending] -----> [running] ----> [done]  |
+    |       \               |                   |
+    |     --depends-on     retry                |
+    +------------------------------------------+
                           |
               Dispatcher assigns to agents
                           |
-        +---------+-------+-------+---------+
-        |         |       |       |         |
-        v         v       v       v         v
-     Claude    Codex   Gemini   Cline   Cursor
-        |         |       |       |         |
-        +---------+-------+-------+---------+
+    +-----+-----+------+-----+------+-----+
+    |     |     |      |     |      |     |
+  Claude Codex Gemini Cline Cursor Kiro  ...
+    |     |     |      |     |      |     |
+    +-----+-----+------+-----+------+-----+
                           |
                           v
                    Shepherd Agent
@@ -29,7 +30,7 @@
 
 ## Features
 
-- **Multi-Agent Dispatch** - Route tasks to 11 agents (Claude, Codex, Gemini, Cline, Cursor, Kiro, Groq, Vibe, Pi, OpenCode, Copilot)
+- **Multi-Agent Dispatch** - Route tasks to 10 agents (Claude, Codex, Gemini, Cline, Cursor, Kiro, Vibe, Pi, OpenCode, Copilot) across 12 providers
 - **Automatic Discovery** - Agents scan repos for TODOs, lint errors, outdated deps, test failures
 - **Dependency Chains** - Wire tasks with `--depends-on` for sequential execution
 - **Parallel Execution** - Independent tasks run concurrently (configurable limit)
@@ -112,9 +113,10 @@ packages/
 | Dispatcher | 60s | Run tasks with resolved deps |
 | Discovery | 15min | Scan repos, create tasks with deps |
 | Shepherd | 15min | Evaluate completed tasks, merge/reject |
-| Digest | 4h | Smart status summaries (Haiku agent) |
+| Armory | 1h | Skill/MCP inventory (batch threshold) |
+| Digest | 6h | Smart status summaries (Haiku agent) |
 | Compaction | 4h | Semantic memory cleanup (Haiku agent) |
-| Health Check | 60s | Monitor device connectivity |
+| Health Check | 60s | Monitor device connectivity, provider status |
 | Blocked Check | 15min | Detect stuck/orphaned tasks |
 
 ### Task Flow
@@ -213,16 +215,17 @@ mycel repos health
 | Agent | Command | Billing | Best For |
 |-------|---------|---------|----------|
 | Claude | `claude` | Subscription | Architecture, complex debugging |
-| Codex | `codex` | Per-use | Code generation, mechanical refactors |
-| Gemini | `gemini` | Free tier + paid | Fast iteration, general tasks |
-| Cline | `cline` | OpenRouter/Cline | Strong reasoning, multi-file work |
+| Codex | `codex` | Subscription | Code generation, mechanical refactors |
+| Gemini | `gemini` | Subscription | Fast iteration, large context (1M) |
 | Cursor | `agent` | Subscription | Multi-file composition |
-| Kiro | `kiro-cli` | Subscription (AWS) | AWS integration, enterprise |
-| Groq | API | Free | Ultra-fast inference |
-| Vibe | `vibe` | Per-use (Mistral) | Mistral models |
-| Pi | `pi` | Per-use | Multi-provider flexibility |
-| OpenCode | `opencode` | Free | Free models (kimi, glm, gpt-5-nano) |
+| Kiro | `kiro-cli` | Subscription (AWS) | Spec-driven development |
 | Copilot | `copilot` | Subscription | GitHub integration |
+| OpenCode | `opencode` | Free | Free models (kimi, glm, gpt-5-nano) |
+| Cline | `cline` | OpenRouter/Cline | 100+ models, multi-file work |
+| Vibe | `vibe` | Per-use (Mistral) | Devstral models |
+| Pi | `pi` | Multi-provider | 7 providers (groq, cerebras, etc.) |
+
+**Note:** Groq and Cerebras are providers, not standalone agents. Access via `pi --provider groq`.
 
 ### Cline Provider Selection
 
@@ -242,8 +245,12 @@ When a task fails, Mycelium can retry with a more capable model:
 
 ```
 Claude:  haiku -> sonnet -> opus
-Gemini:  flash -> pro
+Codex:   gpt-5.2-codex-fast -> gpt-5.2-codex -> gpt-5.3-codex
+Gemini:  flash -> gemini-3-flash -> gemini-3-pro
 Cline:   glm-4.7-flash -> glm-4.7 -> deepseek-v3.2 -> qwen3-coder -> kimi-k2.5
+Cursor:  gemini-3-flash/gpt-5.2-codex/sonnet-4.5 -> composer-1 -> opus-4.6-thinking
+
+Cross-agent: codex->cursor, pi->opencode, opencode->gemini, vibe->cline
 ```
 
 Quota errors skip retry (account-wide limit, not model-specific).
@@ -305,14 +312,17 @@ See `nix/README.md` for full documentation.
 ## Development
 
 ```bash
-# Run all (backend + frontend)
-bun run dev
+# Dev management script (recommended)
+bun run dev:manage start       # Start backend + frontend
+bun run dev:manage stop        # Stop all services
+bun run dev:manage status      # Show status + health
+bun run dev:manage logs        # Tail logs
+bun run dev:manage check       # Task stats + scheduler
+bun run dev:manage scheduler start  # Start scheduler via API
 
-# Backend only (port 8765)
-bun run dev:server
-
-# Frontend only (port 5765)
-bun run dev:client
+# Manual
+bun run dev                    # Backend only (port 8765)
+bun run dev:client             # Frontend only (port 5765)
 
 # Build
 bun run build

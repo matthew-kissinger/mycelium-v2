@@ -11,7 +11,7 @@
 |-----------|--------|
 | Backend API | Hono + Bun, 70+ endpoints |
 | Scheduler | 8 cycles (dispatcher, discovery, shepherd, etc.) |
-| Agent Dispatch | Claude, Codex, Gemini, Cline, Cursor, Kiro, Groq, Vibe, Pi, OpenCode, Copilot |
+| Agent Dispatch | 10 agents (Claude, Codex, Gemini, Cline, Cursor, Kiro, Vibe, Pi, OpenCode, Copilot) across 12 providers |
 | Frontend | Three-column layout (sidebar, React Flow canvas, detail panel) |
 | Cost Tracking | Per-use (Cline/OpenRouter) vs subscription billing |
 
@@ -19,25 +19,30 @@
 
 ## Running
 
-### NixOS (Primary)
+### Dev Management Script (Recommended)
 
 ```bash
-# Systemd service
-systemctl --user start mycelium
-systemctl --user status mycelium
-journalctl --user -u mycelium -f
-
-# Development
 cd ~/repos/mycelium-v2
-bun run dev              # Backend :8765
-bun run dev:client       # Frontend :5765
+bun run dev:manage start       # Start backend + frontend
+bun run dev:manage stop        # Stop all services
+bun run dev:manage status      # Status + health
+bun run dev:manage logs        # Tail logs
+bun run dev:manage check       # Task stats + scheduler
 ```
 
 ### Manual
 
 ```bash
-bun install && bun run build
-bun run dev
+bun run dev              # Backend :8765
+bun run dev:client       # Frontend :5765
+```
+
+### NixOS Service
+
+```bash
+systemctl --user start mycelium
+systemctl --user status mycelium
+journalctl --user -u mycelium -f
 ```
 
 ---
@@ -111,10 +116,11 @@ Full API list in README.md.
 | Dispatcher | 60s | Run tasks with resolved deps |
 | Discovery | 15min | Scan repos, create tasks with deps |
 | Shepherd | 15min | Evaluate tasks per repo (5+ threshold) |
-| Digest | 4h | Smart status summaries (Haiku agent) |
+| Armory | 1h | Skill/MCP inventory (batch threshold) |
+| Digest | 6h | Smart status summaries (Haiku agent) |
 | Compaction | 4h | Semantic memory cleanup (Haiku agent) |
-| Blocked Check | 15min | Detect stuck tasks |
-| Health Check | 60s | Device monitoring |
+| Blocked Check | 15min | Detect stuck tasks, orphan cleanup |
+| Health Check | 60s | Provider status monitoring |
 
 ### Task Flow
 
@@ -160,10 +166,17 @@ prompt_overrides (prompt_id, content, updated_at)
 
 ### Context Injection
 
-- `buildMycelContext()` - CLI instructions
-- `buildAgentsSection()` - Available agents/models
+- `buildMycelContext()` - CLI instructions, agent identity
+- `buildAgentsSectionWithCredits()` - Agent matrix with live credits/quota (async)
 - `buildSkillsSection()` - Skills from ~/.claude/skills/
 - `buildMcpSection(agent)` - MCP servers for specific agent
+
+### Fallback & Health
+
+- Fallback chains: auto-retry with more capable model on failure (up to 2 retries)
+- Cross-agent fallback: codex->cursor, pi->opencode, opencode->gemini, vibe->cline
+- Quota tracking: Gemini, Groq, Cerebras, Codex (auto-backoff until reset)
+- OpenRouter credit monitoring: live balance via `/api/health`
 
 ---
 

@@ -41,7 +41,7 @@ export const DEFAULT_AGENT_CONFIGS: Record<string, AgentConfig> = {
     timeout_seconds: 1800,
     max_turns: 30,
     supports_streaming: true,
-    billing_type: 'subscription',
+    billing_type: 'subscription',  // Google AI Pro subscription
   },
   cline: {
     type: 'cline',
@@ -87,7 +87,7 @@ export const DEFAULT_AGENT_CONFIGS: Record<string, AgentConfig> = {
   opencode: {
     type: 'opencode',
     command: 'opencode',
-    timeout_seconds: 1800,
+    timeout_seconds: 3600, // 1hr - free rate-limited models need more time
     max_turns: 30,
     supports_streaming: false,
     billing_type: 'free',  // OpenCode Zen free models

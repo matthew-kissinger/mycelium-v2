@@ -213,6 +213,18 @@ export interface AgentCreditsInfo {
     quotaStatus: 'available' | 'exceeded'
     quotaResetAt?: string
   }
+  groq?: {
+    available: boolean
+    remainingRequests?: number
+  }
+  cerebras?: {
+    available: boolean
+    remainingRequestsDay?: number
+    limitRequestsDay?: number
+  }
+  mistral?: {
+    available: boolean
+  }
 }
 
 // Cache for credits info (refreshed every 5 min)
@@ -263,6 +275,29 @@ export async function getAgentCreditsInfo(): Promise<AgentCreditsInfo> {
         quotaResetAt: h.quotaResetAt,
       }
     }
+
+    // Provider status (groq, cerebras, mistral)
+    const { checkAllProviderStatus } = await import('../agents/health')
+    const providers = await checkAllProviderStatus()
+
+    if (providers.groq) {
+      info.groq = {
+        available: providers.groq.available,
+        remainingRequests: providers.groq.remainingRequests,
+      }
+    }
+    if (providers.cerebras) {
+      info.cerebras = {
+        available: providers.cerebras.available,
+        remainingRequestsDay: providers.cerebras.remainingRequestsDay,
+        limitRequestsDay: providers.cerebras.limitRequestsDay,
+      }
+    }
+    if (providers.mistral) {
+      info.mistral = {
+        available: providers.mistral.available,
+      }
+    }
   } catch {
     // Ignore errors, return partial info
   }
@@ -272,10 +307,17 @@ export async function getAgentCreditsInfo(): Promise<AgentCreditsInfo> {
 }
 
 /**
+ * Task distribution by agent for injection into AGENTS_SECTION.
+ */
+export interface TaskDistribution {
+  [agent: string]: { total: number; done: number; failed: number; pending: number; running: number }
+}
+
+/**
  * Build the AGENTS_SECTION for prompts.
  * Compact matrix of all valid agent/provider/model combinations.
  */
-export function buildAgentsSection(creditsInfo?: AgentCreditsInfo): string {
+export function buildAgentsSection(creditsInfo?: AgentCreditsInfo, taskDistribution?: TaskDistribution): string {
   const lines: string[] = [
     '## Agent-Provider-Model Matrix',
     '',
@@ -283,13 +325,28 @@ export function buildAgentsSection(creditsInfo?: AgentCreditsInfo): string {
 
   // Credits summary
   if (creditsInfo) {
-    lines.push('### Credits Status')
+    lines.push('### Credits & Provider Status')
     const parts: string[] = []
     if (creditsInfo.openrouter) {
       parts.push(`OpenRouter: $${creditsInfo.openrouter.remaining.toFixed(2)}/$${creditsInfo.openrouter.limit}`)
     }
     if (creditsInfo.gemini?.quotaStatus === 'exceeded') {
       parts.push(`Gemini: QUOTA EXCEEDED`)
+    }
+    if (creditsInfo.groq) {
+      const status = creditsInfo.groq.available ? 'OK' : 'UNAVAILABLE'
+      const reqs = creditsInfo.groq.remainingRequests != null ? ` (${creditsInfo.groq.remainingRequests} reqs left)` : ''
+      parts.push(`Groq: ${status}${reqs}`)
+    }
+    if (creditsInfo.cerebras) {
+      const status = creditsInfo.cerebras.available ? 'OK' : 'UNAVAILABLE'
+      const reqs = creditsInfo.cerebras.remainingRequestsDay != null && creditsInfo.cerebras.limitRequestsDay != null
+        ? ` (${creditsInfo.cerebras.remainingRequestsDay}/${creditsInfo.cerebras.limitRequestsDay} day)`
+        : ''
+      parts.push(`Cerebras: ${status}${reqs}`)
+    }
+    if (creditsInfo.mistral) {
+      parts.push(`Mistral: ${creditsInfo.mistral.available ? 'OK' : 'UNAVAILABLE'}`)
     }
     parts.push('Subscription agents: Unlimited')
     lines.push(parts.join(' | '))
@@ -344,16 +401,16 @@ export function buildAgentsSection(creditsInfo?: AgentCreditsInfo): string {
   lines.push('| Task Type | Agent | Provider | Model | Why |')
   lines.push('|-----------|-------|----------|-------|-----|')
   lines.push('| Simple fix | pi | groq | kimi-k2-instruct | Free, ultra-fast |')
-  lines.push('| Simple fix | pi | cerebras | llama-3.3-70b | Free, ultra-fast |')
+  lines.push('| Simple fix | pi | cerebras | gpt-oss-120b | Free, ultra-fast |')
   lines.push('| Simple fix | opencode | - | kimi-k2.5-free | Free, capable |')
   lines.push('| Docs/comments | claude | - | haiku | Sub, fast |')
   lines.push('| Feature | claude | - | sonnet | Sub, balanced |')
-  lines.push('| Feature | cursor | - | composer-1 | Sub, multi-file |')
-  lines.push('| Refactor | codex | - | gpt-5.2-codex | Sub, code-focused |')
+  lines.push('| Feature | cursor | - | opus-4.6-thinking | Sub, default, thinking |')
+  lines.push('| Refactor | codex | - | gpt-5.3-codex | Sub, latest codex |')
   lines.push('| Complex | claude | - | opus | Sub, best reasoning |')
-  lines.push('| Complex | cursor | - | opus-4.5-thinking | Sub, extended thinking |')
+  lines.push('| Complex | cursor | - | opus-4.6-thinking | Sub, extended thinking |')
   lines.push('| Bulk/mechanical | cline | openrouter | deepseek-v3.2 | Cheap $0.25/$0.38 |')
-  lines.push('| Research | copilot | - | default | GitHub MCP built-in |')
+  lines.push('| Research | copilot | - | claude-opus-4.6 | GitHub MCP built-in |')
   if (creditsInfo?.gemini?.quotaStatus !== 'exceeded') {
     lines.push('| Exploration | gemini | - | flash | Free quota |')
   }
@@ -365,35 +422,66 @@ export function buildAgentsSection(creditsInfo?: AgentCreditsInfo): string {
   lines.push('```bash')
   lines.push('# Single-provider agents (NO --provider)')
   lines.push('mycel task create "title" --agent claude --model sonnet --repo /path')
-  lines.push('mycel task create "title" --agent cursor --model composer-1 --repo /path')
+  lines.push('mycel task create "title" --agent cursor --model opus-4.6-thinking --repo /path')
   lines.push('mycel task create "title" --agent opencode --model opencode/kimi-k2.5-free --repo /path')
   lines.push('mycel task create "title" --agent gemini --model flash --repo /path')
   lines.push('')
   lines.push('# Multi-provider agents (MUST include --provider)')
   lines.push('mycel task create "title" --agent cline --provider openrouter --model kimi-k2.5 --repo /path')
   lines.push('mycel task create "title" --agent pi --provider groq --model kimi-k2-instruct --repo /path')
-  lines.push('mycel task create "title" --agent pi --provider cerebras --model llama-3.3-70b --repo /path')
+  lines.push('mycel task create "title" --agent pi --provider cerebras --model gpt-oss-120b --repo /path')
   lines.push('```')
   lines.push('')
 
   // Pi provider quick ref
   lines.push('### Pi Provider Reference')
   lines.push('`pi` is a multi-provider agent. You MUST specify --provider:')
-  lines.push('- **groq**: Free, ultra-fast (kimi-k2-instruct, llama-3.3-70b)')
-  lines.push('- **cerebras**: Free, ultra-fast (llama-3.3-70b, qwen-3-235b)')
+  lines.push('- **groq**: Free, ultra-fast (kimi-k2-instruct, llama-3.3-70b-versatile)')
+  lines.push('- **cerebras**: Free, ultra-fast (gpt-oss-120b, qwen-3-235b, glm-4.7)')
   lines.push('- **openrouter**: 100+ models, some free (deepseek-v3.2, qwen3-coder)')
-  lines.push('- **mistral/google/anthropic/openai**: Direct API access')
+  lines.push('- **mistral**: Per-use (devstral-latest, mistral-large-latest)')
+  lines.push('- **google**: Free quota (gemini-3-flash, gemini-3-pro)')
+  lines.push('- **anthropic/openai**: Per-use direct API')
+  lines.push('')
+
+  // Usage distribution stats
+  if (taskDistribution) {
+    const totalTasks = Object.values(taskDistribution).reduce((s, d) => s + d.total, 0)
+    if (totalTasks > 0) {
+      lines.push('### Current Usage Distribution (REBALANCE NEEDED)')
+      lines.push('')
+      lines.push('| Agent | Tasks | % | Done | Failed | Success Rate |')
+      lines.push('|-------|-------|---|------|--------|--------------|')
+
+      // Sort by total descending
+      const sorted = Object.entries(taskDistribution).sort(([, a], [, b]) => b.total - a.total)
+      for (const [agent, d] of sorted) {
+        const pct = ((d.total / totalTasks) * 100).toFixed(0)
+        const successRate = d.done + d.failed > 0
+          ? ((d.done / (d.done + d.failed)) * 100).toFixed(0) + '%'
+          : 'N/A'
+        lines.push(`| ${agent} | ${d.total} | ${pct}% | ${d.done} | ${d.failed} | ${successRate} |`)
+      }
+      lines.push('')
+      lines.push('**Target:** Free 60%+ | Subscription 30% | Per-use 10%')
+      lines.push('**Action:** Assign new tasks to underused agents to rebalance.')
+      lines.push('')
+    }
+  }
 
   return lines.join('\n')
 }
 
 /**
- * Build agents section with live credits info.
+ * Build agents section with live credits info and usage distribution.
  * Use this for Discovery and other system agents that benefit from cost awareness.
  */
 export async function buildAgentsSectionWithCredits(): Promise<string> {
-  const creditsInfo = await getAgentCreditsInfo()
-  return buildAgentsSection(creditsInfo)
+  const [creditsInfo, taskDistribution] = await Promise.all([
+    getAgentCreditsInfo(),
+    import('../db/queries').then(q => q.getTaskDistributionByAgent()).catch(() => undefined),
+  ])
+  return buildAgentsSection(creditsInfo, taskDistribution)
 }
 
 // =============================================================================

@@ -28,7 +28,8 @@ describe('getFallbackModel', () => {
   test('codex escalation chain', () => {
     expect(getFallbackModel('codex', 'gpt-5.2-codex-fast')).toBe('gpt-5.2-codex')
     expect(getFallbackModel('codex', 'gpt-5.2-codex')).toBe('gpt-5.2-codex-high')
-    expect(getFallbackModel('codex', 'gpt-5.2-codex-high')).toBeNull()
+    expect(getFallbackModel('codex', 'gpt-5.2-codex-high')).toBe('gpt-5.3-codex')
+    expect(getFallbackModel('codex', 'gpt-5.3-codex')).toBeNull()
   })
 
   test('unknown agent returns null', () => {
@@ -72,17 +73,26 @@ describe('shouldRetry', () => {
 
   test('max retries exhausted is not retryable', () => {
     const ctx: RetryContext = {
-      max_retries: 1,
-      attempt: 1,
+      max_retries: 2,
+      attempt: 2,
       original_agent: 'claude',
       original_model: 'sonnet',
-      history: [{
-        agent: 'claude',
-        model: 'sonnet',
-        error: 'some error',
-        duration_seconds: 10,
-        completed_at: new Date().toISOString(),
-      }],
+      history: [
+        {
+          agent: 'claude',
+          model: 'sonnet',
+          error: 'first error',
+          duration_seconds: 10,
+          completed_at: new Date().toISOString(),
+        },
+        {
+          agent: 'claude',
+          model: 'opus',
+          error: 'second error',
+          duration_seconds: 15,
+          completed_at: new Date().toISOString(),
+        },
+      ],
     }
     const result = shouldRetry('claude', 'opus', JSON.stringify(ctx))
     expect(result.retry).toBe(false)
@@ -113,7 +123,7 @@ describe('buildRetryContext', () => {
     const ctx = JSON.parse(result) as RetryContext
 
     expect(ctx.attempt).toBe(1)
-    expect(ctx.max_retries).toBe(1)
+    expect(ctx.max_retries).toBe(2)
     expect(ctx.original_agent).toBe('claude')
     expect(ctx.original_model).toBe('sonnet')
     expect(ctx.history).toHaveLength(1)

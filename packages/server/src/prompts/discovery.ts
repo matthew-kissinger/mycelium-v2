@@ -83,6 +83,24 @@ SKIPPED: minor style issues not worth fixing
 Reply: all, 1 2 3, none, or custom"
 \`\`\`
 
+## MANDATORY Agent Routing
+
+**You MUST follow these distribution targets when suggesting agents for tasks:**
+
+| Tier | Target % | Agents | When to Use |
+|------|----------|--------|-------------|
+| Tier 1 (Subscription) | 60%+ | claude, codex, cursor, gemini, kiro, copilot | Primary workhorses - we pay for these, USE THEM. Features, bugs, refactors, architecture, any real work. |
+| Tier 2 (Free) | 25% | opencode, pi/groq, pi/cerebras, cline with :free models | Supplement subscriptions for simple/mechanical tasks. Slower and rate-limited. |
+| Tier 3 (Per-use paid) | 15% | cline (paid models), vibe, pi/openrouter (paid) | Fill gaps where sub/free agents lack capability or capacity. |
+
+**Rules:**
+- Subscriptions are already paid for - maximize their use across claude, codex, cursor, gemini, kiro, copilot
+- Spread subscription tasks across ALL 6 sub agents, not just claude
+- Use free agents only for simple/mechanical work (typo fixes, doc updates, basic exploration) - they are slower and rate-limited
+- Use per-use agents when specific models/capabilities are needed
+- Spread tasks across agents - do NOT give >40% of tasks to any single agent
+- Check the usage distribution stats below - actively rebalance toward underused agents
+
 {AGENTS_SECTION}
 
 ## Guidelines
@@ -234,6 +252,25 @@ A good task prompt includes:
 - Implementation: Specific steps to complete the task
 - Validation: How to verify the work
 - Completion: "When complete: test, commit with descriptive message, provide summary"
+
+## MANDATORY Agent Routing
+
+**You MUST follow these distribution targets when assigning agents to tasks:**
+
+| Tier | Target % | Agents | When to Use |
+|------|----------|--------|-------------|
+| Tier 1 (Subscription) | 60%+ | claude, codex, cursor, gemini, kiro, copilot | Primary workhorses - we pay for these, USE THEM. Features, bugs, refactors, architecture, any real work. |
+| Tier 2 (Free) | 25% | opencode, pi/groq, pi/cerebras, cline with :free models | Supplement subscriptions for simple/mechanical tasks. Slower and rate-limited. |
+| Tier 3 (Per-use paid) | 15% | cline (paid models), vibe, pi/openrouter (paid) | Fill gaps where sub/free agents lack capability or capacity. |
+
+**Rules:**
+- Subscriptions are already paid for - maximize their use across claude, codex, cursor, gemini, kiro, copilot
+- Spread subscription tasks across ALL 6 sub agents, not just claude
+- Use free agents only for simple/mechanical work (typo fixes, doc updates, basic exploration) - they are slower and rate-limited
+- Use per-use agents when specific models/capabilities are needed
+- Spread tasks across agents - do NOT give >40% of tasks to any single agent
+- Check the usage distribution stats below - actively rebalance toward underused agents
+- If creating 3+ tasks, use at least 2 different subscription agents
 
 {AGENTS_SECTION}
 
