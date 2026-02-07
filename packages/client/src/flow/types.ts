@@ -18,6 +18,8 @@ export interface BaseNodeData extends Record<string, unknown> {
 export interface SchedulerNodeData extends BaseNodeData {
   running: boolean
   started_at?: string
+  total_cycles_completed?: number
+  total_errors?: number
   config?: {
     dispatcher_interval_sec: number
     discovery_interval_sec: number

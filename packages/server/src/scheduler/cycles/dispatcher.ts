@@ -20,13 +20,43 @@ import {
   buildAgentsSectionWithCredits,
   buildSkillsSection,
   buildMcpSection,
+  buildMemorySection,
+  selectTaskSkills,
+  detectAllSkillsForRepo,
 } from '../../prompts/context'
 import { getTelegramService } from '../../telegram'
 import { formatTaskCompleted, formatTaskFailed, formatTaskRetrying, type TaskInfo, type TaskRetryInfo } from '../../telegram/messages'
+import { bufferTaskEvent } from '../../telegram/buffer'
 import { shouldRetry, buildRetryContext, parseRetryContext, resolveModel } from '../../agents/fallback'
+import { prepareWorkspace, cleanupWorkspace, captureWorktreeDiff, pushBranchToGithub } from '../../agents/workspace'
+import { parseAgentOutput, parseClaudeSessionId } from '../../agents/output-parser'
 
-// Track currently running tasks (task_id -> {start time, agent})
-const runningTasks = new Map<string, { startTime: number; agent: string }>()
+// Track currently running tasks (task_id -> {start time, agent, repo})
+const runningTasks = new Map<string, { startTime: number; agent: string; repoPath: string }>()
+
+// Maximum concurrent tasks per repo (prevents worktree conflicts)
+const MAX_PER_REPO = 3
+
+// Atomic repo slot counter - prevents race between filter and runTask
+const repoSlots = new Map<string, number>()
+
+/** Acquire a repo concurrency slot. Returns false if at limit. */
+function acquireRepoSlot(repoPath: string): boolean {
+  const current = (repoSlots.get(repoPath) ?? 0) + getRunningTasksForRepo(repoPath)
+  if (current >= MAX_PER_REPO) return false
+  repoSlots.set(repoPath, (repoSlots.get(repoPath) ?? 0) + 1)
+  return true
+}
+
+/** Release a repo concurrency slot. */
+function releaseRepoSlot(repoPath: string): void {
+  const current = repoSlots.get(repoPath) ?? 0
+  if (current <= 1) {
+    repoSlots.delete(repoPath)
+  } else {
+    repoSlots.set(repoPath, current - 1)
+  }
+}
 
 /**
  * Subscription agents to use as defaults for unassigned tasks.
@@ -215,6 +245,25 @@ async function runTask(task: Awaited<ReturnType<typeof queries.getTask>>): Promi
 
   // Build context-enriched prompt
   const basePrompt = task.prompt ?? task.title
+
+  // Fetch dependency results for tasks with depends_on
+  let dependencySection = ''
+  const depIds = JSON.parse(task.depends_on ?? '[]') as string[]
+  if (depIds.length > 0) {
+    const depSummaries: string[] = []
+    for (const depId of depIds) {
+      const depTask = await queries.getTask(depId)
+      if (depTask && depTask.status === 'done') {
+        const result = depTask.result ?? '(no result recorded)'
+        const truncated = result.length > 500 ? result.slice(0, 500) + '...' : result
+        depSummaries.push(`### Task #${depId.slice(0, 8)}: ${depTask.title} (by ${depTask.agent ?? 'unknown'})\n${truncated}`)
+      }
+    }
+    if (depSummaries.length > 0) {
+      dependencySection = `\n\n## Completed Dependencies\n${depSummaries.join('\n\n')}\n`
+    }
+  }
+
   const mycelContext = buildMycelContext({
     role: 'task_agent',
     agentId: agent,
@@ -224,8 +273,25 @@ async function runTask(task: Awaited<ReturnType<typeof queries.getTask>>): Promi
   })
   // Use async version to include live credits/quota info
   const agentsSection = await buildAgentsSectionWithCredits()
-  const skillsSection = buildSkillsSection([], repoPath)
+
+  // Merge skills: explicit (from task) + keyword-matched + auto-detected
+  const explicitSkills: string[] = JSON.parse((task as any).skills ?? '[]')
+  const repoSkills = detectAllSkillsForRepo(repoPath)
+  const keywordSkills = selectTaskSkills(repoSkills, task.title, task.prompt ?? undefined)
+  // Dedup: explicit first, then keyword, fill remaining up to 5
+  const mergedSkills = [...new Set([...explicitSkills, ...keywordSkills])]
+  // Fill from repoSkills if under limit
+  if (mergedSkills.length < 5) {
+    for (const skill of repoSkills) {
+      if (mergedSkills.length >= 5) break
+      if (!mergedSkills.includes(skill)) mergedSkills.push(skill)
+    }
+  }
+  const finalSkills = mergedSkills.slice(0, 5)
+
+  const skillsSection = buildSkillsSection(finalSkills, repoPath)
   const mcpSection = buildMcpSection(agent)
+  const memorySection = await buildMemorySection(repoPath)
 
   // Inject previous error context if this is a retry
   const retryCtx = parseRetryContext(task.retry_context)
@@ -236,7 +302,7 @@ async function runTask(task: Awaited<ReturnType<typeof queries.getTask>>): Promi
   }
 
   // Compose full prompt with all context injections
-  const prompt = `${basePrompt}${retrySection}
+  const prompt = `${basePrompt}${dependencySection}${retrySection}
 
 ---
 
@@ -244,12 +310,13 @@ ${mycelContext}
 
 ${agentsSection}
 ${skillsSection ? `\n${skillsSection}` : ''}
-${mcpSection ? `\n${mcpSection}` : ''}`
+${mcpSection ? `\n${mcpSection}` : ''}
+${memorySection ? `\n${memorySection}` : ''}`
 
   console.log(`[Dispatcher] Running task ${taskId.slice(0, 8)}: ${task.title}`)
 
   // Track running task
-  runningTasks.set(taskId, { startTime: Date.now(), agent })
+  runningTasks.set(taskId, { startTime: Date.now(), agent, repoPath })
 
   // Update task status to running
   const startTime = new Date().toISOString()
@@ -270,15 +337,50 @@ ${mcpSection ? `\n${mcpSection}` : ''}`
   // Start logging for this task
   startTaskLog(taskId)
 
+  // Prepare isolated worktree workspace
+  let worktreePath: string | null = null
+  let branchName: string | null = null
+  try {
+    const workspace = await prepareWorkspace(taskId, repoPath)
+    worktreePath = workspace.worktreePath
+    branchName = workspace.branchName
+    console.log(`[Dispatcher] Task ${taskId.slice(0, 8)} using worktree: ${worktreePath}`)
+
+    // Store worktree info immediately
+    await queries.updateTask(taskId, {
+      worktree_path: worktreePath,
+      branch_name: branchName,
+    })
+  } catch (error) {
+    console.error(`[Dispatcher] Failed to create worktree for task ${taskId.slice(0, 8)}, using repo directly:`, error)
+    // Fall back to running in the original repo if worktree creation fails
+  }
+
+  // Use worktree path if available, otherwise fall back to repo path
+  const workingDir = worktreePath ?? repoPath
+
+  // Check for Claude session ID from a previous attempt (for --resume on retry)
+  let resumeSessionId: string | undefined
+  if (agent === 'claude' && task.retry_context) {
+    try {
+      const specCtx = task.spec_context ? JSON.parse(task.spec_context) : {}
+      if (specCtx.session_id) {
+        resumeSessionId = specCtx.session_id
+        console.log(`[Dispatcher] Task ${taskId.slice(0, 8)} resuming Claude session ${resumeSessionId}`)
+      }
+    } catch { /* ignore parse errors */ }
+  }
+
   try {
     // Dispatch to agent
     const result = await dispatch({
       agent,
       prompt,
-      cwd: repoPath,
+      cwd: workingDir,
       model,
       provider,
       taskId,
+      sessionId: resumeSessionId,
       timeout: task.timeout_seconds ?? undefined,
       onStart: (pid) => {
         // Store PID in spec_context for orphan detection after server restart
@@ -302,13 +404,30 @@ ${mcpSection ? `\n${mcpSection}` : ''}`
 
     const completedTime = new Date().toISOString()
 
+    // Extract Claude session ID for potential resume on retry
+    if (agent === 'claude') {
+      const sessionId = parseClaudeSessionId(result.output)
+      if (sessionId) {
+        const existing = task.spec_context ? JSON.parse(task.spec_context) : {}
+        await queries.updateTask(taskId, {
+          spec_context: JSON.stringify({ ...existing, session_id: sessionId }),
+        })
+      }
+    }
+
     if (result.success) {
-      // Task completed successfully
+      // Parse structured output markers from agent output
+      const parsed = parseAgentOutput(result.output)
+
+      // Task completed successfully - keep worktree for shepherd evaluation
       await queries.updateTask(taskId, {
         status: 'done',
         result: result.output,
+        parsed_result: parsed ?? undefined,
         cost_usd: result.cost_usd,
         duration_seconds: result.duration_seconds,
+        input_tokens: result.input_tokens,
+        output_tokens: result.output_tokens,
         completed_at: completedTime,
       })
 
@@ -322,29 +441,66 @@ ${mcpSection ? `\n${mcpSection}` : ''}`
 
       console.log(`[Dispatcher] Task ${taskId.slice(0, 8)} completed successfully`)
 
+      // Push branch to GitHub (non-blocking, best-effort)
+      if (branchName && worktreePath) {
+        pushBranchToGithub(repoPath, branchName).then((pushResult) => {
+          if (pushResult.pushed) {
+            broadcast('github:push', {
+              type: 'github:push' as const,
+              repo_path: repoPath,
+              branch: branchName!,
+              task_id: taskId,
+              timestamp: new Date().toISOString(),
+            })
+          }
+        }).catch((e) => console.error(`[Dispatcher] GitHub push error for task ${taskId.slice(0, 8)}:`, e))
+      }
+
       // Record success in health tracking
       recordSuccess(agent, model)
 
-      // Auto-notify via Telegram
+      // Auto-notify via Telegram (individual + buffer for batching)
       notifyTaskComplete({
         id: taskId, title: task.title, status: 'done', repo_path: repoPath,
         agent, model, cost_usd: result.cost_usd, duration_seconds: result.duration_seconds,
         created_at: task.created_at, completed_at: completedTime,
       })
+      bufferTaskEvent(repoPath, {
+        title: task.title, agent, status: 'done',
+        duration_seconds: result.duration_seconds, cost_usd: result.cost_usd,
+      })
 
-      // Record fruiting session with full log buffer
+      // Build context trace layers (shared between success/failure)
+      const contextTrace = {
+        layers: [
+          { name: 'basePrompt', size: basePrompt.length },
+          ...(dependencySection ? [{ name: 'dependencySection', size: dependencySection.length, dep_ids: depIds }] : []),
+          { name: 'mycelContext', size: mycelContext.length },
+          { name: 'agentsSection', size: agentsSection.length },
+          { name: 'skillsSection', size: skillsSection.length },
+          { name: 'mcpSection', size: mcpSection.length },
+          ...(memorySection ? [{ name: 'memorySection', size: memorySection.length }] : []),
+        ],
+        total_size: prompt.length,
+      }
+
+      // Capture worktree diff for the fruiting session
+      let worktreeDiff: { stat: string; diff: string; commits: number } | null = null
+      if (worktreePath) {
+        worktreeDiff = await captureWorktreeDiff(worktreePath)
+      }
+
+      // Record fruiting session with full log buffer and worktree diff
       const logEntries = getTaskLogEntries(taskId)
       queries.createFruitingSession({
         task_id: taskId, repo_path: repoPath, agent, model,
         context_trace: {
-          layers: [
-            { name: 'basePrompt', size: basePrompt.length },
-            { name: 'mycelContext', size: mycelContext.length },
-            { name: 'agentsSection', size: agentsSection.length },
-            { name: 'skillsSection', size: skillsSection.length },
-            { name: 'mcpSection', size: mcpSection.length },
-          ],
-          total_size: prompt.length,
+          ...contextTrace,
+          ...(worktreeDiff ? {
+            worktree_diff: worktreeDiff.stat,
+            worktree_diff_full: worktreeDiff.diff,
+            commit_count: worktreeDiff.commits,
+          } : {}),
         },
         full_prompt: prompt,
         session_log: logEntries ?? undefined,
@@ -357,19 +513,22 @@ ${mcpSection ? `\n${mcpSection}` : ''}`
       )
 
       // Record fruiting session with full log buffer (even on failure/retry)
+      const contextTrace = {
+        layers: [
+          { name: 'basePrompt', size: basePrompt.length },
+          ...(dependencySection ? [{ name: 'dependencySection', size: dependencySection.length, dep_ids: depIds }] : []),
+          { name: 'mycelContext', size: mycelContext.length },
+          { name: 'agentsSection', size: agentsSection.length },
+          { name: 'skillsSection', size: skillsSection.length },
+          { name: 'mcpSection', size: mcpSection.length },
+          ...(memorySection ? [{ name: 'memorySection', size: memorySection.length }] : []),
+        ],
+        total_size: prompt.length,
+      }
       const logEntries = getTaskLogEntries(taskId)
       queries.createFruitingSession({
         task_id: taskId, repo_path: repoPath, agent, model,
-        context_trace: {
-          layers: [
-            { name: 'basePrompt', size: basePrompt.length },
-            { name: 'mycelContext', size: mycelContext.length },
-            { name: 'agentsSection', size: agentsSection.length },
-            { name: 'skillsSection', size: skillsSection.length },
-            { name: 'mcpSection', size: mcpSection.length },
-          ],
-          total_size: prompt.length,
-        },
+        context_trace: contextTrace,
         full_prompt: prompt,
         session_log: logEntries ?? undefined,
       }).catch((e) => console.error('[Dispatcher] Failed to record fruiting session:', e))
@@ -400,9 +559,25 @@ ${mcpSection ? `\n${mcpSection}` : ''}`
           agent, model, error: cleanError, duration_seconds: result.duration_seconds,
           created_at: task.created_at, completed_at: completedTime,
         })
+        bufferTaskEvent(repoPath, {
+          title: task.title, agent, status: 'failed',
+          duration_seconds: result.duration_seconds,
+        })
 
         // Cancel tasks that depended on this one
         await cancelDependents(taskId, task.title)
+
+        // Cleanup worktree on final failure (no point keeping failed work)
+        if (worktreePath) {
+          cleanupWorkspace(taskId, repoPath).catch((e) =>
+            console.error(`[Dispatcher] Worktree cleanup error for task ${taskId.slice(0, 8)}:`, e)
+          )
+        }
+      } else if (worktreePath) {
+        // Task is being retried - cleanup worktree so retry gets a fresh one
+        cleanupWorkspace(taskId, repoPath).catch((e) =>
+          console.error(`[Dispatcher] Worktree cleanup error for retry ${taskId.slice(0, 8)}:`, e)
+        )
       }
     }
   } catch (error) {
@@ -442,6 +617,21 @@ ${mcpSection ? `\n${mcpSection}` : ''}`
         agent, model, error: errorMsg,
         created_at: task.created_at, completed_at: completedTime,
       })
+      bufferTaskEvent(repoPath, {
+        title: task.title, agent, status: 'failed',
+      })
+
+      // Cleanup worktree on final failure
+      if (worktreePath) {
+        cleanupWorkspace(taskId, repoPath).catch((e) =>
+          console.error(`[Dispatcher] Worktree cleanup error for task ${taskId.slice(0, 8)}:`, e)
+        )
+      }
+    } else if (worktreePath) {
+      // Retry - cleanup worktree so retry gets a fresh one
+      cleanupWorkspace(taskId, repoPath).catch((e) =>
+        console.error(`[Dispatcher] Worktree cleanup error for retry ${taskId.slice(0, 8)}:`, e)
+      )
     }
   } finally {
     // Remove from running tasks
@@ -456,6 +646,17 @@ ${mcpSection ? `\n${mcpSection}` : ''}`
  */
 export function getRunningTaskCount(): number {
   return runningTasks.size
+}
+
+/**
+ * Get count of currently running tasks for a specific repo.
+ */
+export function getRunningTasksForRepo(repoPath: string): number {
+  let count = 0
+  for (const info of runningTasks.values()) {
+    if (info.repoPath === repoPath) count++
+  }
+  return count
 }
 
 /**
@@ -481,6 +682,13 @@ export async function runDispatcherCycle(config: SchedulerConfig): Promise<void>
     const availability = isAgentAvailable(agent, model)
     if (!availability.available) {
       console.log(`[Dispatcher] Skipping task ${task.id.slice(0, 8)} - ${agent}/${model ?? 'default'} unavailable: ${availability.reason}`)
+      broadcast('task:skipped', {
+        type: 'task:skipped',
+        task_id: task.id,
+        agent,
+        reason: availability.reason ?? 'Agent unavailable',
+        timestamp: new Date().toISOString(),
+      })
       return false
     }
     return true
@@ -501,17 +709,31 @@ export async function runDispatcherCycle(config: SchedulerConfig): Promise<void>
     return
   }
 
-  // Take as many tasks as we have slots for
-  const tasksToRun = availableTasks.slice(0, availableSlots)
+  // Atomically claim repo slots and dispatch tasks
+  // This prevents the race where multiple tasks for the same repo
+  // pass the filter before any of them start running
+  let dispatched = 0
+  for (const task of availableTasks) {
+    if (dispatched >= availableSlots) break
 
-  console.log(`[Dispatcher] Running ${tasksToRun.length} tasks (${currentRunning + tasksToRun.length}/${limit} concurrent)`)
+    if (!acquireRepoSlot(task.repo_path)) {
+      console.log(`[Dispatcher] Skipping task ${task.id.slice(0, 8)} - repo at limit (${MAX_PER_REPO}/${MAX_PER_REPO})`)
+      continue
+    }
 
-  // Run tasks in parallel (fire and forget)
-  // Each task manages its own lifecycle
-  for (const task of tasksToRun) {
-    // Don't await - run in background
+    dispatched++
+    // Don't await - run in background. Release slot in finally block.
     runTask(task).catch((error) => {
       console.error(`[Dispatcher] Background task error for ${task.id}:`, error)
+    }).finally(() => {
+      releaseRepoSlot(task.repo_path)
     })
   }
+
+  if (dispatched === 0) {
+    console.log('[Dispatcher] All repos at per-repo concurrency limit')
+    return
+  }
+
+  console.log(`[Dispatcher] Running ${dispatched} tasks (${currentRunning + dispatched}/${limit} concurrent)`)
 }

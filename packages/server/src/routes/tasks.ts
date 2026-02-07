@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
-import { eq, desc, inArray, and } from 'drizzle-orm'
+import { eq, desc, inArray, and, or } from 'drizzle-orm'
 import { z } from 'zod'
 import { db, schema } from '../db'
 import {
@@ -13,6 +13,7 @@ import {
   TaskRunRequest,
 } from '@mycelium/shared'
 import { dispatch, killProcess, clearDependencies } from '../agents'
+import { cleanupWorkspace } from '../agents/workspace'
 import { broadcast } from '../sse'
 import * as queries from '../db/queries'
 import { startTaskLog, appendLog, completeTaskLog, getTaskLogs, getLogBufferStats } from '../logs'
@@ -33,20 +34,18 @@ app.get('/', async (c) => {
   const offset = parseInt(c.req.query('offset') ?? '0')
   const sequenced = c.req.query('sequenced')
 
-  // Use query functions from queries.ts
-  const tasks = await queries.getTasks({
+  // Use paginated query - SQL LIMIT/OFFSET with separate COUNT
+  const { tasks, total } = await queries.getTasksPaginated({
     status: status ?? undefined,
     repo_path: repo_path ?? undefined,
-    limit: 1000, // Get all for total count, then paginate
     sequenced: sequenced !== undefined ? sequenced === 'true' : undefined,
+    limit,
+    offset,
   })
 
-  // Apply offset and limit for pagination
-  const paginatedTasks = tasks.slice(offset, offset + limit)
-
   return c.json({
-    tasks: paginatedTasks.map(parseTask),
-    total: tasks.length,
+    tasks: tasks.map(parseTask),
+    total,
   })
 })
 
@@ -244,6 +243,32 @@ app.post('/', zValidator('json', TaskCreate), async (c) => {
     }
   }
 
+  // Deduplication: check for existing task with same repo + similar title
+  if (data.repo_path) {
+    const existingTasks = await db
+      .select({ id: schema.tasks.id, title: schema.tasks.title })
+      .from(schema.tasks)
+      .where(and(
+        eq(schema.tasks.repo_path, data.repo_path),
+        or(
+          eq(schema.tasks.status, 'pending'),
+          eq(schema.tasks.status, 'running')
+        )
+      ))
+      .limit(50)
+
+    const normalizedTitle = data.title.toLowerCase().trim()
+    const duplicate = existingTasks.find((t) => t.title.toLowerCase().trim() === normalizedTitle)
+    if (duplicate) {
+      console.log(`[Tasks] Skipping duplicate task: "${data.title}" (matches ${duplicate.id.slice(0, 8)})`)
+      return c.json({
+        error: 'Duplicate task',
+        message: `A task with similar title already exists in pending/running state`,
+        existing_task_id: duplicate.id,
+      }, 409)
+    }
+  }
+
   const task = {
     id,
     title: data.title,
@@ -254,6 +279,7 @@ app.post('/', zValidator('json', TaskCreate), async (c) => {
     repo_path: data.repo_path,
     prompt: data.prompt ?? null,
     depends_on: JSON.stringify(resolvedDeps),
+    skills: JSON.stringify(data.skills ?? []),
     sequenced: true,
     created_at: now,
   }
@@ -286,6 +312,8 @@ app.patch('/:id', zValidator('json', TaskUpdate), async (c) => {
   if (data.result !== undefined) updates.result = data.result
   if (data.error !== undefined) updates.error = data.error
   if (data.sequenced !== undefined) updates.sequenced = data.sequenced
+
+  if (data.skills !== undefined) updates.skills = JSON.stringify(data.skills)
 
   // Handle depends_on updates
   if (data.depends_on !== undefined) {
@@ -417,7 +445,7 @@ app.post('/:id/run', async (c) => {
 })
 
 // =============================================================================
-// POST /api/tasks/:id/cancel - Cancel running task
+// POST /api/tasks/:id/cancel - Cancel running or pending task
 // =============================================================================
 app.post('/:id/cancel', async (c) => {
   const id = c.req.param('id')
@@ -428,19 +456,23 @@ app.post('/:id/cancel', async (c) => {
     return c.json({ error: 'Task not found' }, 404)
   }
 
-  if (task.status !== 'running') {
-    return c.json({ error: `Task is ${task.status}, not running` }, 400)
+  if (task.status !== 'running' && task.status !== 'pending') {
+    return c.json({ error: `Task is ${task.status}, can only cancel running or pending tasks` }, 400)
   }
 
-  // Kill the running process via registry
-  // This handles graceful termination + force kill + Cline zombie cleanup
-  const killed = await killProcess(id)
+  let killed = false
 
-  // Also abort the controller if it exists
-  const controller = runningTasks.get(id)
-  if (controller) {
-    controller.abort()
-    runningTasks.delete(id)
+  if (task.status === 'running') {
+    // Kill the running process via registry
+    // This handles graceful termination + force kill + Cline zombie cleanup
+    killed = await killProcess(id)
+
+    // Also abort the controller if it exists
+    const controller = runningTasks.get(id)
+    if (controller) {
+      controller.abort()
+      runningTasks.delete(id)
+    }
   }
 
   // Mark as cancelled
@@ -451,18 +483,72 @@ app.post('/:id/cancel', async (c) => {
     error: 'Task cancelled by user',
   })
 
-  // Clear dependencies on cancelled task so dependents aren't blocked
+  // Clean up worktree if present
+  if ((task as any).worktree_path) {
+    cleanupWorkspace(id, task.repo_path, true).catch(err =>
+      console.error(`[Cancel] Worktree cleanup error for task ${id.slice(0, 8)}:`, err)
+    )
+    await queries.updateTask(id, {
+      worktree_path: null,
+      branch_name: null,
+    })
+  }
+
+  // Cancel dependent tasks (they can't run without this prerequisite)
+  const dependentsCancelled = await cancelDependentTasks(id, task.title)
+
+  // Clear dependencies on cancelled task so any remaining refs are cleaned up
   const unblocked = await clearDependencies([id])
 
-  broadcast('task:cancelled', { id, status: 'cancelled' })
+  broadcast('task:cancelled', {
+    type: 'task:cancelled',
+    task_id: id,
+    status: 'cancelled',
+    timestamp: now,
+  })
 
   return c.json({
     message: 'Task cancelled',
     id,
     process_killed: killed,
+    dependents_cancelled: dependentsCancelled,
     tasks_unblocked: unblocked,
   })
 })
+
+/**
+ * Cancel tasks that depend on a cancelled task.
+ */
+async function cancelDependentTasks(cancelledTaskId: string, cancelledTitle: string): Promise<number> {
+  let count = 0
+  try {
+    const allPending = await queries.getTasks({ status: 'pending', limit: 200 })
+    for (const task of allPending) {
+      const deps = JSON.parse(task.depends_on ?? '[]') as string[]
+      if (deps.includes(cancelledTaskId)) {
+        await queries.updateTask(task.id, {
+          status: 'cancelled',
+          error: `Cancelled: dependency "${cancelledTitle}" (${cancelledTaskId.slice(0, 8)}) was cancelled`,
+          completed_at: new Date().toISOString(),
+        })
+        count++
+
+        broadcast('task:cancelled', {
+          type: 'task:cancelled',
+          task_id: task.id,
+          status: 'cancelled',
+          timestamp: new Date().toISOString(),
+        })
+
+        // Recursively cancel downstream dependents
+        count += await cancelDependentTasks(task.id, task.title)
+      }
+    }
+  } catch (error) {
+    console.error('[Cancel] Error cancelling dependents:', error)
+  }
+  return count
+}
 
 // =============================================================================
 // Helper: Execute task in background
@@ -570,6 +656,7 @@ function parseTask(row: typeof schema.tasks.$inferSelect | Record<string, unknow
   return {
     ...task,
     depends_on: JSON.parse((task.depends_on as string) ?? '[]'),
+    skills: JSON.parse((task.skills as string) ?? '[]'),
     parsed_result: task.parsed_result ? JSON.parse(task.parsed_result as string) : null,
     error_details: task.error_details ? JSON.parse(task.error_details as string) : null,
   }
@@ -631,6 +718,7 @@ app.post('/:id/clone', async (c) => {
     repo_path: task.repo_path,
     prompt: task.prompt,
     depends_on: '[]', // Reset dependencies for clone
+    skills: task.skills ?? '[]',
     sequenced: true,
     created_at: now,
   }

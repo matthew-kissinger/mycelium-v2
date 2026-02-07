@@ -17,6 +17,11 @@ import { registerGenesisCommands } from './commands/genesis.ts'
 import { registerSessionCommands } from './commands/sessions.ts'
 import { registerVersionCommand } from './commands/version.ts'
 import { registerDeviceCommands } from './commands/devices.ts'
+import { registerSchedulerCommands } from './commands/scheduler.ts'
+import { registerTriggerCommands } from './commands/trigger.ts'
+import { registerConfigCommands } from './commands/config.ts'
+import { registerLogsCommands } from './commands/logs.ts'
+import { registerInventoryCommands } from './commands/inventory.ts'
 
 const VERSION = '0.1.0'
 const DEFAULT_API_URL = 'http://localhost:8765'
@@ -49,6 +54,11 @@ registerGenesisCommands(program)  // genesis, genesis create/auto/config
 registerSessionCommands(program)  // sessions, session <id>, trace <task_id>
 registerVersionCommand(program)   // version [--deps] [--outdated]
 registerDeviceCommands(program)   // devices, device add/remove/status/ping/cmd, tv, vol
+registerSchedulerCommands(program) // scheduler, scheduler start/stop/config
+registerTriggerCommands(program)   // trigger discovery/shepherd/digest/compaction/armory
+registerConfigCommands(program)    // config agents/prompts/hooks/history (extends existing config)
+registerLogsCommands(program)      // logs <task-id>, export tasks/stats/memory
+registerInventoryCommands(program) // inventory, inventory skills/mcps/scan
 
 // Parse and execute
 program.parse()

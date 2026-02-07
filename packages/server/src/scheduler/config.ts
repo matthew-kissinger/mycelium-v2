@@ -42,6 +42,8 @@ export const DEFAULT_CONFIG: SchedulerConfig = {
   compaction_interval_sec: 14400, // 4 hours (smart Haiku agent)
   health_check_enabled: true,
   health_check_interval_sec: 60,
+  github_sync_enabled: true,
+  github_sync_interval_sec: 1800, // 30 minutes
   auto_prune_enabled: true,
   auto_prune_threshold: 100,
   auto_prune_keep: 30,

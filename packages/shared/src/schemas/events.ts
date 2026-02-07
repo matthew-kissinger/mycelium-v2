@@ -17,8 +17,10 @@ export const SSEEventType = z.enum([
   'task:completed',
   'task:failed',
   'task:cancelled',
+  'task:retrying',
   'task:output',
   'task:deleted',
+  'task:skipped',
 
   // Signal events
   'signal:created',
@@ -35,6 +37,7 @@ export const SSEEventType = z.enum([
   'memory:warning_created',
   'memory:pattern_deleted',
   'memory:warning_deleted',
+  'memory:compaction_completed',
 
   // System agent events
   'agent:started',
@@ -42,7 +45,8 @@ export const SSEEventType = z.enum([
   'agent:failed',
   'agent:blocked',
   'agent:output',
-  'system:agent_started',
+  'agent:quota_exceeded',
+  'agent:quota_reset',
 
   // Notification events
   'notification:sent',
@@ -50,7 +54,21 @@ export const SSEEventType = z.enum([
   // Scheduler events
   'scheduler:started',
   'scheduler:stopped',
-  'scheduler:cycle',
+  'scheduler:cycle:started',
+  'scheduler:cycle:completed',
+
+  // GitHub events
+  'github:push',
+  'github:pr_created',
+  'github:pr_merged',
+  'github:pr_closed',
+  'github:check_status',
+
+  // Device events
+  'device:status',
+  'device:added',
+  'device:updated',
+  'device:removed',
 
   // System events
   'system:heartbeat',
@@ -121,12 +139,30 @@ export const TaskOutputEvent = z.object({
 })
 export type TaskOutputEvent = z.infer<typeof TaskOutputEvent>
 
+export const TaskRetryingEvent = z.object({
+  type: z.literal('task:retrying'),
+  task_id: z.string().uuid(),
+  retry_count: z.number().optional(),
+  next_model: z.string().optional(),
+  timestamp: z.string().datetime(),
+})
+export type TaskRetryingEvent = z.infer<typeof TaskRetryingEvent>
+
 export const TaskDeletedEvent = z.object({
   type: z.literal('task:deleted'),
   task_id: z.string().uuid(),
   timestamp: z.string().datetime(),
 })
 export type TaskDeletedEvent = z.infer<typeof TaskDeletedEvent>
+
+export const TaskSkippedEvent = z.object({
+  type: z.literal('task:skipped'),
+  task_id: z.string().uuid(),
+  agent: z.string(),
+  reason: z.string(),
+  timestamp: z.string().datetime(),
+})
+export type TaskSkippedEvent = z.infer<typeof TaskSkippedEvent>
 
 // Union of all task events
 export const TaskEvent = z.discriminatedUnion('type', [
@@ -136,8 +172,10 @@ export const TaskEvent = z.discriminatedUnion('type', [
   TaskCompletedEvent,
   TaskFailedEvent,
   TaskCancelledEvent,
+  TaskRetryingEvent,
   TaskOutputEvent,
   TaskDeletedEvent,
+  TaskSkippedEvent,
 ])
 export type TaskEvent = z.infer<typeof TaskEvent>
 
@@ -246,12 +284,23 @@ export const MemoryWarningDeletedEvent = z.object({
 })
 export type MemoryWarningDeletedEvent = z.infer<typeof MemoryWarningDeletedEvent>
 
+export const MemoryCompactionCompletedEvent = z.object({
+  type: z.literal('memory:compaction_completed'),
+  patterns_before: z.number(),
+  patterns_after: z.number(),
+  warnings_before: z.number(),
+  warnings_after: z.number(),
+  timestamp: z.string().datetime(),
+})
+export type MemoryCompactionCompletedEvent = z.infer<typeof MemoryCompactionCompletedEvent>
+
 // Union of all memory events
 export const MemoryEvent = z.discriminatedUnion('type', [
   MemoryPatternCreatedEvent,
   MemoryWarningCreatedEvent,
   MemoryPatternDeletedEvent,
   MemoryWarningDeletedEvent,
+  MemoryCompactionCompletedEvent,
 ])
 export type MemoryEvent = z.infer<typeof MemoryEvent>
 
@@ -305,15 +354,23 @@ export const AgentOutputEvent = z.object({
 })
 export type AgentOutputEvent = z.infer<typeof AgentOutputEvent>
 
-// Alternative system:agent_started event (used by some routes)
-export const SystemAgentStartedEvent = z.object({
-  type: z.literal('system:agent_started'),
-  run_id: z.string().uuid(),
-  agent_type: SystemAgentType,
-  repo_path: z.string().optional(),
+export const AgentQuotaExceededEvent = z.object({
+  type: z.literal('agent:quota_exceeded'),
+  agent: z.string(),
+  model: z.string().optional(),
+  error: z.string(),
+  reset_at: z.string().optional(),
   timestamp: z.string().datetime(),
 })
-export type SystemAgentStartedEvent = z.infer<typeof SystemAgentStartedEvent>
+export type AgentQuotaExceededEvent = z.infer<typeof AgentQuotaExceededEvent>
+
+export const AgentQuotaResetEvent = z.object({
+  type: z.literal('agent:quota_reset'),
+  agent: z.string(),
+  model: z.string().optional(),
+  timestamp: z.string().datetime(),
+})
+export type AgentQuotaResetEvent = z.infer<typeof AgentQuotaResetEvent>
 
 // Union of all agent events
 export const SystemAgentEvent = z.discriminatedUnion('type', [
@@ -322,7 +379,8 @@ export const SystemAgentEvent = z.discriminatedUnion('type', [
   AgentFailedEvent,
   AgentBlockedEvent,
   AgentOutputEvent,
-  SystemAgentStartedEvent,
+  AgentQuotaExceededEvent,
+  AgentQuotaResetEvent,
 ])
 export type SystemAgentEvent = z.infer<typeof SystemAgentEvent>
 
@@ -360,20 +418,138 @@ export const SchedulerStoppedEvent = z.object({
 })
 export type SchedulerStoppedEvent = z.infer<typeof SchedulerStoppedEvent>
 
-export const SchedulerCycleEvent = z.object({
-  type: z.literal('scheduler:cycle'),
+export const SchedulerCycleStartedEvent = z.object({
+  type: z.literal('scheduler:cycle:started'),
   cycle: z.string(),
   timestamp: z.string().datetime(),
 })
-export type SchedulerCycleEvent = z.infer<typeof SchedulerCycleEvent>
+export type SchedulerCycleStartedEvent = z.infer<typeof SchedulerCycleStartedEvent>
+
+export const SchedulerCycleCompletedEvent = z.object({
+  type: z.literal('scheduler:cycle:completed'),
+  cycle: z.string(),
+  duration_ms: z.number(),
+  success: z.boolean(),
+  error: z.string().optional(),
+  timestamp: z.string().datetime(),
+})
+export type SchedulerCycleCompletedEvent = z.infer<typeof SchedulerCycleCompletedEvent>
 
 // Union of all scheduler events
 export const SchedulerEvent = z.discriminatedUnion('type', [
   SchedulerStartedEvent,
   SchedulerStoppedEvent,
-  SchedulerCycleEvent,
+  SchedulerCycleStartedEvent,
+  SchedulerCycleCompletedEvent,
 ])
 export type SchedulerEvent = z.infer<typeof SchedulerEvent>
+
+// =============================================================================
+// GitHub Events
+// =============================================================================
+
+export const GitHubPushEvent = z.object({
+  type: z.literal('github:push'),
+  repo_path: z.string(),
+  branch: z.string(),
+  task_id: z.string().uuid().optional(),
+  timestamp: z.string().datetime(),
+})
+export type GitHubPushEvent = z.infer<typeof GitHubPushEvent>
+
+export const GitHubPRCreatedEvent = z.object({
+  type: z.literal('github:pr_created'),
+  repo_path: z.string(),
+  pr_number: z.number(),
+  pr_url: z.string(),
+  task_id: z.string().uuid().optional(),
+  branch: z.string(),
+  title: z.string(),
+  timestamp: z.string().datetime(),
+})
+export type GitHubPRCreatedEvent = z.infer<typeof GitHubPRCreatedEvent>
+
+export const GitHubPRMergedEvent = z.object({
+  type: z.literal('github:pr_merged'),
+  repo_path: z.string(),
+  pr_number: z.number(),
+  task_id: z.string().uuid().optional(),
+  timestamp: z.string().datetime(),
+})
+export type GitHubPRMergedEvent = z.infer<typeof GitHubPRMergedEvent>
+
+export const GitHubPRClosedEvent = z.object({
+  type: z.literal('github:pr_closed'),
+  repo_path: z.string(),
+  pr_number: z.number(),
+  task_id: z.string().uuid().optional(),
+  reason: z.string().optional(),
+  timestamp: z.string().datetime(),
+})
+export type GitHubPRClosedEvent = z.infer<typeof GitHubPRClosedEvent>
+
+export const GitHubCheckStatusEvent = z.object({
+  type: z.literal('github:check_status'),
+  repo_path: z.string(),
+  pr_number: z.number().optional(),
+  status: z.enum(['pending', 'success', 'failure', 'error']),
+  context: z.string(),
+  timestamp: z.string().datetime(),
+})
+export type GitHubCheckStatusEvent = z.infer<typeof GitHubCheckStatusEvent>
+
+// Union of all GitHub events
+export const GitHubEvent = z.discriminatedUnion('type', [
+  GitHubPushEvent,
+  GitHubPRCreatedEvent,
+  GitHubPRMergedEvent,
+  GitHubPRClosedEvent,
+  GitHubCheckStatusEvent,
+])
+export type GitHubEvent = z.infer<typeof GitHubEvent>
+
+// =============================================================================
+// Device Events
+// =============================================================================
+
+export const DeviceStatusEvent = z.object({
+  type: z.literal('device:status'),
+  device_id: z.string(),
+  status: z.enum(['online', 'offline', 'unknown']),
+  timestamp: z.string().datetime(),
+})
+export type DeviceStatusEvent = z.infer<typeof DeviceStatusEvent>
+
+export const DeviceAddedEvent = z.object({
+  type: z.literal('device:added'),
+  device_id: z.string(),
+  name: z.string(),
+  timestamp: z.string().datetime(),
+})
+export type DeviceAddedEvent = z.infer<typeof DeviceAddedEvent>
+
+export const DeviceUpdatedEvent = z.object({
+  type: z.literal('device:updated'),
+  device_id: z.string(),
+  changes: z.record(z.string(), z.unknown()),
+  timestamp: z.string().datetime(),
+})
+export type DeviceUpdatedEvent = z.infer<typeof DeviceUpdatedEvent>
+
+export const DeviceRemovedEvent = z.object({
+  type: z.literal('device:removed'),
+  device_id: z.string(),
+  timestamp: z.string().datetime(),
+})
+export type DeviceRemovedEvent = z.infer<typeof DeviceRemovedEvent>
+
+export const DeviceEvent = z.discriminatedUnion('type', [
+  DeviceStatusEvent,
+  DeviceAddedEvent,
+  DeviceUpdatedEvent,
+  DeviceRemovedEvent,
+])
+export type DeviceEvent = z.infer<typeof DeviceEvent>
 
 // =============================================================================
 // System Events
@@ -413,6 +589,8 @@ export const SSEEvent = z.union([
   SystemAgentEvent,
   NotificationEvent,
   SchedulerEvent,
+  GitHubEvent,
+  DeviceEvent,
   SystemEvent,
 ])
 export type SSEEvent = z.infer<typeof SSEEvent>

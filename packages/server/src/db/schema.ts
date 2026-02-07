@@ -18,6 +18,8 @@ export const tasks = sqliteTable('tasks', {
   // Git/GitHub
   branch_name: text('branch_name'),
   github_url: text('github_url'),
+  github_pr_number: integer('github_pr_number'),
+  github_pr_url: text('github_pr_url'),
 
   // Context
   spec_context: text('spec_context'), // Orchestrator metadata JSON
@@ -37,11 +39,19 @@ export const tasks = sqliteTable('tasks', {
   // Metrics
   cost_usd: real('cost_usd').default(0),
   duration_seconds: real('duration_seconds'),
+  input_tokens: integer('input_tokens'),
+  output_tokens: integer('output_tokens'),
 
   // Timestamps
   created_at: text('created_at').notNull(),
   started_at: text('started_at'),
   completed_at: text('completed_at'),
+
+  // Workspace isolation
+  worktree_path: text('worktree_path'),
+
+  // Skills (JSON array of skill names)
+  skills: text('skills').default('[]'),
 
   // Evaluation tracking
   shepherd_evaluated_at: text('shepherd_evaluated_at'),
@@ -57,6 +67,15 @@ export const repos = sqliteTable('repos', {
   language: text('language'),
   mode: text('mode').notNull().default('align'),
   weight: integer('weight').default(50), // 0-100 allocation weight for discovery selection
+  // Skills (JSON array of detected skill names)
+  skills: text('skills').default('[]'),
+
+  // GitHub integration
+  github_owner: text('github_owner'),
+  github_repo: text('github_repo'),
+  github_default_branch: text('github_default_branch'),
+  is_public: integer('is_public'), // 0/1 boolean
+
   created_at: text('created_at').notNull(),
   last_scanned_at: text('last_scanned_at'),
 })
@@ -199,5 +218,16 @@ export const devices = sqliteTable('devices', {
   // Metadata
   description: text('description'),
   created_at: text('created_at').notNull(),
+  updated_at: text('updated_at'),
+})
+
+// Scheduler cycle stats (persisted across restarts)
+export const scheduler_stats = sqliteTable('scheduler_stats', {
+  cycle_name: text('cycle_name').primaryKey(),
+  runs_completed: integer('runs_completed').default(0),
+  errors: integer('errors').default(0),
+  last_run_at: text('last_run_at'),
+  last_duration_ms: integer('last_duration_ms'),
+  last_error: text('last_error'),
   updated_at: text('updated_at'),
 })

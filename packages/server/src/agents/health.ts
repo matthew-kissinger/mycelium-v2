@@ -5,6 +5,8 @@
  * Provides intelligent error extraction from agent output.
  */
 
+import { broadcast } from '../sse'
+
 // Per-agent health state
 interface AgentHealth {
   agent: string
@@ -303,6 +305,16 @@ export function recordFailure(
     if (extracted.quotaResetMs) {
       health.quotaResetAt = new Date(Date.now() + extracted.quotaResetMs)
     }
+
+    broadcast('agent:quota_exceeded', {
+      type: 'agent:quota_exceeded',
+      agent,
+      model,
+      error: extracted.error,
+      reset_at: health.quotaResetAt?.toISOString(),
+      timestamp: new Date().toISOString(),
+    })
+
     return {
       error: extracted.error,
       shouldBackoff: true,
@@ -346,6 +358,13 @@ export function isAgentAvailable(agent: string, model?: string): {
     // Quota should have reset
     health.status = 'healthy'
     health.quotaResetAt = undefined
+
+    broadcast('agent:quota_reset', {
+      type: 'agent:quota_reset',
+      agent,
+      model,
+      timestamp: new Date().toISOString(),
+    })
   }
 
   return { available: true }

@@ -18,6 +18,7 @@ import { SchedulerConfig } from '@mycelium/shared'
 import * as queries from '../../db/queries'
 import { broadcast } from '../../sse'
 import { getRunningProcesses } from '../../agents/registry'
+import { cleanupWorkspace } from '../../agents/workspace'
 import { getTelegramService } from '../../telegram'
 import { getActiveRuns } from '../active-runs'
 
@@ -120,6 +121,16 @@ export async function runBlockedCheckCycle(config: SchedulerConfig): Promise<voi
         duration_seconds: (now - startedAt) / 1000,
       })
 
+      // Clean up worktree if task had one
+      if (task.worktree_path && task.repo_path) {
+        try {
+          await cleanupWorkspace(task.id, task.repo_path)
+          console.log(`[BlockedCheck] Cleaned up worktree for orphaned task ${task.id.slice(0, 8)}`)
+        } catch (e) {
+          console.error(`[BlockedCheck] Failed to cleanup worktree for ${task.id.slice(0, 8)}:`, e)
+        }
+      }
+
       broadcast('task:cancelled', {
         type: 'task:cancelled',
         task_id: task.id,
@@ -149,6 +160,15 @@ export async function runBlockedCheckCycle(config: SchedulerConfig): Promise<voi
         error: `Orphaned - exceeded ${ORPHAN_THRESHOLD_HOURS}h runtime limit`,
         completed_at: new Date().toISOString(),
       })
+
+      // Clean up worktree if task had one
+      if (task.worktree_path && task.repo_path) {
+        try {
+          await cleanupWorkspace(task.id, task.repo_path)
+        } catch (e) {
+          console.error(`[BlockedCheck] Failed to cleanup worktree for ${task.id.slice(0, 8)}:`, e)
+        }
+      }
 
       broadcast('task:cancelled', {
         type: 'task:cancelled',
@@ -255,19 +275,32 @@ async function cancelTasksWithFailedDeps(): Promise<number> {
     const pendingTasks = await queries.getTasks({ status: 'pending', limit: 200 })
     if (pendingTasks.length === 0) return 0
 
+    // Batch-collect all dependency IDs across all pending tasks
+    const allDepIds = new Set<string>()
+    const taskDepsMap = new Map<string, string[]>()
+
     for (const task of pendingTasks) {
       const deps = JSON.parse(task.depends_on ?? '[]') as string[]
-      if (deps.length === 0) continue
-
-      // Check each dependency's status
-      for (const depId of deps) {
-        let depTask: { status: string; title: string } | null = null
-        try {
-          depTask = await queries.getTask(depId)
-        } catch {
-          continue
+      if (deps.length > 0) {
+        taskDepsMap.set(task.id, deps)
+        for (const depId of deps) {
+          allDepIds.add(depId)
         }
+      }
+    }
 
+    if (allDepIds.size === 0) return 0
+
+    // Single batch query for all dependency tasks
+    const depTasksList = await queries.getTasksByIds(Array.from(allDepIds))
+    const depTaskMap = new Map(depTasksList.map(t => [t.id, t]))
+
+    for (const task of pendingTasks) {
+      const deps = taskDepsMap.get(task.id)
+      if (!deps) continue
+
+      for (const depId of deps) {
+        const depTask = depTaskMap.get(depId)
         if (!depTask) continue
 
         if (depTask.status === 'failed' || depTask.status === 'cancelled') {
@@ -277,6 +310,15 @@ async function cancelTasksWithFailedDeps(): Promise<number> {
             error: reason,
             completed_at: new Date().toISOString(),
           })
+
+          // Clean up worktree if task had one
+          if (task.worktree_path && task.repo_path) {
+            try {
+              await cleanupWorkspace(task.id, task.repo_path)
+            } catch (e) {
+              console.error(`[BlockedCheck] Failed to cleanup worktree for ${task.id.slice(0, 8)}:`, e)
+            }
+          }
 
           console.log(`[BlockedCheck] Cancelled ${task.id.slice(0, 8)} - dep ${depId.slice(0, 8)} ${depTask.status}`)
 

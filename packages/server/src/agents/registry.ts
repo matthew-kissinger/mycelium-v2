@@ -13,6 +13,7 @@ import { db, schema } from '../db'
 import { eq } from 'drizzle-orm'
 import * as queries from '../db/queries'
 import { broadcast } from '../sse'
+import { cleanupWorkspace } from './workspace'
 
 // =============================================================================
 // Types
@@ -326,7 +327,7 @@ export async function shutdown(): Promise<void> {
   // Kill all processes
   const killed = await killAllProcesses()
 
-  // Mark running tasks as cancelled in database
+  // Mark running tasks as cancelled in database and clean up worktrees
   const cancelledIds: string[] = []
   for (const taskId of runningTaskIds) {
     try {
@@ -339,6 +340,16 @@ export async function shutdown(): Promise<void> {
         })
         cancelledIds.push(taskId)
         broadcast('task:cancelled', { id: taskId, status: 'cancelled', reason: 'backend_shutdown' })
+
+        // Clean up worktree if task had one
+        if (task.worktree_path && task.repo_path) {
+          try {
+            await cleanupWorkspace(taskId, task.repo_path)
+          } catch (e) {
+            // Best effort during shutdown
+          }
+        }
+
         console.log(`[REGISTRY] Cancelled task=${taskId.slice(0, 8)}`)
       }
     } catch (error) {

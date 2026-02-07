@@ -2,6 +2,7 @@
  * Connection Store - SSE EventSource management
  *
  * Owns the single EventSource and dispatches events to domain stores.
+ * Includes auto-reconnect with exponential backoff.
  */
 
 import { create } from 'zustand'
@@ -11,10 +12,18 @@ import { useSignalStore } from './signalStore'
 import { useMemoryStore } from './memoryStore'
 import { useRepoStore } from './repoStore'
 import { useInventoryStore } from './inventoryStore'
+import { useAgentStore } from './agentStore'
+
+// Reconnect constants
+const RECONNECT_BASE_MS = 1000
+const RECONNECT_MAX_MS = 30000
+const RECONNECT_MAX_ATTEMPTS = 10
 
 interface ConnectionState {
   connected: boolean
   eventSource: EventSource | null
+  reconnectAttempts: number
+  reconnectTimer: ReturnType<typeof setTimeout> | null
 
   connectSSE: () => void
   disconnectSSE: () => void
@@ -23,6 +32,8 @@ interface ConnectionState {
 export const useConnectionStore = create<ConnectionState>((set, get) => ({
   connected: false,
   eventSource: null,
+  reconnectAttempts: 0,
+  reconnectTimer: null,
 
   connectSSE: () => {
     if (get().eventSource) return
@@ -30,7 +41,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     const eventSource = new EventSource('/api/events')
 
     eventSource.addEventListener('connected', () => {
-      set({ connected: true })
+      set({ connected: true, reconnectAttempts: 0 })
     })
 
     // Scheduler events
@@ -38,9 +49,6 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
       useSchedulerStore.getState().fetchSchedulerStatus()
     })
     eventSource.addEventListener('scheduler:stopped', () => {
-      useSchedulerStore.getState().fetchSchedulerStatus()
-    })
-    eventSource.addEventListener('scheduler:cycle', () => {
       useSchedulerStore.getState().fetchSchedulerStatus()
     })
 
@@ -79,14 +87,12 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     })
 
     // System agent events
-    eventSource.addEventListener('system:agent_started', () => {
+    eventSource.addEventListener('agent:started', () => {
       useSchedulerStore.getState().fetchRunningSystemAgents()
     })
     eventSource.addEventListener('agent:completed', (event) => {
       useSchedulerStore.getState().fetchRunningSystemAgents()
       useTaskStore.getState().fetchStats()
-      // Refresh shepherd status when shepherd completes (updates unevaluated counts)
-      // Refresh inventory when armory completes
       try {
         const data = JSON.parse(event.data)
         if (data.agent_type === 'shepherd') {
@@ -110,18 +116,43 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     eventSource.addEventListener('signal:responded', () => {
       useSignalStore.getState().fetchSignals()
     })
-
-    // Memory events - fetch both counts and grouped details
-    eventSource.addEventListener('memory:updated', () => {
-      useMemoryStore.getState().fetchMemory()
-      useMemoryStore.getState().fetchMemoryDetails()
+    eventSource.addEventListener('signal:expired', () => {
+      useSignalStore.getState().fetchSignals()
     })
+
+    // Task events - additional
+    eventSource.addEventListener('task:retrying', () => {
+      useTaskStore.getState().fetchStats()
+      useTaskStore.getState().fetchRunningTasks()
+    })
+    eventSource.addEventListener('task:deleted', () => {
+      useTaskStore.getState().fetchStats()
+    })
+    eventSource.addEventListener('task:updated', () => {
+      useTaskStore.getState().fetchStats()
+    })
+    eventSource.addEventListener('task:cancelled', () => {
+      useTaskStore.getState().fetchStats()
+      useTaskStore.getState().fetchRunningTasks()
+    })
+    eventSource.addEventListener('task:skipped', () => {
+      useTaskStore.getState().fetchStats()
+    })
+
+    // Memory events
     eventSource.addEventListener('memory:pattern_created', () => {
-      useMemoryStore.getState().fetchMemory()
       useMemoryStore.getState().fetchMemoryDetails()
     })
     eventSource.addEventListener('memory:warning_created', () => {
-      useMemoryStore.getState().fetchMemory()
+      useMemoryStore.getState().fetchMemoryDetails()
+    })
+    eventSource.addEventListener('memory:pattern_deleted', () => {
+      useMemoryStore.getState().fetchMemoryDetails()
+    })
+    eventSource.addEventListener('memory:warning_deleted', () => {
+      useMemoryStore.getState().fetchMemoryDetails()
+    })
+    eventSource.addEventListener('memory:compaction_completed', () => {
       useMemoryStore.getState().fetchMemoryDetails()
     })
 
@@ -136,19 +167,60 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
       useRepoStore.getState().fetchRepos()
     })
 
-    // Error handling
+    // Agent health events
+    eventSource.addEventListener('agent:quota_exceeded', () => {
+      useAgentStore.getState().fetchHealth()
+      useSchedulerStore.getState().fetchSchedulerStatus()
+    })
+    eventSource.addEventListener('agent:quota_reset', () => {
+      useAgentStore.getState().fetchHealth()
+      useSchedulerStore.getState().fetchSchedulerStatus()
+    })
+
+    // Scheduler cycle events
+    eventSource.addEventListener('scheduler:cycle:completed', () => {
+      useSchedulerStore.getState().fetchSchedulerStatus()
+    })
+
+    // Error handling with auto-reconnect
     eventSource.onerror = () => {
       set({ connected: false })
+
+      // Clean up the failed connection
+      eventSource.close()
+      set({ eventSource: null })
+
+      // Attempt reconnect with exponential backoff
+      const { reconnectAttempts } = get()
+      if (reconnectAttempts < RECONNECT_MAX_ATTEMPTS) {
+        const delay = Math.min(
+          RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts),
+          RECONNECT_MAX_MS
+        )
+        console.log(
+          `[SSE] Connection lost. Reconnecting in ${delay}ms (attempt ${reconnectAttempts + 1}/${RECONNECT_MAX_ATTEMPTS})`
+        )
+        const timer = setTimeout(() => {
+          set({ reconnectAttempts: reconnectAttempts + 1, reconnectTimer: null })
+          get().connectSSE()
+        }, delay)
+        set({ reconnectTimer: timer })
+      } else {
+        console.error(`[SSE] Max reconnect attempts (${RECONNECT_MAX_ATTEMPTS}) reached. Giving up.`)
+      }
     }
 
     set({ eventSource })
   },
 
   disconnectSSE: () => {
-    const { eventSource } = get()
+    const { eventSource, reconnectTimer } = get()
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+    }
     if (eventSource) {
       eventSource.close()
-      set({ eventSource: null, connected: false })
     }
+    set({ eventSource: null, connected: false, reconnectAttempts: 0, reconnectTimer: null })
   },
 }))

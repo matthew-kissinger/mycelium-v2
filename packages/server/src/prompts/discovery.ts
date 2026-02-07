@@ -141,6 +141,8 @@ Your job has FOUR required steps - you MUST complete ALL of them:
 
 **For cline tasks**, add \`--provider openrouter\` or \`--provider cline\` to select the billing provider.
 
+**Add skills** when relevant: \`--skills threejs-collision,vitest\` (1-3 skills, comma-separated). Only add when specific domain knowledge would help the task. See "Available Skills" section below.
+
 **Wire dependencies** using \`--depends-on <task_id1> <task_id2>\` when creating tasks that must wait for others.
 
 **Update existing task deps** using \`mycel task update <task_id> --depends-on <dep_id1> <dep_id2>\` or \`--clear-deps\`.
@@ -364,6 +366,8 @@ When complete: test your changes, commit with "fix: resolve intermittent 401 aft
 
 **For cline tasks**, add \`--provider openrouter\` or \`--provider cline\` to select the billing provider.
 
+**Add skills** when relevant: \`--skills threejs-collision,vitest\` (1-3 skills, comma-separated).
+
 **Wire dependencies** with \`--depends-on <task_id>\` when tasks must run in sequence.
 
 **Send confirmation** when done: \`mycel notify "[TASK CREATOR] Created N tasks"\`
@@ -528,6 +532,21 @@ export function buildDiscoveryPrompt(
       }
       contextParts.push('')
     }
+  }
+
+  // Mode enforcement
+  if (context.autonomous) {
+    contextParts.push('## Mode: AUTONOMOUS')
+    contextParts.push('')
+    contextParts.push('Create tasks directly without asking for confirmation. Use `mycel task create` for each task.')
+    contextParts.push('Do NOT use `mycel align` - you have full authority to create tasks.')
+    contextParts.push('')
+  } else {
+    contextParts.push('## Mode: ALIGNMENT')
+    contextParts.push('')
+    contextParts.push('Propose tasks but do NOT create them. Instead, create an alignment signal using `mycel align` asking the user to approve.')
+    contextParts.push('Do NOT use `mycel task create` directly - the Task Creator agent will handle that after human approval.')
+    contextParts.push('')
   }
 
   // Append context to prompt

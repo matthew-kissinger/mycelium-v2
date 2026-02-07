@@ -15,6 +15,7 @@ export interface DispatchOptions {
   provider?: ProviderType  // For agents with multiple providers
   timeout?: number
   taskId?: string  // Required for process registry tracking
+  sessionId?: string  // Claude session ID for --resume on retry
   onOutput?: (chunk: string, stream?: 'stdout' | 'stderr') => void
   onStart?: (pid: number) => void  // Called with PID after process spawns
 }
@@ -27,7 +28,7 @@ export interface DispatchOptions {
  * Registers process with the registry for cleanup on cancel/shutdown.
  */
 export async function dispatch(options: DispatchOptions): Promise<AgentExecuteResult> {
-  const { agent, prompt, cwd, model, provider, timeout, taskId, onOutput, onStart } = options
+  const { agent, prompt, cwd, model, provider, timeout, taskId, sessionId, onOutput, onStart } = options
   const config = DEFAULT_AGENT_CONFIGS[agent]
 
   if (!config) {
@@ -64,7 +65,7 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
   }
 
   // Build command args based on agent type
-  const args = buildAgentArgs(agent, prompt, model, cwd, clineAddress, provider)
+  const args = buildAgentArgs(agent, prompt, model, cwd, clineAddress, provider, sessionId)
 
   // Switch cline model/provider before dispatch if specified
   if (agent === 'cline' && (model || provider)) {
@@ -124,19 +125,23 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
     }
 
     // Race between completion and timeout
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
     const result = await Promise.race([
       Promise.all([
         readStream(stdoutReader, 'stdout'),
         readStream(stderrReader, 'stderr'),
         proc.exited,
       ]),
-      new Promise<'timeout'>((resolve) =>
-        setTimeout(() => resolve('timeout'), timeoutMs)
-      ),
+      new Promise<'timeout'>((resolve) => {
+        timeoutId = setTimeout(() => resolve('timeout'), timeoutMs)
+      }),
     ])
 
     if (result === 'timeout') {
       proc.kill()
+      // Cancel dangling stream readers so they don't hang
+      stdoutReader.cancel().catch(() => {})
+      stderrReader.cancel().catch(() => {})
       if (taskId) {
         unregisterProcess(taskId)
       }
@@ -152,7 +157,11 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
       }
     }
 
-    const exitCode = await proc.exited
+    // Clear timeout timer on successful completion
+    clearTimeout(timeoutId)
+
+    // proc.exited already resolved as part of Promise.all above
+    const exitCode = (result as [void, void, number])[2]
     const duration = (Date.now() - startTime) / 1000
 
     // Unregister process on completion
@@ -185,12 +194,17 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
       cost_usd = 0
     }
 
+    // Estimate token usage
+    const tokens = estimateTokens(prompt, output)
+
     return {
       success: exitCode === 0,
       output: output || stderr,
       exit_code: exitCode,
       duration_seconds: duration,
       cost_usd,
+      input_tokens: tokens.input_tokens,
+      output_tokens: tokens.output_tokens,
     }
   } catch (error) {
     // Unregister process on error
@@ -232,13 +246,15 @@ function buildAgentArgs(
   model?: string,
   cwd?: string,
   clineAddress?: string | null,
-  provider?: ProviderType
+  provider?: ProviderType,
+  sessionId?: string
 ): string[] {
   switch (agent) {
     case 'claude':
       // claude -p "prompt" --model sonnet --dangerously-skip-permissions
+      // --resume <sessionId> continues a previous session (for retries)
       return [
-        '-p', prompt,
+        ...(sessionId ? ['--resume', sessionId] : ['-p', prompt]),
         ...(model ? ['--model', model] : []),
         '--dangerously-skip-permissions',
       ]
@@ -309,11 +325,12 @@ function buildAgentArgs(
       ]
 
     case 'copilot':
-      // copilot -p "prompt" [--model <model>] --allow-all-tools
+      // copilot -p "prompt" [--model <model>] --allow-all-tools --no-ask-user
       return [
         '-p', prompt,
-        ...(model ? ['--model', model] : []),
+        ...(model ? ['--model', model] : ['--model', 'claude-sonnet-4.5']),
         '--allow-all-tools',
+        '--no-ask-user',
       ]
 
     default:
@@ -509,6 +526,31 @@ export async function getClineConfig(instanceAddress?: string | null): Promise<{
 }
 
 /**
+ * Estimate token counts from prompt and output text.
+ * Rough heuristic: ~4 characters per token (standard for English text/code).
+ * Also parses explicit token counts from agent output when available.
+ */
+function estimateTokens(prompt: string, output: string): { input_tokens: number; output_tokens: number } {
+  // Try parsing explicit token counts from output first
+  const inputMatch = output.match(/input[_\s]tokens[:\s]*(\d[\d,]*)/i)
+  const outputMatch = output.match(/output[_\s]tokens[:\s]*(\d[\d,]*)/i)
+  const totalTokensMatch = output.match(/total[_\s]tokens[:\s]*(\d[\d,]*)/i)
+
+  if (inputMatch && outputMatch) {
+    return {
+      input_tokens: parseInt(inputMatch[1].replace(/,/g, '')),
+      output_tokens: parseInt(outputMatch[1].replace(/,/g, '')),
+    }
+  }
+
+  // Fallback: estimate from character count (~4 chars per token)
+  return {
+    input_tokens: Math.ceil(prompt.length / 4),
+    output_tokens: Math.ceil(output.length / 4),
+  }
+}
+
+/**
  * Parse cost from agent output if present.
  * Agents often report cost in their output.
  */
@@ -586,8 +628,13 @@ export async function dispatchKiro(
 
     // Write prompt to stdin and close
     // Bun's stdin is a FileSink, not a stream
-    proc.stdin.write(prompt)
-    proc.stdin.end()
+    try {
+      proc.stdin.write(prompt)
+      proc.stdin.end()
+    } catch (stdinError) {
+      // Broken pipe - process may have exited before we could write
+      console.error('[Dispatch] Kiro stdin write failed:', stdinError)
+    }
 
     let output = ''
     let stderr = ''
@@ -611,19 +658,25 @@ export async function dispatchKiro(
       }
     }
 
+    const stdoutReader = proc.stdout.getReader()
+    const stderrReader = proc.stderr.getReader()
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
     const result = await Promise.race([
       Promise.all([
-        readStream(proc.stdout.getReader(), 'stdout'),
-        readStream(proc.stderr.getReader(), 'stderr'),
+        readStream(stdoutReader, 'stdout'),
+        readStream(stderrReader, 'stderr'),
         proc.exited,
       ]),
-      new Promise<'timeout'>((resolve) =>
-        setTimeout(() => resolve('timeout'), timeout)
-      ),
+      new Promise<'timeout'>((resolve) => {
+        timeoutId = setTimeout(() => resolve('timeout'), timeout)
+      }),
     ])
 
     if (result === 'timeout') {
       proc.kill()
+      stdoutReader.cancel().catch(() => {})
+      stderrReader.cancel().catch(() => {})
       if (taskId) unregisterProcess(taskId)
       return {
         success: false,
@@ -633,7 +686,8 @@ export async function dispatchKiro(
       }
     }
 
-    const exitCode = await proc.exited
+    clearTimeout(timeoutId)
+    const exitCode = (result as [void, void, number])[2]
     if (taskId) unregisterProcess(taskId)
 
     // Skip first ~30 lines of kiro output (banner/startup)

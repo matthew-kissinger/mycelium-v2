@@ -48,6 +48,10 @@ export const SchedulerConfig = z.object({
   health_check_enabled: z.boolean().default(true),
   health_check_interval_sec: z.number().int().positive().default(60),
 
+  // GitHub sync cycle (repo metadata caching)
+  github_sync_enabled: z.boolean().default(true),
+  github_sync_interval_sec: z.number().int().positive().default(1800), // 30 minutes
+
   // Auto-prune
   auto_prune_enabled: z.boolean().default(true),
   auto_prune_threshold: z.number().int().positive().default(100),

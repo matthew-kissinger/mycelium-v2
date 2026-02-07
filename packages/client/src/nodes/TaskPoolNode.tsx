@@ -1,5 +1,5 @@
 /**
- * TaskPoolNode - Compact task summary with pipeline sub-states
+ * TaskPoolNode - Task summary with full pipeline sub-states
  */
 
 import { memo } from 'react'
@@ -10,20 +10,25 @@ function TaskPoolNodeComponent({ data, selected }: NodeProps) {
   const nodeData = data as TaskPoolNodeData
   const { counts, total } = nodeData
 
+  const hasActiveRetries = counts.failed > 0 && counts.running > 0
+
   const bars = [
     { key: 'unsequenced', label: 'New', color: 'bg-amber-500', text: 'text-amber-400' },
+    { key: 'waiting', label: 'Wait', color: 'bg-orange-500', text: 'text-orange-400' },
     { key: 'ready', label: 'Ready', color: 'bg-lime-500', text: 'text-lime-400' },
     { key: 'running', label: 'Run', color: 'bg-blue-500', text: 'text-blue-400' },
     { key: 'done', label: 'Done', color: 'bg-green-500', text: 'text-green-400' },
     { key: 'failed', label: 'Fail', color: 'bg-red-500', text: 'text-red-400' },
+    { key: 'cancelled', label: 'Canc', color: 'bg-zinc-500', text: 'text-zinc-400' },
   ] as const
 
   return (
     <div
       className={`
-        rounded-lg border-2 bg-zinc-900 px-3 py-2.5 min-w-[200px]
+        rounded-lg border-2 bg-zinc-900 px-3 py-2.5 min-w-[240px]
         ${selected ? 'border-blue-500' : 'border-zinc-700'}
       `}
+      style={hasActiveRetries ? { boxShadow: '0 0 10px 1px rgba(245,158,11,0.15)' } : undefined}
     >
       <Handle type="target" position={Position.Top} id="top" className="!bg-zinc-600 !w-1.5 !h-1.5" />
       <Handle type="target" position={Position.Left} id="left" className="!bg-zinc-600 !w-1.5 !h-1.5" />
@@ -33,7 +38,7 @@ function TaskPoolNodeComponent({ data, selected }: NodeProps) {
           <span className="text-[10px] font-mono px-1 py-0.5 rounded bg-zinc-800 text-zinc-500">TSK</span>
           <span className="text-sm font-medium text-zinc-200">Tasks</span>
         </div>
-        <span className="text-xs text-zinc-500 tabular-nums">{total}</span>
+        <span className="text-sm font-semibold text-zinc-200 tabular-nums">{total}</span>
       </div>
 
       <div className="space-y-1">
@@ -56,6 +61,7 @@ function TaskPoolNodeComponent({ data, selected }: NodeProps) {
       </div>
 
       <Handle type="source" position={Position.Bottom} id="bottom" className="!bg-zinc-600 !w-1.5 !h-1.5" />
+      <Handle type="source" position={Position.Right} id="right" className="!bg-zinc-600 !w-1.5 !h-1.5" />
     </div>
   )
 }

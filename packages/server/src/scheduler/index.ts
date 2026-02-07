@@ -23,7 +23,8 @@ import { runDigestCycle } from './cycles/digest'
 import { runCompactionCycle } from './cycles/compaction'
 import { runArmoryCycle, shouldRunArmory } from './cycles/armory'
 import { runHealthCheckCycle } from './cycles/health'
-import { getTaskStats } from '../db/queries'
+import { runGitHubSyncCycle } from './cycles/github-sync'
+import { getTaskStats, upsertSchedulerStats, getSchedulerStats } from '../db/queries'
 
 // Cycle names
 export type CycleName =
@@ -35,6 +36,7 @@ export type CycleName =
   | 'compaction'
   | 'blocked_check'
   | 'health_check'
+  | 'github_sync'
 
 // Internal cycle state (extends public CycleState with interval ref)
 interface InternalCycleState extends CycleState {
@@ -75,6 +77,7 @@ export function getSchedulerStatus(): SchedulerStatus {
       { name: 'compaction', enabled: true, running: false, runs_completed: 0, errors: 0 },
       { name: 'blocked_check', enabled: true, running: false, runs_completed: 0, errors: 0 },
       { name: 'health_check', enabled: true, running: false, runs_completed: 0, errors: 0 },
+      { name: 'github_sync', enabled: true, running: false, runs_completed: 0, errors: 0 },
     ]
 
     return {
@@ -203,10 +206,49 @@ function initializeScheduler(config: SchedulerConfig): void {
     errors: 0,
   })
 
+  // GitHub sync cycle (repo metadata caching)
+  cycles.set('github_sync', {
+    name: 'github_sync',
+    enabled: config.github_sync_enabled,
+    running: false,
+    runs_completed: 0,
+    errors: 0,
+  })
+
   schedulerState = {
     config,
     running: false,
     cycles,
+  }
+
+  // Load persisted stats from DB (async, non-blocking)
+  loadPersistedStats()
+}
+
+/**
+ * Load persisted scheduler cycle stats from the database.
+ * Restores runs_completed, errors, and last_run from previous sessions.
+ */
+async function loadPersistedStats(): Promise<void> {
+  if (!schedulerState) return
+
+  try {
+    const stats = await getSchedulerStats()
+    for (const stat of stats) {
+      const cycle = schedulerState.cycles.get(stat.cycle_name as CycleName)
+      if (cycle) {
+        cycle.runs_completed = stat.runs_completed
+        cycle.errors = stat.errors
+        if (stat.last_run_at) {
+          cycle.last_run = stat.last_run_at
+        }
+      }
+    }
+    if (stats.length > 0) {
+      console.log(`[Scheduler] Restored persisted stats for ${stats.length} cycles`)
+    }
+  } catch (error) {
+    console.error('[Scheduler] Failed to load persisted stats:', error)
   }
 }
 
@@ -225,6 +267,7 @@ function computeNextRun(cycleName: CycleName): string | undefined {
     compaction: config.compaction_interval_sec,
     armory: 60 * 60,
     health_check: config.health_check_interval_sec,
+    github_sync: config.github_sync_interval_sec,
   }
   const interval = intervalMap[cycleName]
   if (!interval) return undefined
@@ -251,25 +294,57 @@ async function runCycle(
 
   try {
     // Broadcast cycle start event
-    broadcast('scheduler:cycle', {
-      type: 'scheduler:cycle',
+    broadcast('scheduler:cycle:started', {
+      type: 'scheduler:cycle:started',
       cycle: cycleName,
       timestamp: startTime.toISOString(),
     })
 
     await handler()
 
+    const durationMs = Date.now() - startTime.getTime()
+
     // Update state on success
     state.runs_completed++
     state.last_run = startTime.toISOString()
     state.next_run = computeNextRun(cycleName)
-    console.log(`[Scheduler] ${cycleName} cycle completed`)
+    console.log(`[Scheduler] ${cycleName} cycle completed (${durationMs}ms)`)
+
+    // Persist stats to DB
+    upsertSchedulerStats(cycleName, true, durationMs).catch((e) =>
+      console.error(`[Scheduler] Failed to persist stats for ${cycleName}:`, e)
+    )
+
+    broadcast('scheduler:cycle:completed', {
+      type: 'scheduler:cycle:completed',
+      cycle: cycleName,
+      duration_ms: durationMs,
+      success: true,
+      timestamp: new Date().toISOString(),
+    })
   } catch (error) {
+    const durationMs = Date.now() - startTime.getTime()
+    const errorMsg = error instanceof Error ? error.message : String(error)
+
     // Update state on error
     state.errors++
     state.last_run = startTime.toISOString()
     state.next_run = computeNextRun(cycleName)
     console.error(`[Scheduler] ${cycleName} cycle failed:`, error)
+
+    // Persist stats to DB
+    upsertSchedulerStats(cycleName, false, durationMs, errorMsg).catch((e) =>
+      console.error(`[Scheduler] Failed to persist stats for ${cycleName}:`, e)
+    )
+
+    broadcast('scheduler:cycle:completed', {
+      type: 'scheduler:cycle:completed',
+      cycle: cycleName,
+      duration_ms: durationMs,
+      success: false,
+      error: errorMsg,
+      timestamp: new Date().toISOString(),
+    })
   } finally {
     state.running = false
   }
@@ -299,6 +374,7 @@ function startCycles(): void {
   startCycle('digest', () => runDigestCycle(config), config.digest_interval_sec)
   startCycle('compaction', () => runCompactionCycle(config), config.compaction_interval_sec)
   startCycle('health_check', () => runHealthCheckCycle(config), config.health_check_interval_sec)
+  startCycle('github_sync', () => runGitHubSyncCycle(config), config.github_sync_interval_sec)
 
   // Armory cycle - check every hour if batch threshold met
   const armoryState = schedulerState.cycles.get('armory')!
@@ -441,12 +517,6 @@ export async function triggerShepherdForRepo(repoPath: string): Promise<void> {
   // Run shepherd directly (bypass runCycle's global lock for per-repo concurrency)
   const startTime = new Date()
   try {
-    broadcast('scheduler:cycle', {
-      type: 'scheduler:cycle',
-      cycle: 'shepherd',
-      timestamp: startTime.toISOString(),
-    })
-
     await runShepherdCycle(schedulerState!.config, repoPath)
 
     state.runs_completed++
@@ -478,3 +548,4 @@ export { runBlockedCheckCycle } from './cycles/blocked'
 export { runDigestCycle } from './cycles/digest'
 export { runCompactionCycle } from './cycles/compaction'
 export { runHealthCheckCycle } from './cycles/health'
+export { runGitHubSyncCycle } from './cycles/github-sync'

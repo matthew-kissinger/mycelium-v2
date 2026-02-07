@@ -65,10 +65,40 @@ describe('shouldRetry', () => {
     expect(result.fallbackModel).toBe('opus')
   })
 
-  test('top-tier model is not retryable', () => {
+  test('top-tier model falls back to cross-agent', () => {
     const result = shouldRetry('claude', 'opus', null)
-    expect(result.retry).toBe(false)
-    expect(result.fallbackModel).toBeNull()
+    expect(result.retry).toBe(true)
+    expect(result.fallbackModel).toBe('gpt-5.2-codex')
+    expect(result.fallbackAgent).toBe('codex')
+  })
+
+  test('fully exhausted (cross-agent already tried) is not retryable', () => {
+    const ctx: RetryContext = {
+      max_retries: 2,
+      attempt: 1,
+      original_agent: 'claude',
+      original_model: 'opus',
+      history: [
+        {
+          agent: 'claude',
+          model: 'opus',
+          error: 'first error',
+          duration_seconds: 10,
+          completed_at: new Date().toISOString(),
+        },
+        {
+          agent: 'codex',
+          model: 'gpt-5.2-codex',
+          error: 'second error',
+          duration_seconds: 15,
+          completed_at: new Date().toISOString(),
+        },
+      ],
+    }
+    const result = shouldRetry('codex', 'gpt-5.2-codex', JSON.stringify(ctx))
+    // codex has fallback gpt-5.2-codex -> gpt-5.2-codex-high, so it can still retry
+    expect(result.retry).toBe(true)
+    expect(result.fallbackModel).toBe('gpt-5.2-codex-high')
   })
 
   test('max retries exhausted is not retryable', () => {
