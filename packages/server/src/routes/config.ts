@@ -87,7 +87,14 @@ const SchedulerConfigUpdateSchema = z.object({
   discovery_auto_create: z.array(z.string()).optional(),
   // Shepherd
   shepherd_enabled: z.boolean().optional(),
+  shepherd_interval_sec: z.number().int().positive().optional(),
   shepherd_batch_size: z.number().int().positive().optional(),
+  // Health check
+  health_check_enabled: z.boolean().optional(),
+  health_check_interval_sec: z.number().int().positive().optional(),
+  // GitHub sync
+  github_sync_enabled: z.boolean().optional(),
+  github_sync_interval_sec: z.number().int().positive().optional(),
   // Armory
   armory_enabled: z.boolean().optional(),
   armory_batch_size: z.number().int().positive().optional(),
