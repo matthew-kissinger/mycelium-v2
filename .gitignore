@@ -38,3 +38,17 @@ test-results/
 playwright-report/
 playwright/.cache/
 .playwright-mcp/
+
+# Database
+*.db
+*.db-journal
+*.db-wal
+
+# Agent configs (may contain tokens)
+.gemini/
+.claude/
+.cline/
+
+# Credentials
+*.pem
+*.key
