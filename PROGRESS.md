@@ -13,20 +13,25 @@
 - Frontend (three-column layout, React Flow)
 - CLI, MCP server
 
+**Recent Work** (2026-02-06):
+- GitHub integration: client, PR, webhook, github-sync, shepherd PR workflow
+- CI/CD pipeline: GitHub Actions workflow, Dependabot, CodeQL, security scanning
+- Repository rulesets, merge queue support, self-hosted runner config
+- Network hardening: dispatch timeout fix, MAX_PER_REPO atomic slots, cline pool wait queue
+- Architecture: system.ts -> thin facade (1015->365 lines), SSE event standardization
+- Database: 8 indexes, N+1 query fixes, SQL aggregation, proper pagination, schema migration
+- Data integrity: dependency result injection, memory in task context, output markers parsed
+- CLI parity: scheduler, trigger, config, logs/export, inventory commands (~55% coverage)
+- Observability: worktree diffs, token tracking, 6 new SSE events, scheduler stats
+- MIT license, security policy, gitignore hardening for open-source
+- Tests: 284 pass, 0 fail, 1 skip across 12+ test files
+
 **Recent Work** (2026-02-05):
 - Agent health tracking with quota backoff (Gemini, Groq, Cerebras, Codex)
 - Fallback chains with cross-agent retry (codex->cursor, pi->opencode, opencode->gemini, vibe->cline)
 - Cline multi-instance pool (4 concurrent, per-instance gRPC)
 - Agent-provider-model matrix (`agent-matrix.ts` as single source of truth)
 - OpenRouter credit tracking, Cline billing provider selection
-- Discovery prompts with agent routing tiers (60% subscription, 25% free, 15% per-use)
-
-**Recent Work** (2026-02-04):
-- UI-3: Code splitting (471KB bundle), agent stats visualization, Playwright tests
-- UI-2: Mobile responsive layout, SSE sidebar refresh, React Flow edge fix
-- UI-1: Health/credits display, context inspector, sessions tab
-- Agent expansion: Kiro, Vibe, Pi, OpenCode, Copilot added
-- Cerebras provider (free tier, ultra-fast via pi)
 
 ## Phase Status
 
@@ -48,12 +53,17 @@
 | Data | Data-1 to 8 | Complete |
 | UI Polish | UI-1 to 3 | Complete |
 | Agents | Expansion, Health, Fallback | Complete |
+| Network | Fixes, Upgrades, GitHub | Complete |
+| Open Source | License, Security Policy, CI/CD | Complete |
 
 ## What's Next
 
 Focus areas for continued development:
-- Discovery loop optimization (task quality, agent distribution)
-- Agent success rate analysis (per-agent/model/task-type metrics)
+- Implement merge endpoint (currently placeholder - `routes/tasks.ts:684`)
+- Add global unhandled rejection handler to server startup
+- Route-level integration tests (0 of 16 route files tested)
+- Fix context.test.ts timeout (buildMcpSection takes 5s+)
+- Pin dependency versions (all using `latest`)
+- Agent success rate analytics (per-agent/model/task-type metrics)
 - Memory compaction tuning
-- Fruiting session analysis (prompt engineering insights)
-- Additional Playwright test coverage
+- Cursor pagination for large task lists (replace LIMIT/OFFSET)
