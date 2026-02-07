@@ -7,6 +7,7 @@ import { basename, resolve } from 'path'
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
 import { join } from 'path'
 import { broadcast } from '../sse'
+import { detectAllSkillsForRepo } from '../prompts/context'
 
 const app = new Hono()
 
@@ -76,7 +77,10 @@ app.get('/browse', async (c) => {
 // List repos
 app.get('/', async (c) => {
   const rows = await db.select().from(schema.repos)
-  return c.json(rows)
+  return c.json(rows.map(r => ({
+    ...r,
+    skills: JSON.parse(r.skills ?? '[]'),
+  })))
 })
 
 // Health summary - must be before /:id route
@@ -234,7 +238,10 @@ app.get('/:id', async (c) => {
     return c.json({ error: 'Repo not found' }, 404)
   }
 
-  return c.json(rows[0])
+  return c.json({
+    ...rows[0],
+    skills: JSON.parse(rows[0].skills ?? '[]'),
+  })
 })
 
 // Add repo
@@ -268,6 +275,9 @@ app.post('/', zValidator('json', RepoCreateRequest), async (c) => {
   // Try to get description from README
   const description = data.description ?? extractDescription(resolvedPath)
 
+  // Auto-detect skills from package.json deps
+  const skills = detectAllSkillsForRepo(resolvedPath)
+
   const repo = {
     id,
     path: resolvedPath,
@@ -276,6 +286,7 @@ app.post('/', zValidator('json', RepoCreateRequest), async (c) => {
     language,
     mode: data.mode ?? 'align',
     weight: data.weight ?? 50,
+    skills: JSON.stringify(skills),
     created_at: now,
   }
 

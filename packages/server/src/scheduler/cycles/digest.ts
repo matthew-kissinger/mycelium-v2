@@ -46,8 +46,8 @@ export async function runDigestCycle(config: SchedulerConfig): Promise<void> {
   })
 
   // Broadcast event
-  broadcast('system:agent_started', {
-    type: 'system:agent_started',
+  broadcast('agent:started', {
+    type: 'agent:started',
     run_id: run.id,
     agent_type: 'digest',
     timestamp: now.toISOString(),

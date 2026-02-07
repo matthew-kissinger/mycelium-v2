@@ -21,9 +21,16 @@ const instancePool: ClineInstance[] = []
 // Maximum instances to keep in the pool
 const MAX_POOL_SIZE = 4
 
+// Wait queue for callers blocked on a full pool
+const waitQueue: Array<{ resolve: (addr: string) => void; reject: (err: Error) => void }> = []
+
+// Max time to wait for an instance before failing (5 minutes)
+const WAIT_TIMEOUT_MS = 5 * 60 * 1000
+
 /**
  * Get an available cline instance, creating one if needed.
  * Returns the gRPC address to use with --address flag.
+ * Waits if all instances are in use (with timeout).
  */
 export async function acquireClineInstance(): Promise<string> {
   // First, try to find an existing unused instance
@@ -34,34 +41,56 @@ export async function acquireClineInstance(): Promise<string> {
     return available.address
   }
 
-  // If pool is at max, wait for one to become available
-  if (instancePool.length >= MAX_POOL_SIZE) {
-    console.log(`[ClinePool] Pool at max (${MAX_POOL_SIZE}), waiting for available instance...`)
-    // In practice, this should be rare since tasks complete
-    // For now, just return the first one and let cline handle the conflict
-    const first = instancePool[0]
-    first.inUse = true
-    return first.address
+  // Pool not full - create a new instance
+  if (instancePool.length < MAX_POOL_SIZE) {
+    const instance = await createClineInstance()
+    if (instance) {
+      instancePool.push(instance)
+      return instance.address
+    }
+    // Fallback to default if creation fails
+    console.warn('[ClinePool] Failed to create instance, using default')
+    return 'localhost:50052'
   }
 
-  // Create a new instance
-  const instance = await createClineInstance()
-  if (instance) {
-    instancePool.push(instance)
-    return instance.address
-  }
+  // Pool full - wait for one to be released
+  console.log(`[ClinePool] Pool at max (${MAX_POOL_SIZE}), queuing for available instance...`)
+  return new Promise<string>((resolve, reject) => {
+    const entry = { resolve, reject }
+    waitQueue.push(entry)
 
-  // Fallback to default if creation fails
-  console.warn('[ClinePool] Failed to create instance, using default')
-  return 'localhost:50052'
+    const timer = setTimeout(() => {
+      const idx = waitQueue.indexOf(entry)
+      if (idx !== -1) {
+        waitQueue.splice(idx, 1)
+        reject(new Error(`[ClinePool] Timed out waiting for instance after ${WAIT_TIMEOUT_MS / 1000}s`))
+      }
+    }, WAIT_TIMEOUT_MS)
+
+    // Wrap resolve to clear the timeout
+    const originalResolve = entry.resolve
+    entry.resolve = (addr: string) => {
+      clearTimeout(timer)
+      originalResolve(addr)
+    }
+  })
 }
 
 /**
  * Release a cline instance back to the pool.
+ * If callers are waiting, hand the instance directly to the next waiter.
  */
 export function releaseClineInstance(address: string): void {
   const instance = instancePool.find(i => i.address === address)
-  if (instance) {
+  if (!instance) return
+
+  // If someone is waiting, hand the instance directly to them
+  const waiter = waitQueue.shift()
+  if (waiter) {
+    console.log(`[ClinePool] Handing instance ${address} to waiting caller`)
+    // Keep inUse = true since it's being handed off
+    waiter.resolve(instance.address)
+  } else {
     instance.inUse = false
     console.log(`[ClinePool] Released instance at ${address}`)
   }
@@ -121,6 +150,12 @@ async function createClineInstance(): Promise<ClineInstance | null> {
  */
 export async function cleanupClineInstances(): Promise<void> {
   console.log(`[ClinePool] Cleaning up ${instancePool.length} instances...`)
+
+  // Reject any waiting callers
+  while (waitQueue.length > 0) {
+    const waiter = waitQueue.shift()
+    waiter?.reject(new Error('[ClinePool] Shutting down'))
+  }
 
   for (const instance of instancePool) {
     try {

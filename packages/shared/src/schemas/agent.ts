@@ -120,5 +120,7 @@ export const AgentExecuteResult = z.object({
   exit_code: z.number(),
   duration_seconds: z.number(),
   cost_usd: z.number().optional(),
+  input_tokens: z.number().optional(),
+  output_tokens: z.number().optional(),
 })
 export type AgentExecuteResult = z.infer<typeof AgentExecuteResult>

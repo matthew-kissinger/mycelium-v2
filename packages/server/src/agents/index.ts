@@ -17,6 +17,17 @@ export {
   getClinePoolStatus,
 } from './cline-instances'
 export {
+  prepareWorkspace,
+  cleanupWorkspace,
+  cleanupAllWorkspaces,
+  getWorktreeInfo,
+  getBranchDiff,
+  pushBranchToGithub,
+  type WorktreeResult,
+  type WorktreeInfo,
+  type BranchDiff,
+} from './workspace'
+export {
   extractError,
   recordSuccess,
   recordFailure,

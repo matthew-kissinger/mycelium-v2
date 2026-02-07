@@ -81,7 +81,7 @@ discoveryRoutes.post('/trigger', zValidator('json', TriggerRequestSchema), async
   const data = c.req.valid('json')
 
   // Get repo to run discovery on
-  let repo: Awaited<ReturnType<typeof queries.getRepoByPath>> = null
+  let repo: Awaited<ReturnType<typeof queries.getRepoByPath>> | null = null
   if (data.repo_path) {
     repo = await queries.getRepoByPath(data.repo_path)
     if (!repo) {
@@ -107,10 +107,12 @@ discoveryRoutes.post('/trigger', zValidator('json', TriggerRequestSchema), async
   }
 
   // Broadcast start event
-  broadcast('system:agent_started', {
-    id: placeholderRun.id,
+  broadcast('agent:started', {
+    type: 'agent:started',
+    run_id: placeholderRun.id,
     agent_type: 'discovery',
     repo_path: repo.path,
+    timestamp: new Date().toISOString(),
   })
 
   // Run discovery asynchronously (don't await)

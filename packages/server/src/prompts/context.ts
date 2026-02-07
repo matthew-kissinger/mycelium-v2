@@ -22,6 +22,8 @@ interface MycelContextOptions {
   taskId?: string
   taskTitle?: string
   role?: string  // e.g., "task_agent", "shepherd", "discovery"
+  worktreePath?: string
+  branchName?: string
 }
 
 /**
@@ -29,7 +31,7 @@ interface MycelContextOptions {
  * This teaches agents how to communicate with humans via mycel CLI.
  */
 export function buildMycelContext(options: MycelContextOptions = {}): string {
-  const { agentId, model, taskId, taskTitle, role } = options
+  const { agentId, model, taskId, taskTitle, role, worktreePath, branchName } = options
 
   // Build agent identifier prefix
   const prefixParts: string[] = []
@@ -140,7 +142,64 @@ SERVER_PID=$!
 kill $SERVER_PID
 \`\`\`
 
-**Why this matters:** Other agents and the orchestration system share this machine. A server you leave running can block critical infrastructure.`
+**Why this matters:** Other agents and the orchestration system share this machine. A server you leave running can block critical infrastructure.
+
+## Structured Output Markers (REQUIRED)
+
+At the end of your work, include these markers so the orchestration system can parse your results:
+
+\`\`\`
+[FILES_CHANGED] comma-separated list of files you created or modified
+[TESTS_RUN] X passed, Y failed (if you ran tests)
+[BRANCH] branch name (if you created or switched branches)
+\`\`\`
+${buildAgentSpecificInstructions(agentId)}${buildWorktreeContext(worktreePath, branchName)}`
+}
+
+/**
+ * Build agent-specific instruction overrides.
+ * These address known behavioral issues with specific agent CLIs.
+ */
+function buildAgentSpecificInstructions(agentId?: string): string {
+  if (!agentId) return ''
+
+  const sections: string[] = []
+
+  if (agentId === 'kiro') {
+    sections.push(`
+## Kiro Git Safety (CRITICAL)
+
+When committing changes:
+- ONLY stage files YOU created or modified
+- Use \`git add <specific-file>\` for each file
+- NEVER use \`git add .\`, \`git add -A\`, or \`git add --all\`
+- NEVER commit files you did not create or modify
+- Always verify staged files with \`git status\` before committing`)
+  }
+
+  if (agentId === 'cursor') {
+    sections.push(`
+## Test Verification (REQUIRED)
+
+If your task involves writing or running tests, you MUST actually execute them and include the test output. Do not report success without running tests.`)
+  }
+
+  return sections.join('')
+}
+
+/**
+ * Build worktree awareness context when working in an isolated worktree.
+ */
+function buildWorktreeContext(worktreePath?: string, branchName?: string): string {
+  if (!worktreePath || !branchName) return ''
+
+  return `
+
+## Workspace Isolation
+
+You are working in a git worktree at \`${worktreePath}\` on branch \`${branchName}\`.
+This is an isolated workspace - commit freely without worrying about other agents.
+When done, commit your changes to this branch. The system will handle merging.`
 }
 
 // =============================================================================
@@ -497,25 +556,88 @@ interface SkillContent {
 }
 
 const SKILLS_DIR = join(homedir(), '.claude', 'skills')
-const MAX_SKILLS_PER_TASK = 3
+const MAX_SKILLS_PER_TASK = 5
 const MAX_CHARS_PER_SKILL = 8000
 
-// Tech stack to skills mapping
+// Tech stack to skills mapping (dep name -> installed skill names)
 const TECH_SKILL_MAPPING: Record<string, string[]> = {
-  // Three.js
-  three: ['threejs-fundamentals', 'threejs-materials', 'threejs-lighting'],
+  // Three.js ecosystem
+  'three': ['threejs-fundamentals', 'threejs-performance'],
   '@types/three': ['threejs-fundamentals'],
+  'three-mesh-bvh': ['three-mesh-bvh', 'threejs-bvh-skill'],
+  'postprocessing': ['pmndrs-postprocessing', 'threejs-postprocessing'],
 
-  // React
-  react: ['react-patterns', 'react-hooks'],
-  next: ['nextjs-patterns', 'react-patterns'],
+  // Game engines/libs
+  'bitecs': ['bitecs-skill'],
+  'rapier3d': ['rapier3d-physics'],
+  'yuka': ['yuka-game-ai'],
 
-  // Python
-  fastapi: ['fastapi-patterns', 'python-async'],
-  aiosqlite: ['sqlite-patterns', 'python-async'],
+  // React ecosystem
+  'react': ['react-best-practices', 'react-performance'],
+  'react-dom': ['react-best-practices'],
+  '@xyflow/react': ['reactflow-node-graphs'],
+  'reactflow': ['reactflow-node-graphs'],
+  'zustand': ['zustand'],
+
+  // Testing
+  'vitest': ['vitest'],
+  'playwright': ['webapp-testing'],
+  '@playwright/test': ['webapp-testing'],
+  'msw': ['msw-testing'],
 
   // Build tools
-  vite: ['vite-patterns'],
+  'vite': ['vite-optimization'],
+  'tailwindcss': ['ui-design-system'],
+  'eslint': ['eslint-typescript'],
+  '@typescript-eslint/parser': ['eslint-typescript'],
+
+  // Backend
+  'hono': ['hono-framework'],
+  'drizzle-orm': ['drizzle-orm'],
+  'zod': ['zod-validation'],
+  'fastapi': ['fastapi'],
+  'aiosqlite': ['python-async-skill'],
+
+  // AI/Media
+  '@google/generative-ai': ['google-generative-ai'],
+  'sharp': ['nodejs-image-processing'],
+
+  // Other
+  'xstate': ['xstate-skill'],
+  'tweakpane': ['tweakpane-skill'],
+}
+
+// Task keyword to skill mapping (for selectTaskSkills)
+const TASK_SKILL_KEYWORDS: Record<string, string[]> = {
+  'collision': ['threejs-collision', 'threejs-bvh-skill'],
+  'shader': ['threejs-shaders', 'webgpu-threejs-tsl'],
+  'material': ['threejs-materials'],
+  'light': ['threejs-lighting'],
+  'animation': ['threejs-animation'],
+  'particle': ['threejs-particles-skill'],
+  'audio': ['threejs-audio-skill'],
+  'camera': ['game-camera-systems'],
+  'physics': ['rapier3d-physics'],
+  'pathfinding': ['game-ai-pathfinding', 'yuka-game-ai'],
+  'AI': ['game-ai-pathfinding', 'yuka-game-ai'],
+  'state machine': ['game-state-management', 'xstate-skill'],
+  'test': ['vitest', 'game-testing-patterns'],
+  'geometry': ['threejs-geometry'],
+  'texture': ['threejs-textures'],
+  'postprocess': ['pmndrs-postprocessing', 'threejs-postprocessing'],
+  'performance': ['threejs-performance', 'performance-benchmarking'],
+  'loader': ['threejs-loaders'],
+  'interaction': ['threejs-interaction'],
+  'ECS': ['bitecs-skill'],
+  'LOD': ['threejs-performance'],
+  'instanc': ['threejs-performance', 'threejs-geometry'],
+  'worker': ['web-workers'],
+  'SSE': ['sse-streaming'],
+  'react': ['react-best-practices'],
+  'component': ['composition-patterns', 'react-best-practices'],
+  'database': ['drizzle-orm'],
+  'API': ['hono-framework'],
+  'validation': ['zod-validation'],
 }
 
 /**
@@ -636,6 +758,98 @@ export function detectSkillsForRepo(repoPath: string): string[] {
 }
 
 /**
+ * Auto-detect ALL matching skills for a repo (no limit).
+ * Used for storing the full skill list in repos.skills column.
+ */
+export function detectAllSkillsForRepo(repoPath: string): string[] {
+  const packageJsonPath = join(repoPath, 'package.json')
+  if (!existsSync(packageJsonPath)) return []
+
+  try {
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'))
+    const allDeps = {
+      ...(packageJson.dependencies || {}),
+      ...(packageJson.devDependencies || {}),
+    }
+
+    const detectedSkills = new Set<string>()
+    const installedSkills = listInstalledSkills()
+
+    for (const dep of Object.keys(allDeps)) {
+      const mappedSkills = TECH_SKILL_MAPPING[dep] || []
+      for (const skill of mappedSkills) {
+        if (installedSkills.includes(skill)) {
+          detectedSkills.add(skill)
+        }
+      }
+    }
+
+    return Array.from(detectedSkills)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Select the most relevant skills for a specific task based on keywords.
+ * Only returns skills that are in the repo's skill list (intersection).
+ * Falls back to first N from repoSkills if no keyword matches.
+ */
+export function selectTaskSkills(
+  repoSkills: string[],
+  taskTitle: string,
+  taskPrompt?: string,
+  maxSkills = 3,
+): string[] {
+  if (repoSkills.length === 0) return []
+
+  const text = `${taskTitle} ${taskPrompt ?? ''}`.toLowerCase()
+  const matched = new Set<string>()
+
+  for (const [keyword, skills] of Object.entries(TASK_SKILL_KEYWORDS)) {
+    if (text.includes(keyword.toLowerCase())) {
+      for (const skill of skills) {
+        if (repoSkills.includes(skill)) {
+          matched.add(skill)
+        }
+      }
+    }
+  }
+
+  if (matched.size > 0) {
+    return Array.from(matched).slice(0, maxSkills)
+  }
+
+  // Fallback: first N from repo skills
+  return repoSkills.slice(0, maxSkills)
+}
+
+/**
+ * Build a skills list section for discovery prompts.
+ * Shows available skills for a repo so discovery can add --skills to tasks.
+ */
+export function buildRepoSkillsList(repoPath: string, repoSkills?: string[]): string {
+  const skills = repoSkills ?? detectAllSkillsForRepo(repoPath)
+  if (skills.length === 0) return ''
+
+  const lines: string[] = [
+    '## Available Skills for This Repo',
+    '',
+    'When creating tasks, add `--skills skill1,skill2` with 1-3 relevant skills from this list:',
+    '',
+  ]
+
+  for (const skill of skills) {
+    lines.push(`- ${skill}`)
+  }
+
+  lines.push('')
+  lines.push('Only add --skills when specific domain knowledge would help the task.')
+
+  return lines.join('\n')
+}
+
+/**
  * Build skills section for a task prompt.
  */
 export function buildSkillsSection(
@@ -713,6 +927,69 @@ export function buildMcpSection(agent?: string): string {
 
   for (const server of servers) {
     lines.push(`- **${server.name}**: \`${server.command}\``)
+  }
+
+  return lines.join('\n')
+}
+
+// =============================================================================
+// MEMORY - Patterns and warnings from network memory
+// =============================================================================
+
+const MAX_MEMORY_SECTION_CHARS = 2048
+
+/**
+ * Build memory section with patterns and warnings for a repo.
+ * Includes both repo-specific and global memory items.
+ * Returns empty string if no memory exists.
+ */
+export async function buildMemorySection(repoPath: string): Promise<string> {
+  const queries = await import('../db/queries')
+
+  const [repoPatterns, globalPatterns, repoWarnings, globalWarnings] = await Promise.all([
+    queries.getPatterns({ repo_path: repoPath, limit: 10 }),
+    queries.getGlobalPatterns(5),
+    queries.getWarnings({ repo_path: repoPath, limit: 10 }),
+    queries.getGlobalWarnings(5),
+  ])
+
+  // Dedup global items that might overlap with repo items
+  const patternIds = new Set(repoPatterns.map(p => p.id))
+  const uniqueGlobalPatterns = globalPatterns.filter(p => !patternIds.has(p.id))
+  const warningIds = new Set(repoWarnings.map(w => w.id))
+  const uniqueGlobalWarnings = globalWarnings.filter(w => !warningIds.has(w.id))
+
+  const allPatterns = [...repoPatterns, ...uniqueGlobalPatterns]
+  const allWarnings = [...repoWarnings, ...uniqueGlobalWarnings]
+
+  if (allPatterns.length === 0 && allWarnings.length === 0) return ''
+
+  const lines: string[] = ['## Network Memory', '']
+
+  let currentSize = lines.join('\n').length
+
+  if (allPatterns.length > 0) {
+    lines.push('### Patterns')
+    for (const p of allPatterns) {
+      const tags = JSON.parse(p.tags ?? '[]') as string[]
+      const tagSuffix = tags.length > 0 ? ` [tags: ${tags.join(', ')}]` : ''
+      const line = `- ${p.content}${tagSuffix}`
+      if (currentSize + line.length + 1 > MAX_MEMORY_SECTION_CHARS) break
+      lines.push(line)
+      currentSize += line.length + 1
+    }
+    lines.push('')
+  }
+
+  if (allWarnings.length > 0) {
+    lines.push('### Warnings')
+    for (const w of allWarnings) {
+      const line = `- [${w.severity}] ${w.content}`
+      if (currentSize + line.length + 1 > MAX_MEMORY_SECTION_CHARS) break
+      lines.push(line)
+      currentSize += line.length + 1
+    }
+    lines.push('')
   }
 
   return lines.join('\n')

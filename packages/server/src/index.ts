@@ -15,6 +15,7 @@ import configRoutes from './routes/config'
 import promptsRoutes from './routes/prompts'
 import inventoryRoutes from './routes/inventory'
 import devicesRoutes from './routes/devices'
+import githubWebhookRoutes from './routes/github-webhook'
 import {
   systemAgentsRoutes,
   discoveryRoutes,
@@ -26,7 +27,7 @@ import {
 import { getSchedulerStatus } from './scheduler'
 import { getRuns, parseRun, cleanupOrphanedRuns } from './db/queries'
 import { createSSEResponse, getClientCount, getClientInfo, shutdown as shutdownSSE } from './sse'
-import { shutdownRegistry, getRunningProcessCount, cleanupClineInstances, getHealthSummary, checkOpenRouterCredits, checkClineCredits, getClineProvider, getOpenRouterFreeModels, checkAllProviderStatus } from './agents'
+import { shutdownRegistry, getRunningProcessCount, cleanupClineInstances, cleanupAllWorkspaces, getHealthSummary, checkOpenRouterCredits, checkClineCredits, getClineProvider, getOpenRouterFreeModels, checkAllProviderStatus } from './agents'
 import { db, schema } from './db'
 import { sql } from 'drizzle-orm'
 import { initTelegramService, getTelegramService, shutdownTelegramService } from './telegram'
@@ -124,6 +125,7 @@ app.route('/api/config', configRoutes)
 app.route('/api/prompts', promptsRoutes)
 app.route('/api/inventory', inventoryRoutes)
 app.route('/api/devices', devicesRoutes)
+app.route('/api/github', githubWebhookRoutes)
 
 // Initialize database tables
 async function initDb() {
@@ -282,6 +284,124 @@ async function initDb() {
     // Column already exists
   }
 
+  try {
+    // Add worktree_path column for workspace isolation
+    sqlite.exec(`ALTER TABLE tasks ADD COLUMN worktree_path TEXT;`)
+  } catch {
+    // Column already exists
+  }
+
+  try {
+    // Add branch_name column for worktree branch tracking
+    sqlite.exec(`ALTER TABLE tasks ADD COLUMN branch_name TEXT;`)
+  } catch {
+    // Column already exists
+  }
+
+  try {
+    // Add skills column to tasks (JSON array of skill names)
+    sqlite.exec(`ALTER TABLE tasks ADD COLUMN skills TEXT DEFAULT '[]';`)
+  } catch {
+    // Column already exists
+  }
+
+  try {
+    // Add skills column to repos (JSON array of detected skill names)
+    sqlite.exec(`ALTER TABLE repos ADD COLUMN skills TEXT DEFAULT '[]';`)
+  } catch {
+    // Column already exists
+  }
+
+  try {
+    // Add token usage tracking columns to tasks
+    sqlite.exec(`ALTER TABLE tasks ADD COLUMN input_tokens INTEGER;`)
+  } catch {
+    // Column already exists
+  }
+
+  try {
+    sqlite.exec(`ALTER TABLE tasks ADD COLUMN output_tokens INTEGER;`)
+  } catch {
+    // Column already exists
+  }
+
+  // Add missing columns from schema.ts that were never migrated
+  const taskMigrations = [
+    `ALTER TABLE tasks ADD COLUMN timeout_seconds INTEGER;`,
+    `ALTER TABLE tasks ADD COLUMN spec_context TEXT;`,
+    `ALTER TABLE tasks ADD COLUMN retry_context TEXT;`,
+    `ALTER TABLE tasks ADD COLUMN user_input TEXT;`,
+    `ALTER TABLE tasks ADD COLUMN enrich_with_opus INTEGER DEFAULT 0;`,
+    `ALTER TABLE tasks ADD COLUMN github_url TEXT;`,
+    `ALTER TABLE tasks ADD COLUMN github_pr_number INTEGER;`,
+    `ALTER TABLE tasks ADD COLUMN github_pr_url TEXT;`,
+  ]
+  for (const migration of taskMigrations) {
+    try { sqlite.exec(migration) } catch { /* Column already exists */ }
+  }
+
+  // Add GitHub columns to repos table
+  const repoMigrations = [
+    `ALTER TABLE repos ADD COLUMN github_owner TEXT;`,
+    `ALTER TABLE repos ADD COLUMN github_repo TEXT;`,
+    `ALTER TABLE repos ADD COLUMN github_default_branch TEXT;`,
+    `ALTER TABLE repos ADD COLUMN is_public INTEGER;`,
+  ]
+  for (const migration of repoMigrations) {
+    try { sqlite.exec(migration) } catch { /* Column already exists */ }
+  }
+
+  // Create scheduler_stats table if it doesn't exist
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS scheduler_stats (
+    cycle_name TEXT PRIMARY KEY,
+    runs_completed INTEGER DEFAULT 0,
+    errors INTEGER DEFAULT 0,
+    last_run_at TEXT,
+    last_duration_ms INTEGER,
+    last_error TEXT,
+    updated_at TEXT
+  );`)
+
+  // Create fruiting_sessions table if it doesn't exist
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS fruiting_sessions (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    repo_path TEXT NOT NULL,
+    agent TEXT,
+    model TEXT,
+    context_trace TEXT,
+    full_prompt TEXT,
+    session_log TEXT,
+    created_at TEXT NOT NULL
+  );`)
+
+  // Create agent_stats table if it doesn't exist
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS agent_stats (
+    agent_id TEXT PRIMARY KEY,
+    total_tasks INTEGER DEFAULT 0,
+    successful INTEGER DEFAULT 0,
+    failed INTEGER DEFAULT 0,
+    success_rate REAL DEFAULT 0,
+    total_cost REAL DEFAULT 0,
+    best_for TEXT,
+    avoid_for TEXT,
+    updated_at TEXT
+  );`)
+
+  // =========================================================================
+  // Indexes for query performance
+  // =========================================================================
+  sqlite.exec(`
+    CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+    CREATE INDEX IF NOT EXISTS idx_tasks_repo_status ON tasks(repo_path, status);
+    CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
+    CREATE INDEX IF NOT EXISTS idx_sessions_task ON fruiting_sessions(task_id);
+    CREATE INDEX IF NOT EXISTS idx_runs_status ON system_agent_runs(status, started_at);
+    CREATE INDEX IF NOT EXISTS idx_patterns_repo ON memory_patterns(repo_path);
+    CREATE INDEX IF NOT EXISTS idx_warnings_repo ON memory_warnings(repo_path);
+    CREATE INDEX IF NOT EXISTS idx_history_key ON config_history(config_key, changed_at);
+  `)
+
   console.log('Database initialized')
 }
 
@@ -309,6 +429,16 @@ initDb().then(async () => {
     console.log(`[Startup] Cleaned up ${cleaned} orphaned system agent runs`)
   }
 
+  // Clean up stale worktrees from previous sessions
+  try {
+    const worktreesCleaned = await cleanupAllWorkspaces()
+    if (worktreesCleaned > 0) {
+      console.log(`[Startup] Cleaned up ${worktreesCleaned} stale worktrees`)
+    }
+  } catch (error) {
+    console.error('[Startup] Error cleaning worktrees:', error)
+  }
+
   // Initialize Telegram after DB is ready
   await initTelegram()
 
@@ -329,6 +459,13 @@ async function gracefulShutdown(signal: string) {
 
   // Clean up cline instances
   await cleanupClineInstances()
+
+  // Clean up all worktrees
+  try {
+    await cleanupAllWorkspaces()
+  } catch (error) {
+    console.error('[SHUTDOWN] Error cleaning worktrees:', error)
+  }
 
   // Stop Telegram poller
   const telegram = getTelegramService()

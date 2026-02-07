@@ -34,7 +34,7 @@ import {
   getAgentsConfigPath,
   getEnabledAgents,
 } from '../config'
-import { getConfigHistory } from '../db/config-store'
+import { getConfigHistory, saveConfigOverride } from '../db/config-store'
 
 const app = new Hono()
 
@@ -113,8 +113,9 @@ app.patch('/scheduler', zValidator('json', SchedulerConfigUpdateSchema), async (
   // Merge updates
   const updated: SchedulerConfig = { ...current, ...updates }
 
-  // Save to disk
+  // Save to disk (fallback) and DB (primary)
   saveSchedulerConfig(updated)
+  saveConfigOverride('scheduler', JSON.stringify(updated), 'api')
 
   return c.json({
     message: 'Scheduler config updated',
@@ -167,8 +168,9 @@ app.patch('/genesis', zValidator('json', GenesisConfigUpdateSchema), async (c) =
   // Merge updates
   const updated: GenesisConfig = { ...current, ...processedUpdates }
 
-  // Save to disk
+  // Save to disk (fallback) and DB (primary)
   saveGenesisConfig(updated)
+  saveConfigOverride('genesis', JSON.stringify(updated), 'api')
 
   return c.json({
     message: 'Genesis config updated',
@@ -232,8 +234,9 @@ app.patch('/hooks', zValidator('json', HooksConfigUpdateSchema), async (c) => {
   // Merge updates
   const updated: HooksConfig = { ...current, ...processedUpdates }
 
-  // Save to disk
+  // Save to disk (fallback) and DB (primary)
   saveHooksConfig(updated)
+  saveConfigOverride('hooks', JSON.stringify(updated), 'api')
 
   return c.json({
     message: 'Hooks config updated',
@@ -306,8 +309,11 @@ app.patch('/agents/:name', zValidator('json', AgentConfigUpdateSchema), async (c
     }
   }
 
-  // Update agent config
+  // Update agent config (saves to disk)
   const updated = updateAgentConfig(agentName, processedUpdates)
+
+  // Also save to DB for history tracking
+  saveConfigOverride(`agents:${agentName}`, JSON.stringify(updated), 'api')
 
   return c.json({
     message: `Agent ${agentName} config updated`,

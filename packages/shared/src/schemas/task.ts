@@ -83,6 +83,9 @@ export const Task = z.object({
   depends_on: z.array(z.string().uuid()).default([]),
   sequenced: z.boolean().default(true),
 
+  // Skills (explicit skill names for this task)
+  skills: z.array(z.string()).default([]),
+
   // Execution results
   result: z.string().optional(),
   parsed_result: ParsedResult.optional(),
@@ -116,6 +119,7 @@ export const TaskCreate = z.object({
   model: z.string().optional(),
   provider: ProviderType.optional(), // For cline: 'openrouter' or 'cline'
   depends_on: z.array(z.string()).default([]),
+  skills: z.array(z.string()).default([]),
   timeout_seconds: z.number().optional(),
 })
 export type TaskCreate = z.infer<typeof TaskCreate>
@@ -129,6 +133,7 @@ export const TaskUpdate = z.object({
   result: z.string().optional(),
   error: z.string().optional(),
   depends_on: z.array(z.string()).optional(),
+  skills: z.array(z.string()).optional(),
   sequenced: z.boolean().optional(),
 })
 export type TaskUpdate = z.infer<typeof TaskUpdate>

@@ -81,9 +81,15 @@ const FALLBACK_MODEL_MAP: Record<string, Record<string, string | null>> = {
  * Maps agent -> { agent, model } for the fallback target.
  */
 const CROSS_AGENT_FALLBACK: Record<string, { agent: string; model: string }> = {
-  codex: { agent: 'cursor', model: 'composer-1' },         // Same capability tier (subscription)
+  claude: { agent: 'codex', model: 'gpt-5.2-codex' },       // Subscription -> subscription
+  codex: { agent: 'cursor', model: 'composer-1' },           // Subscription -> subscription
+  cursor: { agent: 'claude', model: 'sonnet' },              // Subscription -> subscription
+  gemini: { agent: 'pi', model: 'google/gemini-2.5-flash' }, // Free -> free via OpenRouter
+  cline: { agent: 'pi', model: 'qwen/qwen3-coder' },        // Per-use -> per-use via OpenRouter
+  kiro: { agent: 'claude', model: 'sonnet' },                // Subscription -> subscription
+  copilot: { agent: 'claude', model: 'sonnet' },             // Subscription -> subscription
   pi: { agent: 'opencode', model: 'opencode/kimi-k2.5-free' }, // Free alternative
-  opencode: { agent: 'gemini', model: 'flash' },           // Free alternative
+  opencode: { agent: 'gemini', model: 'flash' },             // Free alternative
   vibe: { agent: 'cline', model: 'mistralai/devstral-2512' }, // Same Mistral backend via OpenRouter
 }
 

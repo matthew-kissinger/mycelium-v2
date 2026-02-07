@@ -221,6 +221,7 @@ export function registerTaskCommands(program: Command): void {
     .option('--provider <provider>', 'Provider for cline/pi (openrouter, groq, cerebras, etc.)')
     .option('-p, --prompt <prompt>', 'Task prompt/specification')
     .option('-d, --depends-on <ids...>', 'Task IDs this task depends on')
+    .option('--skills <skills>', 'Comma-separated skill names (e.g. threejs-collision,vitest)')
     .option('--json', 'Output as JSON')
     .action(async (title: string, options) => {
       try {
@@ -254,6 +255,9 @@ export function registerTaskCommands(program: Command): void {
         if (dependsOn.length > 0) {
           body.depends_on = dependsOn
         }
+        if (options.skills) {
+          body.skills = options.skills.split(',').map((s: string) => s.trim()).filter(Boolean)
+        }
 
         const response = await client.post<TaskResponse>('/api/tasks', body)
 
@@ -276,6 +280,9 @@ export function registerTaskCommands(program: Command): void {
         }
         if (response.task.depends_on.length > 0) {
           console.log(`  Deps:  ${response.task.depends_on.map(shortId).join(', ')}`)
+        }
+        if (response.task.skills?.length > 0) {
+          console.log(`  Skills: ${response.task.skills.join(', ')}`)
         }
       } catch (err) {
         if (err instanceof ApiError) {

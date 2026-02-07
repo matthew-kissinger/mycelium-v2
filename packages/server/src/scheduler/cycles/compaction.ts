@@ -25,11 +25,22 @@ import { getTelegramService } from '../../telegram'
  * Runs every 4 hours, dispatches to Haiku for intelligent cleanup.
  */
 export async function runCompactionCycle(config: SchedulerConfig): Promise<void> {
-  // Session log TTL cleanup runs every cycle regardless
+  // TTL cleanups run every cycle regardless of agent dispatch
   try {
     await queries.cleanExpiredSessionLogs()
   } catch (e) {
     console.error('[Compaction] Session log cleanup error:', e)
+  }
+  try {
+    await queries.cleanExpiredSessionPrompts(7) // 7-day retention for full_prompt
+  } catch (e) {
+    console.error('[Compaction] Session prompt cleanup error:', e)
+  }
+  try {
+    const historyPruned = await queries.pruneConfigHistory(90, 1000)
+    if (historyPruned > 0) console.log(`[Compaction] Pruned ${historyPruned} old config_history entries`)
+  } catch (e) {
+    console.error('[Compaction] Config history cleanup error:', e)
   }
 
   console.log('[Compaction] Starting cycle...')
@@ -50,8 +61,8 @@ export async function runCompactionCycle(config: SchedulerConfig): Promise<void>
   })
 
   // Broadcast event
-  broadcast('system:agent_started', {
-    type: 'system:agent_started',
+  broadcast('agent:started', {
+    type: 'agent:started',
     run_id: run.id,
     agent_type: 'compaction',
     timestamp: now.toISOString(),
@@ -62,6 +73,12 @@ export async function runCompactionCycle(config: SchedulerConfig): Promise<void>
     let pruneCount = 0
     if (config.auto_prune_enabled) {
       pruneCount = await pruneOldTasks(config)
+      // Also prune old failed/cancelled tasks (30-day retention, keep 50 recent)
+      const failedPruned = await queries.pruneFailedAndCancelledTasks(30, 50)
+      if (failedPruned > 0) {
+        console.log(`[Compaction] Pruned ${failedPruned} old failed/cancelled tasks`)
+      }
+      pruneCount += failedPruned
     }
 
     // Then compact memory per repo (slower, uses Haiku)
@@ -102,6 +119,16 @@ export async function runCompactionCycle(config: SchedulerConfig): Promise<void>
       duration_seconds: (Date.now() - now.getTime()) / 1000,
       timestamp: new Date().toISOString(),
     })
+
+    // Broadcast compaction-specific event with memory stats
+    broadcast('memory:compaction_completed', {
+      type: 'memory:compaction_completed',
+      patterns_before: 0, // Exact counts not tracked in auto cycle
+      patterns_after: 0,
+      warnings_before: 0,
+      warnings_after: 0,
+      timestamp: new Date().toISOString(),
+    })
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error)
     await queries.failRun(run.id, errorMsg)
@@ -128,11 +155,13 @@ export async function runCompactionCycle(config: SchedulerConfig): Promise<void>
 export async function runCompactionCycleManual(config: SchedulerConfig): Promise<void> {
   console.log('[Compaction] Starting manual compaction...')
 
-  // Session log TTL cleanup
+  // TTL cleanups
   try {
     await queries.cleanExpiredSessionLogs()
+    await queries.cleanExpiredSessionPrompts(7)
+    await queries.pruneConfigHistory(90, 1000)
   } catch (e) {
-    console.error('[Compaction] Session log cleanup error:', e)
+    console.error('[Compaction] Cleanup error:', e)
   }
 
   const run = await queries.createRun({
@@ -140,8 +169,8 @@ export async function runCompactionCycleManual(config: SchedulerConfig): Promise
     context: { scheduled: false, manual: true },
   })
 
-  broadcast('system:agent_started', {
-    type: 'system:agent_started',
+  broadcast('agent:started', {
+    type: 'agent:started',
     run_id: run.id,
     agent_type: 'compaction',
     timestamp: new Date().toISOString(),
@@ -152,6 +181,7 @@ export async function runCompactionCycleManual(config: SchedulerConfig): Promise
     let pruneCount = 0
     if (config.auto_prune_enabled) {
       pruneCount = await pruneOldTasks(config)
+      pruneCount += await queries.pruneFailedAndCancelledTasks(30, 50)
     }
 
     // Then compact memory (slower, uses Haiku)

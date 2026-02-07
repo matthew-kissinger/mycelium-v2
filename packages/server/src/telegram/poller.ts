@@ -11,10 +11,13 @@
  */
 
 import { eq, desc } from 'drizzle-orm'
+import { spawn } from 'bun'
 import { db, schema } from '../db'
+import * as queries from '../db/queries'
 import { broadcast } from '../sse'
 import { dispatch } from '../agents/dispatch'
 import { buildMycelContext } from '../prompts/context'
+import { escapeHtml } from './messages'
 import type {
   TelegramUpdate,
   TelegramMessage,
@@ -227,9 +230,11 @@ async function runDiscoveryContinuation(
     agentId: 'task_creator',
   })
 
+  const sanitizedResponse = '```\n' + humanResponse + '\n```'
+
   const prompt = DISCOVERY_CONTINUATION_PROMPT
     .replace('{original_report}', signalQuestion)
-    .replace('{human_response}', humanResponse)
+    .replace('{human_response}', sanitizedResponse)
     .replace('{repo_path}', repoPath ?? '')
     .replace('{MYCEL_CONTEXT}', mycelContext)
 
@@ -266,9 +271,11 @@ async function runGenesisContinuation(
     agentId: 'genesis',
   })
 
+  const sanitizedResponse = '```\n' + humanResponse + '\n```'
+
   const prompt = GENESIS_CONTINUATION_PROMPT
     .replace('{original_proposal}', signalQuestion)
-    .replace('{human_response}', humanResponse)
+    .replace('{human_response}', sanitizedResponse)
     .replace('{MYCEL_CONTEXT}', mycelContext)
 
   try {
@@ -305,9 +312,11 @@ async function runShepherdContinuation(
     agentId: 'shepherd',
   })
 
+  const sanitizedResponse = '```\n' + humanResponse + '\n```'
+
   const prompt = SHEPHERD_CONTINUATION_PROMPT
     .replace('{original_question}', signalQuestion)
-    .replace('{human_response}', humanResponse)
+    .replace('{human_response}', sanitizedResponse)
     .replace('{MYCEL_CONTEXT}', mycelContext)
 
   try {
@@ -378,6 +387,8 @@ async function handleMessage(
   let signalId: string | undefined
   let signal: typeof schema.signals.$inferSelect | undefined
 
+  const SIGNAL_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
+
   if (message.reply_to_message) {
     const replyToMsgId = message.reply_to_message.message_id
 
@@ -389,20 +400,45 @@ async function handleMessage(
       .limit(1)
 
     if (signalsByMsgId.length > 0) {
-      signal = signalsByMsgId[0]
-      signalId = signal.id
+      const candidate = signalsByMsgId[0]
+      // Check TTL - skip if signal is older than 24 hours
+      const signalAge = Date.now() - new Date(candidate.created_at).getTime()
+      if (signalAge < SIGNAL_TTL_MS) {
+        signal = candidate
+        signalId = signal.id
+      } else {
+        console.log(`[Poller] Skipping expired signal ${candidate.id.slice(0, 8)} (${Math.round(signalAge / 3600000)}h old)`)
+      }
     } else {
-      // Fallback: match most recent pending signal (simple heuristic)
+      // Fallback: match most recent pending signal, require signal ID prefix in text
       const pendingSignals = await db
         .select()
         .from(schema.signals)
         .where(eq(schema.signals.status, 'pending'))
         .orderBy(desc(schema.signals.created_at))
-        .limit(1)
+        .limit(5)
 
-      if (pendingSignals.length > 0) {
-        signal = pendingSignals[0]
-        signalId = signal.id
+      // Check for signal ID prefix in the text (first 8 chars)
+      for (const ps of pendingSignals) {
+        const shortId = ps.id.slice(0, 8)
+        const signalAge = Date.now() - new Date(ps.created_at).getTime()
+        if (signalAge >= SIGNAL_TTL_MS) continue
+
+        if (text.includes(shortId)) {
+          signal = ps
+          signalId = signal.id
+          break
+        }
+      }
+
+      // Final fallback: if only one pending signal and it's recent, use it
+      if (!signal && pendingSignals.length === 1) {
+        const candidate = pendingSignals[0]
+        const signalAge = Date.now() - new Date(candidate.created_at).getTime()
+        if (signalAge < SIGNAL_TTL_MS) {
+          signal = candidate
+          signalId = signal.id
+        }
       }
     }
   }
@@ -474,22 +510,53 @@ async function handleSignalResponse(
 
   // Spawn continuation agents based on signal type
   // Run in background (don't await) so we don't block the poller
+  const runWithRetry = async (
+    name: string,
+    fn: () => Promise<void>,
+    signalId: string,
+    tg: TelegramService
+  ) => {
+    try {
+      await fn()
+    } catch (err) {
+      console.error(`[Poller] ${name} continuation failed, retrying in 30s:`, err)
+      await new Promise(resolve => setTimeout(resolve, 30_000))
+      try {
+        await fn()
+      } catch (retryErr) {
+        console.error(`[Poller] ${name} continuation retry failed:`, retryErr)
+        // Mark signal as error
+        await db
+          .update(schema.signals)
+          .set({ status: 'error' })
+          .where(eq(schema.signals.id, signalId))
+        // Notify user
+        tg.sendMessage('Failed to process your response. Please try again or contact the operator.').catch(() => {})
+      }
+    }
+  }
+
   if (isDiscoverySignal(signal.question)) {
-    runDiscoveryContinuation(
-      signal.question,
-      response,
-      signal.repo_path ?? undefined
-    ).catch((err) => console.error('[Poller] Discovery continuation error:', err))
+    runWithRetry(
+      'Discovery',
+      () => runDiscoveryContinuation(signal.question, response, signal.repo_path ?? undefined),
+      signal.id,
+      telegram
+    )
   } else if (isGenesisSignal(signal.question)) {
-    runGenesisContinuation(signal.question, response).catch((err) =>
-      console.error('[Poller] Genesis continuation error:', err)
+    runWithRetry(
+      'Genesis',
+      () => runGenesisContinuation(signal.question, response),
+      signal.id,
+      telegram
     )
   } else if (isShepherdSignal(signal.question)) {
-    runShepherdContinuation(
-      signal.question,
-      response,
-      signal.repo_path ?? undefined
-    ).catch((err) => console.error('[Poller] Shepherd continuation error:', err))
+    runWithRetry(
+      'Shepherd',
+      () => runShepherdContinuation(signal.question, response, signal.repo_path ?? undefined),
+      signal.id,
+      telegram
+    )
   }
 }
 
@@ -570,7 +637,8 @@ async function handleCommand(
           `Available commands:\n` +
           `/ping - Check connection\n` +
           `/status - View system status\n` +
-          `/pending - View pending signals`
+          `/pending - View pending signals\n` +
+          `/worktrees - Active worktrees per repo`
       )
       break
 
@@ -584,6 +652,11 @@ async function handleCommand(
 
     case '/pending':
       await sendPendingSignals(telegram)
+      break
+
+    case '/worktrees':
+    case '/ws':
+      await sendWorktreeStatus(telegram)
       break
 
     default:
@@ -648,6 +721,102 @@ async function sendPendingSignals(telegram: TelegramService): Promise<void> {
   }
 
   await telegram.sendMessage(message)
+}
+
+/**
+ * Send worktree status per repo.
+ */
+async function sendWorktreeStatus(telegram: TelegramService): Promise<void> {
+  const repos = await queries.getRepos()
+
+  if (repos.length === 0) {
+    await telegram.sendMessage('No repos registered.')
+    return
+  }
+
+  let message = '<b>Worktree Status</b>\n\n'
+  let totalWorktrees = 0
+
+  for (const repo of repos) {
+    try {
+      const proc = spawn({
+        cmd: ['git', 'worktree', 'list', '--porcelain'],
+        cwd: repo.path,
+        stdout: 'pipe',
+        stderr: 'pipe',
+        stdin: 'ignore',
+      })
+
+      const stdout = await new Response(proc.stdout).text()
+      const exitCode = await proc.exited
+
+      if (exitCode !== 0) continue
+
+      // Parse porcelain output - skip the main worktree
+      const blocks = stdout.trim().split('\n\n').filter(Boolean)
+      const worktrees: Array<{ branch: string; path: string }> = []
+
+      for (const block of blocks) {
+        const lines = block.split('\n')
+        const pathLine = lines.find(l => l.startsWith('worktree '))
+        const branchLine = lines.find(l => l.startsWith('branch '))
+
+        if (pathLine && branchLine) {
+          const wPath = pathLine.replace('worktree ', '')
+          const branch = branchLine.replace('branch refs/heads/', '')
+
+          // Only show mycelium worktrees
+          if (branch.startsWith('mycel/')) {
+            worktrees.push({ branch, path: wPath })
+          }
+        }
+      }
+
+      if (worktrees.length > 0) {
+        message += `<b>${escapeHtml(repo.name)}</b>\n`
+
+        for (const wt of worktrees) {
+          // Get ahead/behind counts
+          let statusStr = ''
+          try {
+            const logProc = spawn({
+              cmd: ['git', 'rev-list', '--left-right', '--count', `main...${wt.branch}`],
+              cwd: repo.path,
+              stdout: 'pipe',
+              stderr: 'pipe',
+              stdin: 'ignore',
+            })
+            const logOut = await new Response(logProc.stdout).text()
+            const logExit = await logProc.exited
+
+            if (logExit === 0 && logOut.trim()) {
+              const [behind, ahead] = logOut.trim().split('\t').map(Number)
+              const parts: string[] = []
+              if (ahead > 0) parts.push(`${ahead} ahead`)
+              if (behind > 0) parts.push(`${behind} behind`)
+              statusStr = parts.length > 0 ? ` (${parts.join(', ')})` : ' (synced)'
+            }
+          } catch {
+            // Ignore - branch might not track main
+          }
+
+          message += `  <code>${escapeHtml(wt.branch)}</code>${statusStr}\n`
+          totalWorktrees++
+        }
+
+        message += '\n'
+      }
+    } catch {
+      // Skip repos that fail
+    }
+  }
+
+  if (totalWorktrees === 0) {
+    await telegram.sendMessage('No active worktrees.')
+  } else {
+    message += `<b>Total:</b> ${totalWorktrees} active worktree${totalWorktrees === 1 ? '' : 's'}`
+    await telegram.sendMessage(message)
+  }
 }
 
 // =============================================================================

@@ -24,12 +24,11 @@ export interface TaskInfo {
   completed_at?: string | null
 }
 
-export interface DiscoveryReportInfo {
-  repo_path: string
-  repo_name: string
-  findings: string[]
-  tasks_created?: number
-  mode: 'align' | 'auto'
+export interface BranchEvaluation {
+  task_id: string
+  decision: string
+  reason: string
+  agent?: string
 }
 
 export interface ShepherdReportInfo {
@@ -42,16 +41,7 @@ export interface ShepherdReportInfo {
   merges?: number
   rejects?: number
   defers?: number
-}
-
-export interface DigestSummaryInfo {
-  period: string
-  total_tasks: number
-  completed_tasks: number
-  failed_tasks: number
-  total_cost_usd: number
-  active_repos: string[]
-  pending_signals: number
+  branch_evaluations?: BranchEvaluation[]
 }
 
 export interface SignalInfo {
@@ -65,33 +55,6 @@ export interface SignalInfo {
 // =============================================================================
 // Task Messages
 // =============================================================================
-
-export function formatTaskCreated(task: TaskInfo): string {
-  const shortId = task.id.slice(0, 8)
-  const repoName = task.repo_path?.split('/').pop() ?? 'unknown'
-
-  return (
-    `<b>New Task Created</b>\n\n` +
-    `<b>ID:</b> <code>${shortId}</code>\n` +
-    `<b>Title:</b> ${escapeHtml(task.title)}\n` +
-    `<b>Repo:</b> ${escapeHtml(repoName)}\n` +
-    (task.agent ? `<b>Agent:</b> ${task.agent}\n` : '')
-  )
-}
-
-export function formatTaskStarted(task: TaskInfo): string {
-  const shortId = task.id.slice(0, 8)
-  const repoName = task.repo_path?.split('/').pop() ?? 'unknown'
-
-  return (
-    `\u25b6\ufe0f <b>Task Started</b>\n\n` +
-    `<b>ID:</b> <code>${shortId}</code>\n` +
-    `<b>Title:</b> ${escapeHtml(task.title)}\n` +
-    `<b>Repo:</b> ${escapeHtml(repoName)}\n` +
-    (task.agent ? `<b>Agent:</b> ${task.agent}` : '') +
-    (task.model ? ` (${task.model})` : '')
-  )
-}
 
 export function formatTaskCompleted(task: TaskInfo): string {
   const shortId = task.id.slice(0, 8)
@@ -169,49 +132,105 @@ export function formatTaskRetrying(info: TaskRetryInfo): string {
   )
 }
 
-export function formatTaskUpdate(task: TaskInfo): string {
-  switch (task.status) {
-    case 'running':
-      return formatTaskStarted(task)
-    case 'done':
-      return formatTaskCompleted(task)
-    case 'failed':
-      return formatTaskFailed(task)
-    default:
-      return formatTaskCreated(task)
+// =============================================================================
+// Batch Task Messages
+// =============================================================================
+
+export interface BatchTaskItem {
+  title: string
+  agent?: string | null
+  status: string
+  duration_seconds?: number | null
+  cost_usd?: number | null
+  branchName?: string | null
+}
+
+export function formatTaskBatch(
+  repoName: string,
+  tasks: BatchTaskItem[],
+  timeRange?: { start: string; end: string }
+): string {
+  const completed = tasks.filter((t) => t.status === 'done').length
+  const failed = tasks.filter((t) => t.status === 'failed').length
+
+  let header = ''
+  if (completed > 0 && failed > 0) {
+    header = `${completed} completed, ${failed} failed`
+  } else if (completed > 0) {
+    header = `${completed} task${completed === 1 ? '' : 's'} completed`
+  } else {
+    header = `${failed} task${failed === 1 ? '' : 's'} failed`
   }
+
+  let message = `\ud83d\udce6 <b>${header} on ${escapeHtml(repoName)}</b>`
+  if (timeRange) {
+    const start = new Date(timeRange.start)
+    const end = new Date(timeRange.end)
+    const startStr = `${start.getHours()}:${String(start.getMinutes()).padStart(2, '0')}`
+    const endStr = `${end.getHours()}:${String(end.getMinutes()).padStart(2, '0')}`
+    message += ` (${startStr}-${endStr})`
+  }
+  message += '\n'
+
+  for (const task of tasks) {
+    const icon = task.status === 'done' ? '\u2705' : '\u274c'
+    const agent = task.agent ? ` (${escapeHtml(task.agent)})` : ''
+    const duration = task.duration_seconds ? ` ${formatDuration(task.duration_seconds)}` : ''
+    const statusLabel = task.status === 'done'
+      ? (task.branchName ? ' - ready to merge' : '')
+      : ' FAILED'
+
+    message += `${icon} ${escapeHtml(truncate(task.title, 40))}${agent}${duration}${statusLabel}\n`
+  }
+
+  const totalCost = tasks.reduce((sum, t) => sum + (t.cost_usd ?? 0), 0)
+  if (totalCost > 0) {
+    message += `\n<b>Cost:</b> $${totalCost.toFixed(4)}`
+  }
+
+  return message
 }
 
 // =============================================================================
-// Discovery Messages
+// Merge Messages
 // =============================================================================
 
-export function formatDiscoveryReport(report: DiscoveryReportInfo): string {
-  const modeIcon = report.mode === 'auto' ? '\ud83e\udd16' : '\ud83d\udc41\ufe0f'
-  const modeLabel = report.mode === 'auto' ? 'Auto' : 'Align'
+export function formatMergeConflict(
+  repoPath: string,
+  branchName: string,
+  agent: string,
+  conflictFiles: string[]
+): string {
+  const repoName = repoPath.split('/').pop() ?? 'unknown'
 
   let message =
-    `${modeIcon} <b>Discovery Report: ${escapeHtml(report.repo_name)}</b>\n` +
-    `<i>${escapeHtml(report.repo_path)}</i>\n\n`
+    `\u26a0\ufe0f <b>MERGE CONFLICT: ${escapeHtml(repoName)}</b>\n\n` +
+    `<b>Branch:</b> ${escapeHtml(branchName)} (${escapeHtml(agent)})\n` +
+    `<b>Conflicts:</b>\n`
 
-  if (report.findings.length > 0) {
-    message += `<b>Findings:</b>\n`
-    for (const finding of report.findings.slice(0, 5)) {
-      message += `  \u2022 ${escapeHtml(finding)}\n`
-    }
-    if (report.findings.length > 5) {
-      message += `  ... and ${report.findings.length - 5} more\n`
-    }
-    message += '\n'
+  for (const file of conflictFiles.slice(0, 5)) {
+    message += `  \u2022 <code>${escapeHtml(file)}</code>\n`
   }
-
-  if (report.tasks_created !== undefined && report.tasks_created > 0) {
-    message += `<b>Tasks Created:</b> ${report.tasks_created}\n`
+  if (conflictFiles.length > 5) {
+    message += `  ... and ${conflictFiles.length - 5} more\n`
   }
-
-  message += `<b>Mode:</b> ${modeLabel}`
 
   return message
+}
+
+export function formatMergeSuccess(
+  repoPath: string,
+  branchName: string,
+  agent: string,
+  filesMerged: number
+): string {
+  const repoName = repoPath.split('/').pop() ?? 'unknown'
+
+  return (
+    `\u2705 <b>MERGED: ${escapeHtml(repoName)}</b>\n\n` +
+    `<b>Branch:</b> ${escapeHtml(branchName)} (${escapeHtml(agent)})\n` +
+    `<b>Files:</b> ${filesMerged} merged`
+  )
 }
 
 // =============================================================================
@@ -257,45 +276,27 @@ export function formatShepherdReport(report: ShepherdReportInfo): string {
   }
 
   if (decisions.length > 0) {
-    message += `<b>Decisions:</b> ${decisions.join(', ')}`
+    message += `<b>Decisions:</b> ${decisions.join(', ')}\n`
   }
 
-  return message
-}
+  // Branch evaluation details
+  if (report.branch_evaluations && report.branch_evaluations.length > 0) {
+    const merged = report.branch_evaluations.filter((b) => b.decision === 'MERGE')
+    const rejected = report.branch_evaluations.filter((b) => b.decision === 'REJECT')
 
-// =============================================================================
-// Digest Messages
-// =============================================================================
-
-export function formatDigestSummary(digest: DigestSummaryInfo): string {
-  const successRate =
-    digest.total_tasks > 0
-      ? ((digest.completed_tasks / digest.total_tasks) * 100).toFixed(1)
-      : '0'
-
-  let message =
-    `\ud83d\udcca <b>Digest Summary (${escapeHtml(digest.period)})</b>\n\n` +
-    `<b>Tasks:</b>\n` +
-    `  Total: ${digest.total_tasks}\n` +
-    `  Completed: ${digest.completed_tasks}\n` +
-    `  Failed: ${digest.failed_tasks}\n` +
-    `  Success Rate: ${successRate}%\n\n` +
-    `<b>Cost:</b> $${digest.total_cost_usd.toFixed(2)}\n\n`
-
-  if (digest.active_repos.length > 0) {
-    message += `<b>Active Repos:</b>\n`
-    for (const repo of digest.active_repos.slice(0, 5)) {
-      const name = repo.split('/').pop() ?? repo
-      message += `  \u2022 ${escapeHtml(name)}\n`
+    if (merged.length > 0) {
+      const mergeOrder = merged
+        .map((b) => b.agent ? escapeHtml(b.agent) : b.task_id.slice(0, 8))
+        .join(' \u2192 ')
+      message += `<b>Merge order:</b> ${mergeOrder}\n`
     }
-    if (digest.active_repos.length > 5) {
-      message += `  ... and ${digest.active_repos.length - 5} more\n`
-    }
-    message += '\n'
-  }
 
-  if (digest.pending_signals > 0) {
-    message += `\u26a0\ufe0f <b>${digest.pending_signals} pending signal(s)</b> awaiting response`
+    if (rejected.length > 0) {
+      for (const r of rejected) {
+        const label = r.agent ? escapeHtml(r.agent) : r.task_id.slice(0, 8)
+        message += `<b>Rejected:</b> ${label} (${escapeHtml(truncate(r.reason, 60))})\n`
+      }
+    }
   }
 
   return message
@@ -364,14 +365,6 @@ export function formatNotification(message: string): string {
   return `\ud83d\udce2 ${escapeHtml(message)}`
 }
 
-export function formatError(error: string): string {
-  return `\u274c <b>Error:</b>\n<pre>${escapeHtml(error)}</pre>`
-}
-
-export function formatWarning(warning: string): string {
-  return `\u26a0\ufe0f <b>Warning:</b> ${escapeHtml(warning)}`
-}
-
 // =============================================================================
 // Helpers
 // =============================================================================
@@ -395,28 +388,6 @@ export function formatDuration(seconds: number): string {
   const hours = Math.floor(minutes / 60)
   const mins = minutes % 60
   return `${hours}h ${mins}m`
-}
-
-export function formatRelativeTime(timestamp: string): string {
-  const now = Date.now()
-  const then = new Date(timestamp).getTime()
-  const diff = now - then
-
-  const seconds = Math.floor(diff / 1000)
-  const minutes = Math.floor(seconds / 60)
-  const hours = Math.floor(minutes / 60)
-  const days = Math.floor(hours / 24)
-
-  if (days > 0) {
-    return `${days}d ago`
-  }
-  if (hours > 0) {
-    return `${hours}h ago`
-  }
-  if (minutes > 0) {
-    return `${minutes}m ago`
-  }
-  return 'just now'
 }
 
 export function truncate(text: string, maxLength: number): string {

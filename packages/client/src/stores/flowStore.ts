@@ -50,16 +50,31 @@ export const useFlowStore = create<FlowState>((set) => ({
     set((state) => {
       let nodes = state.nodes
       let edges = state.edges
+
+      // Compute aggregate stats across all cycles
+      let total_cycles_completed = 0
+      let total_errors = 0
+      for (const cycle of status.cycles) {
+        total_cycles_completed += cycle.runs_completed || 0
+        total_errors += cycle.errors || 0
+      }
+
       nodes = updateNodeData<SchedulerNodeData>(nodes, 'scheduler', {
         running: status.running,
         started_at: status.started_at,
+        total_cycles_completed,
+        total_errors,
       })
-      // Only map edges that exist in the visible graph
-      // Note: armory/blocked/digest/compaction/health nodes are hidden, so no edges for them
+
       const edgeMap: Record<string, string[]> = {
         discovery: ['e-scheduler-discovery', 'e-discovery-taskpool'],
         dispatcher: ['e-taskpool-dispatcher', 'e-dispatcher-agents'],
         shepherd: ['e-agents-shepherd', 'e-shepherd-memory'],
+        blocked_check: ['e-blocked-taskpool'],
+        digest: ['e-taskpool-digest'],
+        armory: ['e-armory-agents'],
+        health_check: ['e-health-agents'],
+        compaction: ['e-compaction-memory'],
       }
       for (const cycle of status.cycles) {
         const nodeId = cycle.name === 'blocked_check' ? 'blocked-check'

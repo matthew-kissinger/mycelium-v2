@@ -13,6 +13,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
+import { shutdownBuffer } from './buffer'
 
 // =============================================================================
 // Types
@@ -36,6 +37,7 @@ export interface TelegramMessage {
     id: number
   }
   text?: string
+  caption?: string
   photo?: TelegramPhotoSize[]
   document?: TelegramDocument
   date: number
@@ -476,10 +478,20 @@ class TelegramClient implements TelegramService {
     this.pollAbortController = new AbortController()
     console.log('[Telegram] Starting polling...')
 
+    let backoffMs = 5000
+    let consecutiveFailures = 0
+    const MAX_BACKOFF_MS = 60_000
+    const PAUSE_AFTER_FAILURES = 10
+    const PAUSE_DURATION_MS = 5 * 60_000 // 5 minutes
+
     const poll = async () => {
       while (this.pollingActive) {
         try {
           const updates = await this.getUpdates(30)
+
+          // Reset backoff on successful poll
+          backoffMs = 5000
+          consecutiveFailures = 0
 
           for (const update of updates) {
             try {
@@ -490,9 +502,18 @@ class TelegramClient implements TelegramService {
           }
         } catch (error) {
           if (this.pollingActive) {
-            console.error('[Telegram] Polling error:', error)
-            // Wait before retrying
-            await new Promise(resolve => setTimeout(resolve, 5000))
+            consecutiveFailures++
+            console.error(`[Telegram] Polling error (failure ${consecutiveFailures}):`, error)
+
+            if (consecutiveFailures >= PAUSE_AFTER_FAILURES) {
+              console.error(`[Telegram] ${PAUSE_AFTER_FAILURES} consecutive failures, pausing polling for 5 minutes`)
+              await new Promise(resolve => setTimeout(resolve, PAUSE_DURATION_MS))
+              consecutiveFailures = 0
+              backoffMs = 5000
+            } else {
+              await new Promise(resolve => setTimeout(resolve, backoffMs))
+              backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS)
+            }
           }
         }
       }
@@ -550,6 +571,9 @@ export function getTelegramService(): TelegramService | null {
 }
 
 export function shutdownTelegramService(): void {
+  // Flush any buffered notifications before shutdown
+  shutdownBuffer()
+
   if (telegramService) {
     telegramService.stopPolling()
     telegramService = null

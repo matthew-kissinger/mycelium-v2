@@ -8,10 +8,37 @@ on:
 
 jobs:
   build:
+    # To use self-hosted runner, change to:
+    # runs-on: [self-hosted, mycelium-hub]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v1
+      - name: Cache bun install
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
       - run: bun install
       - run: bun run typecheck
       - run: bun run build
+
+  test:
+    # To use self-hosted runner, change to:
+    # runs-on: [self-hosted, mycelium-hub]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v1
+      - name: Cache bun install
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+      - run: bun install
+      - name: Run tests
+        run: bun test --timeout 30000 packages/server/src

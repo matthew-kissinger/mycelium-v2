@@ -24,6 +24,8 @@ import {
   buildAgentsSectionWithCredits,
   buildSkillsSection,
   buildMcpSection,
+  detectAllSkillsForRepo,
+  buildRepoSkillsList,
 } from '../../prompts/context'
 
 /**
@@ -123,8 +125,8 @@ export async function runDiscoveryForRepo(
   })
 
   // Broadcast event
-  broadcast('system:agent_started', {
-    type: 'system:agent_started',
+  broadcast('agent:started', {
+    type: 'agent:started',
     run_id: run.id,
     agent_type: 'discovery',
     repo_path: repoPath,
@@ -139,6 +141,10 @@ export async function runDiscoveryForRepo(
       return
     }
 
+    // Refresh repo skills on each scan
+    const repoSkills = detectAllSkillsForRepo(repoPath)
+    await queries.updateRepo(repo.id, { skills: repoSkills })
+
     // Build dynamic context sections
     const mycelContext = buildMycelContext({
       role: 'discovery',
@@ -148,9 +154,11 @@ export async function runDiscoveryForRepo(
     const agentsSection = await buildAgentsSectionWithCredits()
     const skillsSection = buildSkillsSection([], repoPath)
     const mcpSection = buildMcpSection('claude')
+    const repoSkillsList = buildRepoSkillsList(repoPath, repoSkills)
 
     // Build prompt with dynamic context
     const prompt = buildDiscoveryPrompt(context, mycelContext, agentsSection)
+      + (repoSkillsList ? `\n\n${repoSkillsList}` : '')
       + (skillsSection ? `\n\n${skillsSection}` : '')
       + (mcpSection ? `\n\n${mcpSection}` : '')
 
