@@ -30,6 +30,8 @@ export const useSignalStore = create<SignalState>((set, get) => ({
       const signals = await fetchAPI<Signal[]>('/signals')
       const pending = signals.filter((s) => s.status === 'pending').length
       set({ signals, pendingSignalCount: pending, totalSignalCount: signals.length })
+      const { useFlowStore } = await import('./flowStore')
+      useFlowStore.getState().updateSignalNodes(pending, signals.length)
     } catch (error) {
       console.error('Failed to fetch signals:', error)
     } finally {

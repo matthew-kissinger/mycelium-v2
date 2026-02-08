@@ -4,6 +4,7 @@
 
 import { create } from 'zustand'
 import { fetchAPI } from './api'
+import { useFlowStore } from './flowStore'
 import type { BrowseResult } from '../types'
 import type { Repo } from '@mycelium/shared'
 
@@ -30,6 +31,12 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       set({ reposLoading: true })
       const repos = await fetchAPI<Repo[]>('/repos')
       set({ repos })
+      const byLang: Record<string, number> = {}
+      for (const r of repos) {
+        const lang = r.language || 'unknown'
+        byLang[lang] = (byLang[lang] || 0) + 1
+      }
+      useFlowStore.getState().updateReposNodes(repos.length, byLang, 0)
     } catch (error) {
       console.error('Failed to fetch repos:', error)
     } finally {

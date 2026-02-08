@@ -14,7 +14,7 @@
  */
 
 import { spawn, type Subprocess } from 'bun'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from 'fs'
 import { join, dirname } from 'path'
 import { homedir, platform, networkInterfaces } from 'os'
 
@@ -37,6 +37,13 @@ const FRONTEND_PID = join(LOG_DIR, 'frontend.pid')
 
 const BACKEND_PORT = parseInt(process.env['PORT'] || '8765')
 const FRONTEND_PORT = parseInt(process.env['FRONTEND_PORT'] || '5765')
+
+// Database path
+const CONFIG_DIR = platform() === 'darwin'
+  ? join(homedir(), 'Library', 'Application Support', 'mycelium-v2')
+  : join(homedir(), '.config', 'mycelium-v2')
+const DB_PATH = join(CONFIG_DIR, 'mycelium.db')
+const WORKTREE_DIR = join(homedir(), '.mycelium', 'worktrees')
 
 // Colors (ANSI codes, supported on most modern terminals including Windows Terminal)
 const RED = '\x1b[31m'
@@ -424,6 +431,104 @@ async function cmdClean(deep: boolean = false): Promise<void> {
   console.log(`${GREEN}Cleanup complete${NC}`)
 }
 
+async function cmdReset(what: string = 'tasks'): Promise<void> {
+  if (!existsSync(DB_PATH)) {
+    console.log(`${RED}Database not found at ${DB_PATH}${NC}`)
+    return
+  }
+
+  // Stop scheduler first if backend is running
+  if (await isBackendRunning()) {
+    try {
+      await fetch(`http://localhost:${BACKEND_PORT}/api/scheduler/stop`, { method: 'POST' })
+      console.log(`${GREEN}Scheduler stopped${NC}`)
+    } catch { /* backend may not be running */ }
+  }
+
+  const { Database } = require('bun:sqlite')
+  const db = new Database(DB_PATH)
+
+  const tables: string[] = []
+
+  switch (what) {
+    case 'tasks':
+      tables.push('tasks', 'fruiting_sessions')
+      break
+    case 'memory':
+      tables.push('memory_patterns', 'memory_warnings')
+      break
+    case 'all':
+      tables.push('tasks', 'fruiting_sessions', 'memory_patterns', 'memory_warnings', 'signals')
+      break
+    default:
+      console.log(`Usage: reset <tasks|memory|all>`)
+      console.log('  tasks   - Clear tasks and sessions (keeps repos, config, memory)')
+      console.log('  memory  - Clear patterns and warnings (keeps everything else)')
+      console.log('  all     - Clear tasks, sessions, memory, signals (keeps repos and config)')
+      db.close()
+      return
+  }
+
+  for (const table of tables) {
+    try {
+      const count = db.query(`SELECT COUNT(*) as cnt FROM ${table}`).get() as { cnt: number }
+      db.run(`DELETE FROM ${table}`)
+      console.log(`  ${GREEN}Cleared${NC} ${table}: ${count.cnt} rows`)
+    } catch {
+      console.log(`  ${YELLOW}Skipped${NC} ${table} (not found)`)
+    }
+  }
+
+  // Clean worktrees
+  if (what === 'tasks' || what === 'all') {
+    if (existsSync(WORKTREE_DIR)) {
+      try {
+        const entries = readdirSync(WORKTREE_DIR)
+        if (entries.length > 0) {
+          rmSync(WORKTREE_DIR, { recursive: true })
+          mkdirSync(WORKTREE_DIR, { recursive: true })
+          console.log(`  ${GREEN}Cleaned${NC} worktrees: ${entries.length} dirs`)
+        }
+      } catch (e) {
+        console.log(`  ${YELLOW}Worktree cleanup failed${NC}: ${e}`)
+      }
+    }
+  }
+
+  db.close()
+
+  // Show what's preserved
+  const db2 = new Database(DB_PATH)
+  const repos = db2.query('SELECT name FROM repos').all() as { name: string }[]
+  const configs = db2.query('SELECT key FROM config_overrides').all() as { key: string }[]
+  db2.close()
+
+  console.log('')
+  console.log(`${GREEN}Preserved:${NC}`)
+  console.log(`  Repos: ${repos.map(r => r.name).join(', ') || 'none'}`)
+  console.log(`  Config: ${configs.map(c => c.key).join(', ') || 'none'}`)
+  console.log(`${GREEN}Reset complete${NC}`)
+}
+
+async function cmdFresh(): Promise<void> {
+  console.log(`${BLUE}Fresh start: reset all data + restart...${NC}`)
+  await cmdReset('all')
+  console.log('')
+
+  // If backend is running, restart it; otherwise start everything
+  if (await isBackendRunning()) {
+    // Just start scheduler
+    try {
+      await fetch(`http://localhost:${BACKEND_PORT}/api/scheduler/start`, { method: 'POST' })
+      console.log(`${GREEN}Scheduler started${NC}`)
+    } catch {
+      console.log(`${YELLOW}Could not start scheduler${NC}`)
+    }
+  } else {
+    await cmdStart()
+  }
+}
+
 async function cmdBuild(): Promise<void> {
   console.log(`${BLUE}Building Mycelium v2...${NC}`)
 
@@ -577,6 +682,8 @@ function cmdHelp(): void {
   console.log('  restart            Restart all servers')
   console.log('  status             Show server status and health')
   console.log('  logs               Show logs (backend|frontend|all)')
+  console.log('  reset <scope>      Clear data (tasks|memory|all) - keeps repos & config')
+  console.log('  fresh              Reset all data + restart scheduler')
   console.log('  clean              Stop servers and clean logs (--deep for node_modules)')
   console.log('  build              Build all packages')
   console.log('  build-restart      Build then restart servers')
@@ -585,12 +692,13 @@ function cmdHelp(): void {
   console.log('  help               Show this help')
   console.log('')
   console.log('Examples:')
-  console.log('  bun scripts/dev.ts start              # Start all services')
-  console.log('  bun scripts/dev.ts logs backend       # Show backend logs')
-  console.log('  bun scripts/dev.ts build-restart      # Build + restart')
-  console.log('  bun scripts/dev.ts scheduler start    # Start scheduler')
-  console.log('  bun scripts/dev.ts check              # System summary')
-  console.log('  bun scripts/dev.ts clean --deep       # Full cleanup including node_modules')
+  console.log('  bun run dev:manage start              # Start all services')
+  console.log('  bun run dev:manage reset tasks        # Wipe tasks, keep config/repos')
+  console.log('  bun run dev:manage reset all          # Wipe tasks + memory + signals')
+  console.log('  bun run dev:manage fresh              # Reset all + restart scheduler')
+  console.log('  bun run dev:manage build-restart      # Build + restart')
+  console.log('  bun run dev:manage scheduler start    # Start scheduler')
+  console.log('  bun run dev:manage check              # System summary')
 }
 
 // =============================================================================
@@ -618,6 +726,12 @@ switch (command) {
     break
   case 'clean':
     await cmdClean(args.includes('--deep'))
+    break
+  case 'reset':
+    await cmdReset(args[1])
+    break
+  case 'fresh':
+    await cmdFresh()
     break
   case 'build':
     await cmdBuild()

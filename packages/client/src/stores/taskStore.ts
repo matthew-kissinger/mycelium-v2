@@ -5,6 +5,7 @@
 import { create } from 'zustand'
 import { fetchAPI } from './api'
 import { useUIStore } from './uiStore'
+import { useFlowStore } from './flowStore'
 import type {
   Stats,
   Task,
@@ -107,6 +108,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         ready: response.ready || 0,
       }
       set({ stats })
+      useFlowStore.getState().updateStatsNodes(stats)
     } catch (error) {
       console.error('Failed to fetch stats:', error)
     }
@@ -135,6 +137,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       }))
 
       set({ runningTasks: slots })
+      useFlowStore.getState().updateRunningTaskNodes(slots)
     } catch (error) {
       console.error('Failed to fetch running tasks:', error)
     }
