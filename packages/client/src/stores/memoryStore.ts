@@ -4,6 +4,7 @@
 
 import { create } from 'zustand'
 import { fetchAPI } from './api'
+import { useFlowStore } from './flowStore'
 import type { GroupedMemory } from '../types'
 import type { MemoryPattern, MemoryWarning } from '@mycelium/shared'
 
@@ -36,10 +37,10 @@ export const useMemoryStore = create<MemoryState>((set, get) => ({
       const memory = await fetchAPI<{ patterns: MemoryPattern[]; warnings: MemoryWarning[] }>(
         '/memory/global'
       )
-      set({
-        patternCount: memory.patterns?.length || 0,
-        warningCount: memory.warnings?.length || 0,
-      })
+      const pc = memory.patterns?.length || 0
+      const wc = memory.warnings?.length || 0
+      set({ patternCount: pc, warningCount: wc })
+      useFlowStore.getState().updateMemoryNodes(pc, wc, 0)
     } catch (error) {
       console.error('Failed to fetch memory:', error)
     }

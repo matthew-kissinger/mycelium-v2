@@ -25,9 +25,21 @@
 cd ~/repos/mycelium-v2
 bun run dev:manage start       # Start backend + frontend
 bun run dev:manage stop        # Stop all services
+bun run dev:manage restart     # Restart all services
 bun run dev:manage status      # Status + health
 bun run dev:manage logs        # Tail logs
 bun run dev:manage check       # Task stats + scheduler
+
+# Data management (keeps repos + config)
+bun run dev:manage reset tasks    # Clear tasks + sessions
+bun run dev:manage reset memory   # Clear patterns + warnings
+bun run dev:manage reset all      # Clear tasks + memory + signals
+bun run dev:manage fresh          # Reset all + restart scheduler
+
+# Build cycle
+bun run dev:manage build          # Build all packages
+bun run dev:manage build-restart  # Build + restart servers
+bun run dev:manage scheduler start  # Start scheduler via API
 ```
 
 ### Manual

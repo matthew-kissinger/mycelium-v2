@@ -5,6 +5,7 @@
 import { create } from 'zustand'
 import { fetchAPI } from './api'
 import { useUIStore } from './uiStore'
+import { useFlowStore } from './flowStore'
 import type { SchedulerStatus, SchedulerConfig, RunningSystemAgent, ShepherdStatus } from '../types'
 
 interface SchedulerState {
@@ -40,6 +41,7 @@ export const useSchedulerStore = create<SchedulerState>((set, get) => ({
     try {
       const status = await fetchAPI<SchedulerStatus>('/scheduler/status')
       set({ scheduler: status })
+      useFlowStore.getState().updateSchedulerNodes(status)
     } catch (error) {
       console.error('Failed to fetch scheduler status:', error)
     }
@@ -50,6 +52,7 @@ export const useSchedulerStore = create<SchedulerState>((set, get) => ({
       set({ schedulerLoading: true, schedulerError: null })
       const status = await fetchAPI<SchedulerStatus>('/scheduler/start', { method: 'POST' })
       set({ scheduler: status })
+      useFlowStore.getState().updateSchedulerNodes(status)
       useUIStore.getState().addToast('success', 'Scheduler started')
     } catch (error) {
       set({ schedulerError: (error as Error).message })
@@ -64,6 +67,7 @@ export const useSchedulerStore = create<SchedulerState>((set, get) => ({
       set({ schedulerLoading: true, schedulerError: null })
       const status = await fetchAPI<SchedulerStatus>('/scheduler/stop', { method: 'POST' })
       set({ scheduler: status })
+      useFlowStore.getState().updateSchedulerNodes(status)
       useUIStore.getState().addToast('info', 'Scheduler stopped')
     } catch (error) {
       set({ schedulerError: (error as Error).message })

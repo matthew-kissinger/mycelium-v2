@@ -43,23 +43,23 @@ app.use('*', logger())
 app.get('/api/health', async (c) => {
   const telegram = getTelegramService()
   const schedulerStatus = getSchedulerStatus()
-  const runningSystemAgents = await getRuns({ status: 'running' })
+  const runningSystemAgents = await getRuns({ status: 'running' }).catch(() => [])
 
-  // Get agent health and quota info (async API calls in parallel)
+  // Get agent health and quota info (async API calls in parallel, each with fallback)
   const [agentHealth, openrouterCredits, clineCredits, clineProvider, freeModels, providerStatus] = await Promise.all([
     Promise.resolve(getHealthSummary()),
-    checkOpenRouterCredits(),
-    checkClineCredits(),
-    getClineProvider(),
-    getOpenRouterFreeModels(),
-    checkAllProviderStatus(),
+    checkOpenRouterCredits().catch(() => null),
+    checkClineCredits().catch(() => null),
+    getClineProvider().catch(() => 'unknown'),
+    getOpenRouterFreeModels().catch(() => []),
+    checkAllProviderStatus().catch(() => ({ groq: 'unknown', cerebras: 'unknown', mistral: 'unknown' })),
   ])
 
   return c.json({
     backend: true,
     scheduler: schedulerStatus.running,
     scheduler_cycles: schedulerStatus.cycles.filter(cy => cy.running).map(cy => cy.name),
-    running_system_agents: runningSystemAgents.map(r => ({
+    running_system_agents: (runningSystemAgents as any[]).map(r => ({
       id: r.id,
       agent_type: r.agent_type,
       repo_path: r.repo_path,
