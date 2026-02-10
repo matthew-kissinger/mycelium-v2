@@ -4,7 +4,7 @@
  * Tests the prompt injection system that builds context for agent dispatch.
  */
 
-import { describe, test, expect } from 'bun:test'
+import { describe, test, expect, beforeAll } from 'bun:test'
 import {
   buildMycelContext,
   buildAgentsSection,
@@ -12,6 +12,13 @@ import {
   buildMcpSection,
   selectTaskSkills,
 } from './context'
+import { _markInitializedForTesting } from '../agents/registry-cache'
+
+// Registry cache must be marked initialized before buildAgentsSection can
+// call getCachedEnabledAgents (cache is empty so all AGENT_MATRIX entries show).
+beforeAll(() => {
+  _markInitializedForTesting()
+})
 
 // =============================================================================
 // buildMycelContext

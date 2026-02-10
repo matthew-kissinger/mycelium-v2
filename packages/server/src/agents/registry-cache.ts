@@ -3,7 +3,8 @@
  *
  * Sub-millisecond reads for dispatch hot paths.
  * Write operations go to DB first, then invalidate cache.
- * initRegistryCache() loads everything on startup.
+ * initRegistryCache() MUST be called (and awaited) before the server starts.
+ * All read functions assert initialization - accessing before init is a fatal bug.
  */
 
 import type { AgentRow, ProviderRow, ModelRow, HealthRow } from '../db/registry-queries'
@@ -20,6 +21,13 @@ let modelsByProviderCache = new Map<string, ModelRow[]>()
 let healthCache = new Map<string, HealthRow>()
 let crossAgentFallbackCache: Record<string, { agent: string; model: string }> = {}
 let cacheInitialized = false
+
+/** Assert that the cache has been initialized. Throws if not. */
+function assertInitialized(): void {
+  if (!cacheInitialized) {
+    throw new Error('[Registry Cache] Accessed before initialization. initRegistryCache() must be awaited at startup.')
+  }
+}
 
 // =============================================================================
 // Init
@@ -106,14 +114,17 @@ export async function initRegistryCache(): Promise<void> {
 // =============================================================================
 
 export function getCachedAgent(id: string): AgentRow | undefined {
+  assertInitialized()
   return agentCache.get(id)
 }
 
 export function getCachedAllAgents(): AgentRow[] {
+  assertInitialized()
   return Array.from(agentCache.values())
 }
 
 export function getCachedEnabledAgents(): AgentRow[] {
+  assertInitialized()
   return Array.from(agentCache.values()).filter(a => a.enabled)
 }
 
@@ -122,10 +133,12 @@ export function getCachedEnabledAgents(): AgentRow[] {
 // =============================================================================
 
 export function getCachedProvider(id: string): ProviderRow | undefined {
+  assertInitialized()
   return providerCache.get(id)
 }
 
 export function getCachedAllProviders(): ProviderRow[] {
+  assertInitialized()
   return Array.from(providerCache.values())
 }
 
@@ -134,20 +147,23 @@ export function getCachedAllProviders(): ProviderRow[] {
 // =============================================================================
 
 export function getCachedModel(id: string): ModelRow | undefined {
+  assertInitialized()
   return modelCache.get(id)
 }
 
 export function getCachedModelsForAgent(agentId: string): ModelRow[] {
+  assertInitialized()
   return modelsByAgentCache.get(agentId) ?? []
 }
 
 export function getCachedModelsForProvider(providerId: string): ModelRow[] {
+  assertInitialized()
   return modelsByProviderCache.get(providerId) ?? []
 }
 
 export function getCachedDefaultModel(agentId: string): string | null {
-  const agent = agentCache.get(agentId)
-  return agent?.default_model ?? null
+  assertInitialized()
+  return agentCache.get(agentId)?.default_model ?? null
 }
 
 /**
@@ -155,11 +171,8 @@ export function getCachedDefaultModel(agentId: string): string | null {
  * Follows fallback_model_id in the models table.
  */
 export function getCachedFallbackModel(agentId: string, modelId: string): string | null {
+  assertInitialized()
   const agentModels = modelsByAgentCache.get(agentId) ?? []
-
-  // Find the model entry with a matching provider for this agent
-  const agent = agentCache.get(agentId)
-  const defaultProvider = agent?.default_provider
 
   // Look for the model within the agent's compatible models
   const current = agentModels.find(m => m.model_id === modelId)
@@ -173,6 +186,7 @@ export function getCachedFallbackModel(agentId: string, modelId: string): string
  * Get cross-agent fallback for when an agent exhausts its model chain.
  */
 export function getCachedCrossAgentFallback(agentId: string): { agent: string; model: string } | null {
+  assertInitialized()
   return crossAgentFallbackCache[agentId] ?? null
 }
 
@@ -181,10 +195,12 @@ export function getCachedCrossAgentFallback(agentId: string): { agent: string; m
 // =============================================================================
 
 export function getCachedHealthState(key: string): HealthRow | undefined {
+  assertInitialized()
   return healthCache.get(key)
 }
 
 export function getCachedAllHealth(): HealthRow[] {
+  assertInitialized()
   return Array.from(healthCache.values())
 }
 
@@ -253,8 +269,32 @@ export async function reloadCache(): Promise<void> {
 }
 
 /**
- * Check if cache is initialized.
+ * Check if cache is initialized. Used only for testing.
+ * In production, cache is guaranteed initialized before server starts.
  */
 export function isCacheReady(): boolean {
   return cacheInitialized
+}
+
+/**
+ * Reset cache state for testing.
+ */
+export function _resetCacheForTesting(): void {
+  agentCache.clear()
+  providerCache.clear()
+  modelCache.clear()
+  modelsByAgentCache.clear()
+  modelsByProviderCache.clear()
+  healthCache.clear()
+  crossAgentFallbackCache = {}
+  cacheInitialized = false
+}
+
+/**
+ * Mark cache as initialized for testing (without loading from DB).
+ * This allows tests to call cache read functions without a real DB.
+ * The cache will be empty but won't throw.
+ */
+export function _markInitializedForTesting(): void {
+  cacheInitialized = true
 }

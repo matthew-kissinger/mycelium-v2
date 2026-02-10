@@ -49,6 +49,8 @@ export {
   initRegistryCache,
   reloadCache,
   isCacheReady,
+  _resetCacheForTesting,
+  _markInitializedForTesting,
   getCachedAgent,
   getCachedAllAgents,
   getCachedEnabledAgents,
@@ -82,3 +84,11 @@ export {
   type FetchResult,
   type FetchedModel,
 } from './fetch-models'
+export {
+  getAdapter,
+  registerAdapter,
+  getAllAdapters,
+  getClineConfig,
+  type AgentAdapter,
+  type AdapterOptions,
+} from './adapters'

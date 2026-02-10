@@ -1,40 +1,22 @@
 import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
-import { eq, desc, inArray, and, or } from 'drizzle-orm'
-import { z } from 'zod'
+import { eq, and, or } from 'drizzle-orm'
 import { db, schema } from '../db'
 import {
   TaskCreate,
   TaskUpdate,
-  TaskStatus,
-  TaskListParams,
-  TaskCreateRequest,
-  TaskUpdateRequest,
-  TaskRunRequest,
+  type AgentType,
 } from '@mycelium/shared'
-import { dispatch, killProcess, clearDependencies } from '../agents'
-import { cleanupWorkspace, prepareWorkspace, captureWorktreeDiff, pushBranchToGithub } from '../agents/workspace'
-import { parseAgentOutput } from '../agents/output-parser'
-import { recordSuccess, recordFailure } from '../agents/health'
-import {
-  buildMycelContext,
-  buildSkillsSection,
-  buildMcpSection,
-  buildMemorySection,
-  selectTaskSkills,
-  detectAllSkillsForRepo,
-} from '../prompts/context'
+import { killProcess, clearDependencies } from '../agents'
+import { cleanupWorkspace } from '../agents/workspace'
 import { broadcast } from '../sse'
 import * as queries from '../db/queries'
-import { startTaskLog, appendLog, completeTaskLog, getTaskLogs, getTaskLogEntries, getLogBufferStats } from '../logs'
+import { getTaskLogs, getLogBufferStats } from '../logs'
 import { mergePR } from '../github/pr'
-import { runGh, formatSlug, type RepoSlug } from '../github/client'
+import { type RepoSlug } from '../github/client'
+import { executeTask as pipelineExecuteTask } from '../execution/pipeline'
 
 const app = new Hono()
-
-// Track abort controllers for task cancellation
-// Note: Process management is now handled by the registry
-const runningTasks = new Map<string, AbortController>()
 
 // =============================================================================
 // GET /api/tasks - List tasks with filters
@@ -384,7 +366,7 @@ app.delete('/:id', async (c) => {
 })
 
 // =============================================================================
-// POST /api/tasks/:id/run - Execute task (use dispatch from agents/dispatch.ts)
+// POST /api/tasks/:id/run - Execute task via unified pipeline
 // =============================================================================
 app.post('/:id/run', async (c) => {
   const id = c.req.param('id')
@@ -432,27 +414,34 @@ app.post('/:id/run', async (c) => {
     }
   }
 
+  // Apply overrides to task record before pipeline execution
+  const model = overrides.model ?? task.model ?? undefined
+  const provider = (overrides.provider ?? task.provider ?? undefined) as 'openrouter' | 'cline' | undefined
+
   // Mark as running
-  const provider = overrides.provider ?? task.provider ?? undefined
   await queries.updateTask(id, {
     status: 'running',
     agent: agent,
-    model: overrides.model ?? task.model ?? undefined,
+    model: model,
     provider: provider,
     started_at: new Date().toISOString(),
   })
 
   broadcast('task:started', { id, status: 'running', agent, provider })
 
-  // Execute agent (fire and forget, result handled async)
-  executeTask({
-    ...task,
-    agent,
-    model: overrides.model ?? task.model,
-    provider,
-  }).catch(console.error)
-
+  // Re-fetch task after updates so pipeline sees current state
   const updatedTask = await queries.getTask(id)
+
+  // Execute via unified pipeline (fire and forget, result handled async)
+  // API runs disable retry and dependent cancellation by default
+  pipelineExecuteTask(
+    updatedTask!,
+    agent as AgentType,
+    model,
+    provider,
+    { enableRetry: false, cancelDependents: false },
+  ).catch(console.error)
+
   return c.json({ message: 'Task started', task: parseTask(updatedTask!) })
 })
 
@@ -478,13 +467,6 @@ app.post('/:id/cancel', async (c) => {
     // Kill the running process via registry
     // This handles graceful termination + force kill + Cline zombie cleanup
     killed = await killProcess(id)
-
-    // Also abort the controller if it exists
-    const controller = runningTasks.get(id)
-    if (controller) {
-      controller.abort()
-      runningTasks.delete(id)
-    }
   }
 
   // Mark as cancelled
@@ -560,300 +542,6 @@ async function cancelDependentTasks(cancelledTaskId: string, cancelledTitle: str
     console.error('[Cancel] Error cancelling dependents:', error)
   }
   return count
-}
-
-// =============================================================================
-// Helper: Execute task in background with full context enrichment
-// Mirrors dispatcher.ts:runTask() pipeline: worktree, context, health, sessions
-// =============================================================================
-async function executeTask(task: {
-  id: string
-  title: string
-  agent: string | null
-  model: string | null
-  provider?: string | null
-  prompt: string | null
-  repo_path: string
-  depends_on?: string | null
-  skills?: string | null
-}) {
-  const taskId = task.id
-  const agent = task.agent!
-  const model = task.model ?? undefined
-  const provider = task.provider as 'openrouter' | 'cline' | undefined
-  const repoPath = task.repo_path
-  const basePrompt = task.prompt ?? task.title
-
-  // Create abort controller for cancellation
-  const controller = new AbortController()
-  runningTasks.set(taskId, controller)
-
-  // Start logging for this task
-  startTaskLog(taskId)
-
-  // --- Prepare isolated worktree workspace BEFORE building context ---
-  // so agents know their branch name and worktree path
-  let worktreePath: string | null = null
-  let branchName: string | null = null
-  try {
-    const workspace = await prepareWorkspace(taskId, repoPath)
-    worktreePath = workspace.worktreePath
-    branchName = workspace.branchName
-    console.log(`[ExecuteTask] Task ${taskId.slice(0, 8)} using worktree: ${worktreePath}`)
-
-    await queries.updateTask(taskId, {
-      worktree_path: worktreePath,
-      branch_name: branchName,
-    })
-  } catch (error) {
-    console.error(`[ExecuteTask] Failed to create worktree for task ${taskId.slice(0, 8)}, using repo directly:`, error)
-  }
-
-  const workingDir = worktreePath ?? repoPath
-
-  // --- Build enriched prompt (same pipeline as dispatcher) ---
-
-  // Fetch dependency results
-  let dependencySection = ''
-  const depIds = JSON.parse(task.depends_on ?? '[]') as string[]
-  if (depIds.length > 0) {
-    const depSummaries: string[] = []
-    for (const depId of depIds) {
-      const depTask = await queries.getTask(depId)
-      if (depTask && depTask.status === 'done') {
-        const depResult = depTask.result ?? '(no result recorded)'
-        const truncated = depResult.length > 500 ? depResult.slice(0, 500) + '...' : depResult
-        depSummaries.push(`### Task #${depId.slice(0, 8)}: ${depTask.title} (by ${depTask.agent ?? 'unknown'})\n${truncated}`)
-      }
-    }
-    if (depSummaries.length > 0) {
-      dependencySection = `\n\n## Completed Dependencies\n${depSummaries.join('\n\n')}\n`
-    }
-  }
-
-  const mycelContext = buildMycelContext({
-    role: 'task_agent',
-    agentId: agent,
-    model,
-    taskId,
-    taskTitle: task.title,
-    worktreePath: worktreePath ?? undefined,
-    branchName: branchName ?? undefined,
-  })
-
-  // Merge skills: explicit + keyword-matched + auto-detected
-  const explicitSkills: string[] = JSON.parse(task.skills ?? '[]')
-  const repoSkills = detectAllSkillsForRepo(repoPath)
-  const keywordSkills = selectTaskSkills(repoSkills, task.title, task.prompt ?? undefined)
-  const mergedSkills = [...new Set([...explicitSkills, ...keywordSkills])]
-  if (mergedSkills.length < 5) {
-    for (const skill of repoSkills) {
-      if (mergedSkills.length >= 5) break
-      if (!mergedSkills.includes(skill)) mergedSkills.push(skill)
-    }
-  }
-  const finalSkills = mergedSkills.slice(0, 5)
-
-  const skillsSection = buildSkillsSection(finalSkills, repoPath)
-  const mcpSection = buildMcpSection(agent)
-  const memorySection = await buildMemorySection(repoPath)
-
-  // Compose full enriched prompt
-  const prompt = `${basePrompt}${dependencySection}
-
----
-
-${mycelContext}
-${skillsSection ? `\n${skillsSection}` : ''}
-${mcpSection ? `\n${mcpSection}` : ''}
-${memorySection ? `\n${memorySection}` : ''}`
-
-  try {
-    const result = await dispatch({
-      agent: agent as any,
-      prompt,
-      cwd: workingDir,
-      model,
-      provider,
-      taskId,
-      onOutput: (chunk, stream = 'stdout') => {
-        appendLog(taskId, chunk, stream)
-        broadcast('task:output', {
-          type: 'task:output',
-          task_id: taskId,
-          chunk,
-          stream,
-          timestamp: new Date().toISOString(),
-        })
-      },
-    })
-
-    // Check if cancelled during execution
-    if (controller.signal.aborted) {
-      return
-    }
-
-    const now = new Date().toISOString()
-
-    if (result.success) {
-      // Parse structured output markers
-      const parsed = parseAgentOutput(result.output)
-
-      await queries.updateTask(taskId, {
-        status: 'done',
-        result: result.output,
-        parsed_result: parsed ?? undefined,
-        cost_usd: result.cost_usd ?? 0,
-        duration_seconds: result.duration_seconds,
-        input_tokens: result.input_tokens,
-        output_tokens: result.output_tokens,
-        completed_at: now,
-      })
-
-      broadcast('task:completed', {
-        type: 'task:completed',
-        task_id: taskId,
-        duration_seconds: result.duration_seconds,
-        cost_usd: result.cost_usd,
-        timestamp: now,
-      })
-
-      // Record success in health tracking
-      recordSuccess(agent, model)
-
-      // Push branch to GitHub (non-blocking, best-effort)
-      if (branchName && worktreePath) {
-        pushBranchToGithub(repoPath, branchName).then((pushResult) => {
-          if (pushResult.pushed) {
-            broadcast('github:push', {
-              type: 'github:push' as const,
-              repo_path: repoPath,
-              branch: branchName!,
-              task_id: taskId,
-              timestamp: new Date().toISOString(),
-            })
-          }
-        }).catch((e) => console.error(`[ExecuteTask] GitHub push error for task ${taskId.slice(0, 8)}:`, e))
-      }
-
-      // Build context trace for fruiting session
-      const contextTrace = {
-        layers: [
-          { name: 'basePrompt', size: basePrompt.length },
-          ...(dependencySection ? [{ name: 'dependencySection', size: dependencySection.length, dep_ids: depIds }] : []),
-          { name: 'mycelContext', size: mycelContext.length },
-          { name: 'skillsSection', size: skillsSection.length },
-          { name: 'mcpSection', size: mcpSection.length },
-          ...(memorySection ? [{ name: 'memorySection', size: memorySection.length }] : []),
-        ],
-        total_size: prompt.length,
-      }
-
-      // Capture worktree diff
-      let worktreeDiff: { stat: string; diff: string; commits: number } | null = null
-      if (worktreePath) {
-        worktreeDiff = await captureWorktreeDiff(worktreePath)
-      }
-
-      // Record fruiting session
-      const logEntries = getTaskLogEntries(taskId)
-      queries.createFruitingSession({
-        task_id: taskId, repo_path: repoPath, agent, model,
-        context_trace: {
-          ...contextTrace,
-          ...(worktreeDiff ? {
-            worktree_diff: worktreeDiff.stat,
-            worktree_diff_full: worktreeDiff.diff,
-            commit_count: worktreeDiff.commits,
-          } : {}),
-        },
-        full_prompt: prompt,
-        session_log: logEntries ?? undefined,
-      }).catch((e) => console.error('[ExecuteTask] Failed to record fruiting session:', e))
-
-    } else {
-      // Task failed - use health tracking for clean error extraction
-      const { error: cleanError } = recordFailure(agent, model, result.output)
-
-      await queries.updateTask(taskId, {
-        status: 'failed',
-        error: cleanError,
-        error_details: {
-          error_type: 'execution_error',
-          exit_code: result.exit_code,
-        },
-        duration_seconds: result.duration_seconds,
-        completed_at: now,
-      })
-
-      broadcast('task:failed', {
-        type: 'task:failed',
-        task_id: taskId,
-        error: cleanError,
-        timestamp: now,
-      })
-
-      // Record fruiting session even on failure
-      const contextTrace = {
-        layers: [
-          { name: 'basePrompt', size: basePrompt.length },
-          ...(dependencySection ? [{ name: 'dependencySection', size: dependencySection.length, dep_ids: depIds }] : []),
-          { name: 'mycelContext', size: mycelContext.length },
-          { name: 'skillsSection', size: skillsSection.length },
-          { name: 'mcpSection', size: mcpSection.length },
-          ...(memorySection ? [{ name: 'memorySection', size: memorySection.length }] : []),
-        ],
-        total_size: prompt.length,
-      }
-      const logEntries = getTaskLogEntries(taskId)
-      queries.createFruitingSession({
-        task_id: taskId, repo_path: repoPath, agent, model,
-        context_trace: contextTrace,
-        full_prompt: prompt,
-        session_log: logEntries ?? undefined,
-      }).catch((e) => console.error('[ExecuteTask] Failed to record fruiting session:', e))
-
-      // Clean up worktree on failure
-      if (worktreePath) {
-        cleanupWorkspace(taskId, repoPath).catch((e) =>
-          console.error(`[ExecuteTask] Worktree cleanup error for task ${taskId.slice(0, 8)}:`, e)
-        )
-      }
-    }
-  } catch (error) {
-    // Check if cancelled during execution
-    if (controller.signal.aborted) {
-      return
-    }
-
-    const errorMsg = error instanceof Error ? error.message : String(error)
-
-    // Record failure in health tracking
-    recordFailure(agent, model, errorMsg)
-
-    await queries.updateTask(taskId, {
-      status: 'failed',
-      error: errorMsg,
-      completed_at: new Date().toISOString(),
-    })
-
-    broadcast('task:failed', {
-      type: 'task:failed',
-      task_id: taskId,
-      error: errorMsg,
-      timestamp: new Date().toISOString(),
-    })
-
-    // Clean up worktree on error
-    if (worktreePath) {
-      cleanupWorkspace(taskId, repoPath).catch((e) =>
-        console.error(`[ExecuteTask] Worktree cleanup error for task ${taskId.slice(0, 8)}:`, e)
-      )
-    }
-  } finally {
-    runningTasks.delete(taskId)
-    completeTaskLog(taskId)
-  }
 }
 
 // =============================================================================

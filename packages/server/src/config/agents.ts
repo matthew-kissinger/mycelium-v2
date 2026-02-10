@@ -7,6 +7,8 @@ import { homedir } from 'os'
 import { join } from 'path'
 import { DEFAULT_AGENT_CONFIGS, type AgentConfig } from '@mycelium/shared'
 import { getConfigOverride, saveConfigOverride, importFileConfig } from '../db/config-store'
+import { getCachedAgent, invalidateAgent } from '../agents/registry-cache'
+import { upsertAgent } from '../db/registry-queries'
 
 // =============================================================================
 // Types
@@ -119,23 +121,18 @@ export function saveAgentsConfig(config: AgentsConfig): void {
 }
 
 export function getAgentConfig(agentName: string): AgentConfigExtended | undefined {
-  // Try registry cache first (DB-backed)
-  try {
-    const { getCachedAgent, isCacheReady } = require('../agents/registry-cache')
-    if (isCacheReady()) {
-      const cached = getCachedAgent(agentName)
-      if (cached) {
-        return {
-          command: cached.command,
-          timeout_seconds: cached.timeout_seconds ?? 1800,
-          billing_type: 'subscription', // Default - registry doesn't store this on agent
-          enabled: cached.enabled ?? true,
-          default_model: cached.default_model ?? undefined,
-          description: cached.notes ?? undefined,
-        } as AgentConfigExtended
-      }
-    }
-  } catch { /* fall through to config store */ }
+  // Registry cache is the source of truth
+  const cached = getCachedAgent(agentName)
+  if (cached) {
+    return {
+      command: cached.command,
+      timeout_seconds: cached.timeout_seconds ?? 1800,
+      billing_type: 'subscription', // Default - registry doesn't store this on agent
+      enabled: cached.enabled ?? true,
+      default_model: cached.default_model ?? undefined,
+      description: cached.notes ?? undefined,
+    } as AgentConfigExtended
+  }
 
   const config = loadAgentsConfig()
   return config.agents[agentName]
@@ -151,18 +148,14 @@ export function updateAgentConfig(
   saveAgentsConfig(config)
 
   // Write through to registry DB + invalidate cache
-  try {
-    const { upsertAgent } = require('../db/registry-queries')
-    const { invalidateAgent } = require('../agents/registry-cache')
-    const regUpdates: Record<string, unknown> = {}
-    if (updates.enabled !== undefined) regUpdates.enabled = updates.enabled
-    if (updates.default_model !== undefined) regUpdates.default_model = updates.default_model
-    if (updates.timeout_seconds !== undefined) regUpdates.timeout_seconds = updates.timeout_seconds
-    if (Object.keys(regUpdates).length > 0) {
-      upsertAgent(agentName, regUpdates)
-      invalidateAgent(agentName)
-    }
-  } catch { /* registry not available yet */ }
+  const regUpdates: Record<string, unknown> = {}
+  if (updates.enabled !== undefined) regUpdates.enabled = updates.enabled
+  if (updates.default_model !== undefined) regUpdates.default_model = updates.default_model
+  if (updates.timeout_seconds !== undefined) regUpdates.timeout_seconds = updates.timeout_seconds
+  if (Object.keys(regUpdates).length > 0) {
+    upsertAgent(agentName, regUpdates as any)
+    invalidateAgent(agentName)
+  }
 
   return config.agents[agentName]
 }
@@ -177,16 +170,11 @@ export function getEnabledAgents(): AgentConfigExtended[] {
 }
 
 export function isAgentEnabled(agentName: string): boolean {
-  // Try registry cache first (covers all 10 agents)
-  try {
-    const { getCachedAgent, isCacheReady } = require('../agents/registry-cache')
-    if (isCacheReady()) {
-      const cachedAgent = getCachedAgent(agentName)
-      if (cachedAgent !== undefined) {
-        return cachedAgent.enabled ?? true
-      }
-    }
-  } catch { /* fall through */ }
+  // Registry cache is the source of truth (covers all 10 agents)
+  const cachedAgentRow = getCachedAgent(agentName)
+  if (cachedAgentRow !== undefined) {
+    return cachedAgentRow.enabled ?? true
+  }
 
   // Fallback to config file (only covers 5 agents)
   const config = loadAgentsConfig()

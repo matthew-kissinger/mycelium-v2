@@ -12,6 +12,7 @@ import {
   getAgentMatrix, getFallbackChain, getRegistryHealthSummary,
 } from '../db/registry-queries'
 import { broadcast } from '../sse'
+import { getAvailableCredentialKeys } from '../agents/credentials'
 
 const app = new Hono()
 
@@ -206,13 +207,8 @@ app.post('/refresh', async (c) => {
 
 // GET /api/registry/credentials - List available credential keys (names only, no values)
 app.get('/credentials', (c) => {
-  try {
-    const { getAvailableCredentialKeys } = require('../agents/credentials')
-    const keys = getAvailableCredentialKeys()
-    return c.json({ keys, count: keys.length })
-  } catch {
-    return c.json({ keys: [], count: 0 })
-  }
+  const keys = getAvailableCredentialKeys()
+  return c.json({ keys, count: keys.length })
 })
 
 export default app

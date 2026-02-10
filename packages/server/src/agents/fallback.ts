@@ -5,6 +5,8 @@
  * If still fails, mark failed and let discovery handle.
  */
 
+import { getCachedFallbackModel, getCachedCrossAgentFallback, getCachedDefaultModel } from './registry-cache'
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -123,18 +125,11 @@ export function getFallbackModel(agent: string, model: string | null | undefined
   const resolvedModel = model ?? AGENT_DEFAULT_MODELS[agent]
   if (!resolvedModel) return null
 
-  // Try registry cache first (DB-backed fallback chain)
-  try {
-    const { getCachedFallbackModel, isCacheReady } = require('./registry-cache')
-    if (isCacheReady()) {
-      const cachedFallback = getCachedFallbackModel(agent, resolvedModel)
-      if (cachedFallback) return cachedFallback
-    }
-  } catch {
-    // Cache not available, fall through to hardcoded map
-  }
+  // Registry cache (DB-backed fallback chain) - primary source
+  const cachedFallback = getCachedFallbackModel(agent, resolvedModel)
+  if (cachedFallback) return cachedFallback
 
-  // Hardcoded fallback (seed data)
+  // Hardcoded fallback (seed data) - covers models not yet in DB
   const agentMap = FALLBACK_MODEL_MAP[agent]
   if (!agentMap) return null
 
@@ -168,14 +163,7 @@ export function shouldRetry(
   }
 
   // In-agent fallback exhausted - try cross-agent fallback
-  // Try registry cache first, then hardcoded
-  let crossFallback: { agent: string; model: string } | null = null
-  try {
-    const { getCachedCrossAgentFallback, isCacheReady } = require('./registry-cache')
-    if (isCacheReady()) {
-      crossFallback = getCachedCrossAgentFallback(agent)
-    }
-  } catch { /* fall through */ }
+  let crossFallback = getCachedCrossAgentFallback(agent)
   if (!crossFallback) {
     crossFallback = CROSS_AGENT_FALLBACK[agent] ?? null
   }
@@ -254,14 +242,9 @@ export function parseRetryContext(str: string | null | undefined): RetryContext 
 export function resolveModel(agent: string, model: string | null | undefined): string {
   if (model) return model
 
-  // Try registry cache
-  try {
-    const { getCachedDefaultModel, isCacheReady } = require('./registry-cache')
-    if (isCacheReady()) {
-      const cached = getCachedDefaultModel(agent)
-      if (cached) return cached
-    }
-  } catch { /* fall through */ }
+  // Registry cache is the source of truth for default models
+  const cached = getCachedDefaultModel(agent)
+  if (cached) return cached
 
   return AGENT_DEFAULT_MODELS[agent] ?? 'unknown'
 }
