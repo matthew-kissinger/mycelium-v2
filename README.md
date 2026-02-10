@@ -41,6 +41,7 @@
 - **Real-time Streaming** - SSE streaming of agent output to frontend
 - **Telegram Integration** - Notifications, alignment signals, remote control
 - **GitHub Integration** - PRs, webhooks, security scanning, rulesets, merge queue
+- **Max Alignment** - Repo-level health audits: runtime verification, doc alignment, cruft cleanup
 - **Startup Safety** - Orphaned tasks cleaned up on restart to prevent token burn
 
 ## Quick Start
@@ -65,7 +66,7 @@
 
 ```bash
 # Clone and install
-git clone https://github.com/yourusername/mycelium-v2.git
+git clone https://github.com/matthew-kissinger/mycelium-v2.git
 cd mycelium-v2
 bun install
 
@@ -123,6 +124,7 @@ packages/
 | Armory | 1h | Skill/MCP inventory (batch threshold) |
 | Digest | 6h | Smart status summaries (Haiku agent) |
 | Compaction | 4h | Semantic memory cleanup (Haiku agent) |
+| Max Alignment | 15min | Repo-level health audit after shepherd evaluations |
 | Health Check | 60s | Monitor device connectivity, provider status |
 | Blocked Check | 15min | Detect stuck/orphaned tasks |
 | GitHub Sync | 30min | Cache repo slugs, default branches, enable security |
@@ -136,6 +138,7 @@ packages/
 3. On success: Telegram notification
 4. On failure: Retry with fallback model, or cancel dependents
 5. Shepherd evaluates results per repo
+6. Max Alignment audits repo health after shepherd evaluations accumulate
 ```
 
 ## CLI Usage

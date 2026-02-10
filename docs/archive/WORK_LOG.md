@@ -1,3 +1,5 @@
+> **HISTORICAL** - This is the original work log from initial development. See PROGRESS.md for current status.
+
 # Mycelium v2 Progress Tracker
 
 > Agents update this file when claiming/completing phases.

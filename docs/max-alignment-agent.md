@@ -180,8 +180,8 @@ You MUST output the <max_alignment_result> XML block. The system parses it to up
 
 - **Cycle name**: `max_alignment`
 - **System agent type**: `max_alignment`
-- **Default interval**: 3600s (1h)
-- **Trigger**: Repos with 3+ completed tasks since last alignment check
+- **Default interval**: 900s (15min check interval)
+- **Trigger**: Repos with 2+ shepherd evaluations since last max alignment run (configurable via `max_alignment_shepherd_trigger`)
 - **Model**: Claude/Opus (needs deep repo understanding) or Sonnet (for cost)
 - **Runs in**: The repo's working directory (not a worktree - it modifies the repo directly)
 - **Commits**: Yes - commits its changes (CLAUDE.md rewrite, slop deletion) with conventional commit message
@@ -190,8 +190,8 @@ You MUST output the <max_alignment_result> XML block. The system parses it to up
 
 ```typescript
 max_alignment_enabled: z.boolean().default(true),
-max_alignment_interval_sec: z.number().int().positive().default(3600),
-max_alignment_batch_threshold: z.number().int().positive().default(3),
+max_alignment_interval_sec: z.number().int().positive().default(900),
+max_alignment_shepherd_trigger: z.number().int().positive().default(2),
 ```
 
 ## Events
@@ -208,6 +208,6 @@ max_alignment_batch_threshold: z.number().int().positive().default(3),
 |-------|-----------|-------|-------------|-----------|
 | Discovery | What work to do | Per-repo scan | Creates tasks | 15min |
 | Shepherd | Task branch quality | Per-task batch | Merges/rejects branches | 15min |
-| **Max Alignment** | **Repo product health** | **Whole repo** | **Modifies repo directly** | **1h** |
-| Digest | Network trends | Network-wide stats | None | 4h |
+| **Max Alignment** | **Repo product health** | **Whole repo** | **Modifies repo directly** | **15min (check), triggers after 2 shepherd evals** |
+| Digest | Network trends | Network-wide stats | None | 6h |
 | Compaction | Memory quality | Per-repo memory | Replaces memory | 4h |

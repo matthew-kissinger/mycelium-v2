@@ -1,7 +1,7 @@
 # Agent-Provider-Model Matrix
 
-**Generated:** 2026-02-05
-**Source of truth:** `packages/shared/src/schemas/agent-matrix.ts`
+**Updated:** 2026-02-10
+**Source of truth:** DB tables `agents`, `providers`, `models` (seeded from `packages/shared/src/schemas/agent-matrix.ts`, grows via provider API fetch)
 
 ---
 
