@@ -7,7 +7,7 @@ import { parseJsonColumn, buildWhere } from '../serialize'
 // Types
 // ============================================================================
 
-export type SystemAgentType = 'discovery' | 'shepherd' | 'armory' | 'genesis' | 'digest' | 'compaction'
+export type SystemAgentType = 'discovery' | 'shepherd' | 'armory' | 'genesis' | 'digest' | 'compaction' | 'max_alignment'
 export type SystemAgentStatus = 'running' | 'completed' | 'failed' | 'blocked'
 
 export interface SystemAgentRunCreateInput {
@@ -21,6 +21,7 @@ export interface SystemAgentRunUpdateInput {
   output?: string
   error?: string
   completed_at?: string
+  context?: object
 }
 
 // ============================================================================
@@ -76,6 +77,7 @@ export async function updateRun(id: string, input: SystemAgentRunUpdateInput) {
   if (input.output !== undefined) updates.output = input.output
   if (input.error !== undefined) updates.error = input.error
   if (input.completed_at !== undefined) updates.completed_at = input.completed_at
+  if (input.context !== undefined) updates.context = JSON.stringify(input.context)
 
   await db.update(schema.system_agent_runs).set(updates).where(eq(schema.system_agent_runs.id, id))
 

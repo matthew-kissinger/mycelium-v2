@@ -56,6 +56,11 @@ export const SchedulerConfig = z.object({
   registry_refresh_enabled: z.boolean().default(true),
   registry_refresh_interval_sec: z.number().int().positive().default(21600), // 6 hours
 
+  // Max Alignment cycle (repo health auditing)
+  max_alignment_enabled: z.boolean().default(true),
+  max_alignment_interval_sec: z.number().int().positive().default(900), // 15 minutes (checks trigger threshold each tick)
+  max_alignment_shepherd_trigger: z.number().int().positive().default(2), // Run after N shepherd evaluations
+
   // Auto-prune
   auto_prune_enabled: z.boolean().default(true),
   auto_prune_threshold: z.number().int().positive().default(100),

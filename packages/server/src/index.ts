@@ -24,6 +24,7 @@ import {
   schedulerRoutes,
   compactionRoutes,
   digestRoutes,
+  maxAlignmentRoutes,
 } from './routes/system-agents'
 import { getSchedulerStatus } from './scheduler'
 import { getRuns, parseRun, cleanupOrphanedRuns } from './db/queries'
@@ -115,6 +116,7 @@ app.route('/api/shepherd', shepherdRoutes)
 app.route('/api/scheduler', schedulerRoutes)
 app.route('/api/compaction', compactionRoutes)
 app.route('/api/digest', digestRoutes)
+app.route('/api/max-alignment', maxAlignmentRoutes)
 
 // New routes
 app.route('/api/queue', queueRoutes)

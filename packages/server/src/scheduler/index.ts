@@ -5,9 +5,10 @@
  * - Dispatcher: Run ready tasks (every 60s)
  * - Discovery: Scan repos for work (every 15min)
  * - Shepherd: Evaluate completed batches (every 15min)
+ * - Max Alignment: Repo health auditing (every 15min, trigger-based)
  * - Blocked Check: Detect stuck tasks (every 15min)
  * - Digest: Send status summaries (every 6h)
- * - Compaction: Clean memory (weekly Monday 11am)
+ * - Compaction: Clean memory (every 4h)
  */
 
 import { SchedulerConfig, CycleState, SchedulerStatus } from '@mycelium/shared'
@@ -25,6 +26,7 @@ import { runArmoryCycle, shouldRunArmory } from './cycles/armory'
 import { runHealthCheckCycle } from './cycles/health'
 import { runGitHubSyncCycle } from './cycles/github-sync'
 import { runRegistryRefreshCycle } from './cycles/registry-refresh'
+import { runMaxAlignmentCycle } from './cycles/max-alignment'
 import { getTaskStats, upsertSchedulerStats, getSchedulerStats } from '../db/queries'
 
 // Cycle names
@@ -39,6 +41,7 @@ export type CycleName =
   | 'health_check'
   | 'github_sync'
   | 'registry_refresh'
+  | 'max_alignment'
 
 // Internal cycle state (extends public CycleState with interval ref)
 interface InternalCycleState extends CycleState {
@@ -52,9 +55,10 @@ export {
   unregisterActiveRun,
   getActiveRuns,
   isShepherdRunningForRepo,
+  isMaxAlignmentRunningForRepo,
 } from './active-runs'
 
-import { getActiveRuns, isShepherdRunningForRepo } from './active-runs'
+import { getActiveRuns, isShepherdRunningForRepo, isMaxAlignmentRunningForRepo } from './active-runs'
 
 // Scheduler instance
 let schedulerState: {
@@ -81,6 +85,7 @@ export function getSchedulerStatus(): SchedulerStatus {
       { name: 'health_check', enabled: true, running: false, runs_completed: 0, errors: 0 },
       { name: 'github_sync', enabled: true, running: false, runs_completed: 0, errors: 0 },
       { name: 'registry_refresh', enabled: true, running: false, runs_completed: 0, errors: 0 },
+      { name: 'max_alignment', enabled: true, running: false, runs_completed: 0, errors: 0 },
     ]
 
     return {
@@ -227,6 +232,15 @@ function initializeScheduler(config: SchedulerConfig): void {
     errors: 0,
   })
 
+  // Max Alignment cycle (repo health auditing)
+  cycles.set('max_alignment', {
+    name: 'max_alignment',
+    enabled: config.max_alignment_enabled,
+    running: false,
+    runs_completed: 0,
+    errors: 0,
+  })
+
   schedulerState = {
     config,
     running: false,
@@ -281,6 +295,7 @@ function computeNextRun(cycleName: CycleName): string | undefined {
     health_check: config.health_check_interval_sec,
     github_sync: config.github_sync_interval_sec,
     registry_refresh: config.registry_refresh_interval_sec,
+    max_alignment: config.max_alignment_interval_sec,
   }
   const interval = intervalMap[cycleName]
   if (!interval) return undefined
@@ -389,6 +404,7 @@ function startCycles(): void {
   startCycle('health_check', () => runHealthCheckCycle(config), config.health_check_interval_sec)
   startCycle('github_sync', () => runGitHubSyncCycle(config), config.github_sync_interval_sec)
   startCycle('registry_refresh', () => runRegistryRefreshCycle(config), config.registry_refresh_interval_sec)
+  startCycle('max_alignment', () => runMaxAlignmentCycle(config), config.max_alignment_interval_sec)
 
   // Armory cycle - check every hour if batch threshold met
   const armoryState = schedulerState.cycles.get('armory')!
@@ -543,6 +559,35 @@ export async function triggerShepherdForRepo(repoPath: string): Promise<void> {
   }
 }
 
+/**
+ * Trigger Max Alignment for a repo.
+ * Per-repo concurrency - same repo won't run twice.
+ */
+export async function triggerMaxAlignmentForRepo(repoPath: string): Promise<void> {
+  if (!schedulerState) return
+
+  const state = schedulerState.cycles.get('max_alignment')
+  if (!state || !state.enabled) return
+
+  if (isMaxAlignmentRunningForRepo(repoPath)) {
+    console.log(`[Scheduler] Max alignment already running for ${repoPath}, skipping`)
+    return
+  }
+
+  const startTime = new Date()
+  try {
+    await runMaxAlignmentCycle(schedulerState!.config, repoPath)
+
+    state.runs_completed++
+    state.last_run = startTime.toISOString()
+    console.log(`[Scheduler] max_alignment cycle completed`)
+  } catch (error) {
+    state.errors++
+    state.last_run = startTime.toISOString()
+    console.error(`[Scheduler] max_alignment cycle failed:`, error)
+  }
+}
+
 // Export cycle handlers for direct access (e.g., from API routes)
 export { runDispatcherCycle } from './cycles/dispatcher'
 export { runDiscoveryCycle } from './cycles/discovery'
@@ -554,3 +599,4 @@ export { runCompactionCycle } from './cycles/compaction'
 export { runHealthCheckCycle } from './cycles/health'
 export { runGitHubSyncCycle } from './cycles/github-sync'
 export { runRegistryRefreshCycle } from './cycles/registry-refresh'
+export { runMaxAlignmentCycle } from './cycles/max-alignment'

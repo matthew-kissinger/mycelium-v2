@@ -293,9 +293,15 @@ export interface ShepherdTaskContext {
   error?: string
   branch_name?: string
   parsed_result?: {
+    status?: 'success' | 'partial' | 'blocked'
+    summary?: string
+    files_modified?: string[]
+    files_created?: string[]
+    files_deleted?: string[]
+    tests?: { passed: number; failed: number; skipped: number }
+    commits?: Array<{ hash?: string; message: string }>
     branch?: string
-    commits?: string[]
-    pr_url?: string
+    git_backed?: boolean
   }
 }
 

@@ -39,3 +39,13 @@ export function isShepherdRunningForRepo(repoPath: string): boolean {
   }
   return false
 }
+
+/** Check if max alignment is already running for a specific repo */
+export function isMaxAlignmentRunningForRepo(repoPath: string): boolean {
+  for (const run of activeRuns.values()) {
+    if (run.agent_type === 'max_alignment' && run.repo_path === repoPath) {
+      return true
+    }
+  }
+  return false
+}

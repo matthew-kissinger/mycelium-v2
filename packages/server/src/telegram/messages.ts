@@ -28,7 +28,12 @@ export interface BranchEvaluation {
   task_id: string
   decision: string
   reason: string
+  confidence?: number
   agent?: string
+  files_modified?: string[]
+  files_created?: string[]
+  commits?: Array<{ hash?: string; message: string }>
+  tests?: { passed: number; failed: number; skipped: number }
 }
 
 export interface ShepherdReportInfo {
@@ -279,24 +284,90 @@ export function formatShepherdReport(report: ShepherdReportInfo): string {
     message += `<b>Decisions:</b> ${decisions.join(', ')}\n`
   }
 
-  // Branch evaluation details
+  // Per-task evaluation details
   if (report.branch_evaluations && report.branch_evaluations.length > 0) {
-    const merged = report.branch_evaluations.filter((b) => b.decision === 'MERGE')
-    const rejected = report.branch_evaluations.filter((b) => b.decision === 'REJECT')
+    message += '\n'
+    for (const b of report.branch_evaluations) {
+      const icon = b.decision === 'MERGE' ? '\u2705' : b.decision === 'REJECT' ? '\u274c' : '\u23f3'
+      const label = b.agent ? escapeHtml(b.agent) : b.task_id.slice(0, 8)
+      const confStr = b.confidence ? ` (${Math.round(b.confidence * 100)}%)` : ''
+      message += `${icon} <b>${b.decision}:</b> ${label}${confStr}\n`
 
-    if (merged.length > 0) {
-      const mergeOrder = merged
-        .map((b) => b.agent ? escapeHtml(b.agent) : b.task_id.slice(0, 8))
-        .join(' \u2192 ')
-      message += `<b>Merge order:</b> ${mergeOrder}\n`
-    }
+      if (b.reason) message += `  ${escapeHtml(truncate(b.reason, 80))}\n`
 
-    if (rejected.length > 0) {
-      for (const r of rejected) {
-        const label = r.agent ? escapeHtml(r.agent) : r.task_id.slice(0, 8)
-        message += `<b>Rejected:</b> ${label} (${escapeHtml(truncate(r.reason, 60))})\n`
-      }
+      const fileCount = (b.files_modified?.length ?? 0) + (b.files_created?.length ?? 0)
+      if (fileCount > 0) message += `  Files: ${fileCount} changed\n`
+      if (b.tests) message += `  Tests: ${b.tests.passed}p/${b.tests.failed}f/${b.tests.skipped}s\n`
+      if (b.commits?.length) message += `  Commits: ${b.commits.length}\n`
     }
+  }
+
+  return message
+}
+
+// =============================================================================
+// Max Alignment Messages
+// =============================================================================
+
+export interface MaxAlignmentReportInfo {
+  repo_path: string
+  repo_name: string
+  health: 'healthy' | 'warning' | 'critical'
+  headline: string
+  build_status?: string
+  test_status?: string
+  test_count?: number
+  test_passing?: number
+  test_failing?: number
+  runtime_status?: string
+  critical_bugs: number
+  claude_md_action?: string
+  deleted_files: number
+  deleted_branches: number
+}
+
+export function formatMaxAlignmentReport(report: MaxAlignmentReportInfo): string {
+  const healthIcon = {
+    healthy: '\ud83d\udfe2',
+    warning: '\ud83d\udfe1',
+    critical: '\ud83d\udd34',
+  }[report.health]
+
+  let message =
+    `${healthIcon} <b>Max Alignment: ${escapeHtml(report.repo_name)}</b>\n\n` +
+    `<b>${escapeHtml(report.headline)}</b>\n\n`
+
+  // Runtime check summary
+  const checks: string[] = []
+  if (report.build_status) {
+    checks.push(`Build: ${report.build_status === 'pass' ? '\u2705' : '\u274c'}`)
+  }
+  if (report.test_status) {
+    const testDetail = report.test_passing != null && report.test_failing != null
+      ? ` (${report.test_passing}p/${report.test_failing}f)`
+      : ''
+    checks.push(`Tests: ${report.test_status === 'pass' ? '\u2705' : '\u274c'}${testDetail}`)
+  }
+  if (report.runtime_status) {
+    checks.push(`Runtime: ${report.runtime_status === 'pass' ? '\u2705' : report.runtime_status === 'untestable' ? '\u2796' : '\u274c'}`)
+  }
+  if (checks.length > 0) {
+    message += checks.join(' | ') + '\n'
+  }
+
+  if (report.critical_bugs > 0) {
+    message += `\u26a0\ufe0f <b>${report.critical_bugs} critical bug${report.critical_bugs > 1 ? 's' : ''} found</b>\n`
+  }
+
+  if (report.claude_md_action === 'rewritten') {
+    message += `\ud83d\udcdd CLAUDE.md rewritten\n`
+  }
+
+  const cleanupParts: string[] = []
+  if (report.deleted_files > 0) cleanupParts.push(`${report.deleted_files} files`)
+  if (report.deleted_branches > 0) cleanupParts.push(`${report.deleted_branches} branches`)
+  if (cleanupParts.length > 0) {
+    message += `\ud83e\uddf9 Cleaned: ${cleanupParts.join(', ')}\n`
   }
 
   return message

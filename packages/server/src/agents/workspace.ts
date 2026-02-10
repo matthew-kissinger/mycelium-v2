@@ -359,6 +359,75 @@ export async function getBranchDiff(repoPath: string, branchName: string): Promi
 }
 
 // =============================================================================
+// Git Backup Data Capture
+// =============================================================================
+
+export interface WorktreeCommitData {
+  commits: Array<{ hash: string; message: string; author: string }>
+  files_modified: string[]
+  files_created: string[]
+  files_deleted: string[]
+}
+
+/**
+ * Capture commit and file change data from a worktree's git history.
+ * Used as backup when agents don't produce structured XML output.
+ *
+ * Reads: git log (commits since default branch) + git diff --name-status (file categorization).
+ */
+export async function captureWorktreeCommits(worktreePath: string): Promise<WorktreeCommitData | null> {
+  try {
+    const defaultBranch = await getDefaultBranch(worktreePath)
+
+    // Get commit list since divergence from default branch
+    const logResult = await runGitSafe(
+      ['log', `${defaultBranch}..HEAD`, '--format=%H|%s|%an', '--reverse'],
+      worktreePath,
+    )
+    const commits: WorktreeCommitData['commits'] = []
+    if (logResult.exitCode === 0 && logResult.stdout) {
+      for (const line of logResult.stdout.split('\n')) {
+        if (!line.trim()) continue
+        const [hash, message, author] = line.split('|')
+        if (hash && message) {
+          commits.push({ hash: hash.slice(0, 7), message, author: author ?? 'unknown' })
+        }
+      }
+    }
+
+    if (commits.length === 0) return null
+
+    // Get file categorization (M=modified, A=added, D=deleted)
+    const diffResult = await runGitSafe(
+      ['diff', '--name-status', `${defaultBranch}...HEAD`],
+      worktreePath,
+    )
+
+    const files_modified: string[] = []
+    const files_created: string[] = []
+    const files_deleted: string[] = []
+
+    if (diffResult.exitCode === 0 && diffResult.stdout) {
+      for (const line of diffResult.stdout.split('\n')) {
+        if (!line.trim()) continue
+        const [status, ...pathParts] = line.split('\t')
+        const filePath = pathParts.join('\t') // handle paths with tabs (rare)
+        if (!filePath) continue
+
+        if (status === 'A') files_created.push(filePath)
+        else if (status === 'D') files_deleted.push(filePath)
+        else files_modified.push(filePath) // M, R, C all treated as modified
+      }
+    }
+
+    return { commits, files_modified, files_created, files_deleted }
+  } catch (error) {
+    console.error('[WORKSPACE] Failed to capture worktree commits:', error)
+    return null
+  }
+}
+
+// =============================================================================
 // Diff Capture
 // =============================================================================
 

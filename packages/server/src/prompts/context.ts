@@ -145,16 +145,54 @@ kill $SERVER_PID
 
 **Why this matters:** Other agents and the orchestration system share this machine. A server you leave running can block critical infrastructure.
 
-## Structured Output Markers (REQUIRED)
-
-At the end of your work, include these markers so the orchestration system can parse your results:
-
-\`\`\`
-[FILES_CHANGED] comma-separated list of files you created or modified
-[TESTS_RUN] X passed, Y failed (if you ran tests)
-[BRANCH] branch name (if you created or switched branches)
-\`\`\`
+${buildStructuredOutputSection(role)}
 ${buildAgentSpecificInstructions(agentId)}${buildWorktreeContext(worktreePath, branchName)}`
+}
+
+/** System agent roles that have their own output formats (YAML, markers, etc.) */
+const SYSTEM_AGENT_ROLES = new Set(['shepherd', 'discovery', 'digest', 'compaction', 'armory', 'genesis', 'max_alignment'])
+
+/**
+ * Build structured output section.
+ * Task agents get XML <task_result> instructions.
+ * System agents (shepherd, digest, compaction, etc.) have their own output
+ * formats defined in their dedicated prompts - skip to avoid ambiguity.
+ */
+function buildStructuredOutputSection(role?: string): string {
+  if (role && SYSTEM_AGENT_ROLES.has(role)) return ''
+
+  return `## Structured Output (REQUIRED)
+
+At the end of your work, output this XML block so the orchestration system can parse your results:
+
+\`\`\`xml
+<task_result status="success|partial|blocked">
+  <summary>Brief description of what you did and why</summary>
+  <files_changed>
+    <file action="modified">src/foo.ts</file>
+    <file action="created">src/bar.ts</file>
+    <file action="deleted">src/old.ts</file>
+  </files_changed>
+  <tests>
+    <passed>12</passed>
+    <failed>0</failed>
+    <skipped>1</skipped>
+  </tests>
+  <commits>
+    <commit hash="abc1234">feat: add user model</commit>
+    <commit hash="def5678">test: add user tests</commit>
+  </commits>
+</task_result>
+\`\`\`
+
+Field reference:
+- status: "success" (completed), "partial" (some work done), "blocked" (could not proceed)
+- summary: 1-3 sentences of what you accomplished
+- files_changed: each file with action="modified"|"created"|"deleted"
+- tests: only if you ran tests (omit section entirely if you didn't)
+- commits: your commit messages with short hashes (omit if no commits)
+
+You MUST output this XML block. The system parses it to track your work.`
 }
 
 /**

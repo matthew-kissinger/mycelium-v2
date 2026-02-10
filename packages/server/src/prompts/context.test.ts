@@ -96,11 +96,33 @@ describe('buildMycelContext', () => {
     expect(ctx).not.toContain('## Workspace Isolation')
   })
 
-  test('includes structured output markers section', () => {
+  test('includes structured XML output section for task agents', () => {
     const ctx = buildMycelContext()
-    expect(ctx).toContain('[FILES_CHANGED]')
-    expect(ctx).toContain('[TESTS_RUN]')
-    expect(ctx).toContain('[BRANCH]')
+    expect(ctx).toContain('## Structured Output (REQUIRED)')
+    expect(ctx).toContain('<task_result')
+    expect(ctx).toContain('status="success|partial|blocked"')
+    expect(ctx).toContain('<summary>')
+    expect(ctx).toContain('<file action="modified">')
+    expect(ctx).toContain('<tests>')
+    expect(ctx).toContain('<commit hash=')
+    // Old markers should NOT appear
+    expect(ctx).not.toContain('[FILES_CHANGED]')
+    expect(ctx).not.toContain('[TESTS_RUN]')
+    expect(ctx).not.toContain('[BRANCH]')
+  })
+
+  test('excludes XML output section for system agents', () => {
+    for (const sysRole of ['shepherd', 'discovery', 'digest', 'compaction', 'armory', 'genesis']) {
+      const ctx = buildMycelContext({ role: sysRole })
+      expect(ctx).not.toContain('## Structured Output (REQUIRED)')
+      expect(ctx).not.toContain('<task_result')
+    }
+  })
+
+  test('includes XML output section for task_agent role', () => {
+    const ctx = buildMycelContext({ role: 'task_agent' })
+    expect(ctx).toContain('## Structured Output (REQUIRED)')
+    expect(ctx).toContain('<task_result')
   })
 
   test('combines all options correctly', () => {
@@ -116,6 +138,7 @@ describe('buildMycelContext', () => {
     expect(ctx).toContain('#12345678')
     expect(ctx).toContain('Implement feature X')
     expect(ctx).toContain('## Kiro Git Safety')
+    expect(ctx).toContain('<task_result')
   })
 })
 

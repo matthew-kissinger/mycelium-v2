@@ -56,11 +56,22 @@ export const AGENT_PROVIDERS: Record<AgentType, { supported: ProviderType[], def
 
 // Parsed result from agent execution
 export const ParsedResult = z.object({
+  status: z.enum(['success', 'partial', 'blocked']).optional(),
   summary: z.string().optional(),
   files_modified: z.array(z.string()).default([]),
   files_created: z.array(z.string()).default([]),
-  tests_passed: z.boolean().optional(),
-  commit_hash: z.string().optional(),
+  files_deleted: z.array(z.string()).default([]),
+  tests: z.object({
+    passed: z.number(),
+    failed: z.number(),
+    skipped: z.number(),
+  }).optional(),
+  commits: z.array(z.object({
+    hash: z.string().optional(),
+    message: z.string(),
+  })).default([]),
+  branch: z.string().optional(),
+  git_backed: z.boolean().optional(),
 })
 export type ParsedResult = z.infer<typeof ParsedResult>
 

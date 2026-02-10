@@ -7,13 +7,24 @@
 
 **Core System**: Complete
 - Backend API (85+ endpoints)
-- Scheduler (10 cycles: dispatcher, discovery, shepherd, armory, digest, compaction, blocked_check, health_check, github_sync, registry_refresh)
+- Scheduler (11 cycles: dispatcher, discovery, shepherd, max_alignment, armory, digest, compaction, blocked_check, health_check, github_sync, registry_refresh)
 - Agent dispatch (10 agents: Claude, Codex, Gemini, Cline, Cursor, Kiro, Vibe, Pi, OpenCode, Copilot)
 - Provider support (12 providers: anthropic, openai, google, cursor, aws, github, openrouter, cline, mistral, groq, cerebras, opencode-zen)
 - Dynamic registry (DB-backed agents/providers/models with auto-detection and API model fetching)
 - Frontend (three-column layout, React Flow)
 - CLI, MCP server
 - GitHub integration (PRs, webhooks, security scanning, rulesets, merge queue)
+
+**Recent Work** (2026-02-10):
+- Major architectural refactor: Drizzle migrations, query domain split (11 files), agent adapters (10 files), registry unified (blocking init, no dual-path), execution pipeline (single task path)
+- Max Alignment Agent: repo-level health audit system agent
+  - Triggers after N shepherd evaluations per repo (default 2)
+  - Runs claude/opus in repo working directory (not worktree) with write access
+  - Runtime verification: build, tests, runtime checks, critical bug detection
+  - Cleanup: deletes cruft files, prunes stale branches, rewrites CLAUDE.md
+  - XML output parsing with pattern/warning extraction to memory
+  - 5 new SSE events, Telegram notifications, API endpoints (`/api/max-alignment/trigger`, `/api/max-alignment/status`)
+  - 16 new tests (323 total pass, 0 fail)
 
 **Recent Work** (2026-02-09):
 - Dynamic Agent/Provider Registry: replaced 440+ lines of hardcoded agent/provider/model data with DB-backed, self-healing registry
@@ -82,6 +93,8 @@
 | Open Source | License, Security Policy, CI/CD | Complete |
 | Audit | E2E hardening, startup safety, unified execution | Complete |
 | Registry | DB tables, cache, consumers, auto-detection, API, CLI | Complete |
+| Refactor | Drizzle migrations, query split, adapters, pipeline, registry unified | Complete |
+| Max Alignment | Cycle, prompt, parser, routes, tests | Complete |
 
 ## What's Next
 

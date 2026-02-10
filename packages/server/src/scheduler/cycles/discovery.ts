@@ -18,6 +18,7 @@ import {
   DiscoveryContext,
   DISCOVERY_SENT_MARKER,
   DISCOVERY_AUTO_MARKER,
+  DISCOVERY_RESULT_REGEX,
 } from '../../prompts/discovery'
 import {
   buildMycelContext,
@@ -27,6 +28,8 @@ import {
   detectAllSkillsForRepo,
   buildRepoSkillsList,
 } from '../../prompts/context'
+import { getCachedEnabledAgents } from '../../agents/registry-cache'
+import { parseDiscoveryResult } from '../../agents/output-parser'
 
 /**
  * Build context for Discovery agent.
@@ -88,7 +91,7 @@ async function buildContext(
     })),
     patterns: patterns.map((p) => p.content),
     warnings: warnings.map((w) => w.content),
-    agentsAvailable: ['claude', 'codex', 'gemini', 'cursor', 'cline', 'kiro', 'vibe', 'pi', 'opencode', 'copilot'],
+    agentsAvailable: getCachedEnabledAgents().map(a => a.id),
     autonomous: isAuto,
   }
 }
@@ -141,6 +144,9 @@ export async function runDiscoveryForRepo(
       return
     }
 
+    // Use claude/opus for auto mode (more autonomous), claude/sonnet for align mode
+    const model = isAuto ? 'opus' : 'sonnet'
+
     // Refresh repo skills on each scan
     const repoSkills = detectAllSkillsForRepo(repoPath)
     await queries.updateRepo(repo.id, { skills: repoSkills })
@@ -149,10 +155,13 @@ export async function runDiscoveryForRepo(
     const mycelContext = buildMycelContext({
       role: 'discovery',
       agentId: 'discovery',
+      model,
     })
     // Use async version to include live credits/quota info
     const agentsSection = await buildAgentsSectionWithCredits()
-    const skillsSection = buildSkillsSection([], repoPath)
+    // Pass top 3 repo skills so discovery gets domain knowledge
+    const topSkills = repoSkills.slice(0, 3)
+    const skillsSection = buildSkillsSection(topSkills, repoPath)
     const mcpSection = buildMcpSection('claude')
     const repoSkillsList = buildRepoSkillsList(repoPath, repoSkills)
 
@@ -161,10 +170,6 @@ export async function runDiscoveryForRepo(
       + (repoSkillsList ? `\n\n${repoSkillsList}` : '')
       + (skillsSection ? `\n\n${skillsSection}` : '')
       + (mcpSection ? `\n\n${mcpSection}` : '')
-
-    // Dispatch to agent
-    // Use claude/opus for auto mode (more autonomous), claude/sonnet for align mode
-    const model = isAuto ? 'opus' : 'sonnet'
 
     // Collect session log entries
     const sessionLog: Array<{ chunk: string; stream: string; timestamp: string }> = []
@@ -175,6 +180,12 @@ export async function runDiscoveryForRepo(
       cwd: repoPath,
       model,
       timeout: 1800, // 30 min timeout
+      extraEnv: isAuto ? {
+        GIT_AUTHOR_NAME: `discovery/claude/${model} (mycelium)`,
+        GIT_AUTHOR_EMAIL: `discovery+claude+${model}@mycelium.local`,
+        GIT_COMMITTER_NAME: `discovery/claude/${model} (mycelium)`,
+        GIT_COMMITTER_EMAIL: `discovery+claude+${model}@mycelium.local`,
+      } : undefined,
       onOutput: (chunk, stream = 'stdout') => {
         sessionLog.push({ chunk, stream, timestamp: new Date().toISOString() })
         broadcast('agent:output', {
@@ -202,26 +213,44 @@ export async function runDiscoveryForRepo(
       session_log: sessionLog,
     }).catch((e) => console.error('[Discovery] Failed to record fruiting session:', e))
 
-    // Check for success markers
+    // Parse structured result (new XML format or old markers)
+    const discoveryResult = parseDiscoveryResult(result.output)
+
+    // Check for success: new structured XML or old-style markers
+    const hasNewResult = DISCOVERY_RESULT_REGEX.test(result.output)
     const hasAlignMarker = result.output.includes(DISCOVERY_SENT_MARKER)
     const hasAutoMarker = result.output.includes(DISCOVERY_AUTO_MARKER)
+    const hasSuccessMarker = hasNewResult || hasAlignMarker || hasAutoMarker
 
-    if (result.success && (hasAlignMarker || hasAutoMarker)) {
+    if (result.success && hasSuccessMarker) {
       await queries.completeRun(run.id, result.output)
+
+      // Store structured result in run context if parsed
+      if (discoveryResult) {
+        await queries.updateRun(run.id, {
+          context: {
+            mode: isAuto ? 'auto' : 'align',
+            result: discoveryResult,
+          },
+        })
+      }
 
       // Update repo last scanned time
       await queries.updateRepo(repo.id, {
         last_scanned_at: new Date().toISOString(),
       })
 
-      console.log(`[Discovery] ${repo.name} completed successfully`)
+      const headline = discoveryResult?.headline ?? 'completed'
+      const taskCount = discoveryResult?.tasks.length ?? 0
+      console.log(`[Discovery] ${repo.name} completed: ${headline} (${taskCount} tasks)`)
 
-      // Broadcast completion
+      // Broadcast completion with structured data
       broadcast('agent:completed', {
         type: 'agent:completed',
         run_id: run.id,
         agent_type: 'discovery',
         duration_seconds: result.duration_seconds,
+        discovery_result: discoveryResult ?? undefined,
         timestamp: new Date().toISOString(),
       })
     } else {

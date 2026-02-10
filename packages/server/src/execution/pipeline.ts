@@ -32,8 +32,8 @@ import { getTelegramService } from '../telegram'
 import { formatTaskCompleted, formatTaskFailed, formatTaskRetrying, type TaskInfo, type TaskRetryInfo } from '../telegram/messages'
 import { bufferTaskEvent } from '../telegram/buffer'
 import { shouldRetry, buildRetryContext, parseRetryContext, resolveModel } from '../agents/fallback'
-import { prepareWorkspace, cleanupWorkspace, captureWorktreeDiff, pushBranchToGithub } from '../agents/workspace'
-import { parseAgentOutput, parseClaudeSessionId } from '../agents/output-parser'
+import { prepareWorkspace, cleanupWorkspace, captureWorktreeDiff, captureWorktreeCommits, pushBranchToGithub } from '../agents/workspace'
+import { parseTaskResult, parseClaudeSessionId } from '../agents/output-parser'
 
 // =============================================================================
 // Types
@@ -379,8 +379,36 @@ async function handleTaskSuccess(
   const completedTime = new Date().toISOString()
   const repoPath = task.repo_path
 
-  // Parse structured output markers
-  const parsed = parseAgentOutput(result.output)
+  // Parse structured output (XML first, then legacy markers)
+  let parsed = parseTaskResult(result.output)
+
+  // Git backup: supplement or build from actual git data
+  if (worktreePath) {
+    const gitData = await captureWorktreeCommits(worktreePath)
+    if (gitData) {
+      if (!parsed) {
+        // No structured output - build entirely from git
+        parsed = {
+          status: 'success',
+          files_modified: gitData.files_modified,
+          files_created: gitData.files_created,
+          files_deleted: gitData.files_deleted,
+          commits: gitData.commits.map(c => ({ hash: c.hash, message: c.message })),
+          git_backed: true,
+        }
+      } else {
+        // Supplement: fill empty fields from git data
+        if (parsed.files_modified.length === 0 && parsed.files_created.length === 0) {
+          parsed.files_modified = gitData.files_modified
+          parsed.files_created = gitData.files_created
+          parsed.files_deleted = gitData.files_deleted
+        }
+        if (parsed.commits.length === 0) {
+          parsed.commits = gitData.commits.map(c => ({ hash: c.hash, message: c.message }))
+        }
+      }
+    }
+  }
 
   await queries.updateTask(taskId, {
     status: 'done',
@@ -604,6 +632,12 @@ export async function executeTask(
       taskId,
       sessionId: resumeSessionId,
       timeout: task.timeout_seconds ?? undefined,
+      extraEnv: {
+        GIT_AUTHOR_NAME: `${agent}/${model ?? 'default'} #${taskId.slice(0, 8)} (mycelium)`,
+        GIT_AUTHOR_EMAIL: `task+${agent}+${model ?? 'default'}@mycelium.local`,
+        GIT_COMMITTER_NAME: `${agent}/${model ?? 'default'} #${taskId.slice(0, 8)} (mycelium)`,
+        GIT_COMMITTER_EMAIL: `task+${agent}+${model ?? 'default'}@mycelium.local`,
+      },
       onStart: (pid) => {
         // Store PID in spec_context for orphan detection
         queries.updateTask(taskId, {
