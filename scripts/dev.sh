@@ -79,9 +79,9 @@ cmd_start() {
 
     echo ""
     echo -e "${GREEN}Mycelium v2 is running!${NC}"
-    echo -e "  Backend:  http://localhost:8000"
-    echo -e "  Frontend: http://localhost:5173"
-    echo -e "  API:      http://localhost:8000/api/health"
+    echo -e "  Backend:  http://localhost:8765"
+    echo -e "  Frontend: http://localhost:5765"
+    echo -e "  API:      http://localhost:8765/api/health"
 }
 
 cmd_stop() {
@@ -153,8 +153,8 @@ cmd_status() {
 
     echo ""
     echo -e "${BLUE}Network Access:${NC}"
-    echo -e "  Backend:  http://localhost:8000"
-    echo -e "  Frontend: http://localhost:5173"
+    echo -e "  Backend:  http://localhost:8765"
+    echo -e "  Frontend: http://localhost:5765"
 }
 
 cmd_logs() {
