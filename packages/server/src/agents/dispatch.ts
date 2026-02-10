@@ -29,7 +29,23 @@ export interface DispatchOptions {
  */
 export async function dispatch(options: DispatchOptions): Promise<AgentExecuteResult> {
   const { agent, prompt, cwd, model, provider, timeout, taskId, sessionId, onOutput, onStart } = options
-  const config = DEFAULT_AGENT_CONFIGS[agent]
+
+  // Try registry cache first, fall back to hardcoded defaults
+  let config = DEFAULT_AGENT_CONFIGS[agent]
+  try {
+    const { getCachedAgent, isCacheReady } = require('./registry-cache')
+    if (isCacheReady()) {
+      const cachedAgent = getCachedAgent(agent)
+      if (cachedAgent) {
+        // Overlay registry data onto config
+        config = {
+          ...config,
+          command: cachedAgent.command,
+          timeout_seconds: cachedAgent.timeout_seconds ?? config?.timeout_seconds ?? 1800,
+        }
+      }
+    }
+  } catch { /* fall through to hardcoded config */ }
 
   if (!config) {
     return {
@@ -175,8 +191,23 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
     }
 
     // Calculate cost for per_use billing
+    // Try registry cache for billing type, fall back to config
+    let billingType = config.billing_type
+    try {
+      const { getCachedAgent, getCachedProvider, isCacheReady } = require('./registry-cache')
+      if (isCacheReady()) {
+        const cachedAgent = getCachedAgent(agent)
+        if (cachedAgent?.default_provider) {
+          const providerRow = getCachedProvider(cachedAgent.default_provider)
+          if (providerRow?.billing) {
+            billingType = providerRow.billing
+          }
+        }
+      }
+    } catch { /* fall through */ }
+
     let cost_usd: number | undefined
-    if (config.billing_type === 'per_use') {
+    if (billingType === 'per_use') {
       // For agents using OpenRouter, calculate from usage delta
       if ((agent === 'cline' || agent === 'pi') && openRouterUsageBefore !== null) {
         const creditsAfter = await checkOpenRouterCredits()
@@ -188,7 +219,7 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
       if (cost_usd === undefined) {
         cost_usd = parseCostFromOutput(output)
       }
-    } else if (config.billing_type === 'free') {
+    } else if (billingType === 'free') {
       cost_usd = 0
     } else {
       cost_usd = 0

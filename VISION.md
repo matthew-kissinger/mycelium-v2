@@ -59,20 +59,29 @@ Like the underground fungal networks that connect trees in a forest, Mycelium co
 ## What's Working
 
 - Autonomous discovery and task creation
-- Multi-agent parallel execution
-- Dependency chain management
+- Multi-agent parallel execution with worktree isolation
+- Dependency chain management with result injection into downstream prompts
 - Cost tracking (per-use vs subscription)
 - Health monitoring and quota backoff
 - Real-time streaming to frontend
+- GitHub integration (PR creation, webhooks, security scanning, rulesets, merge queue)
+- Dynamic agent/provider registry (DB-backed, CLI auto-detection, provider API model fetching)
+- Health state persistence (survives restarts via DB-backed agent_stats)
+- Startup safety (orphaned tasks/worktrees cleaned, no token burn on restart)
+- Unified execution pipeline (manual runs get same context enrichment as scheduler)
+- Memory patterns and warnings injected into task context
 
 ## Current Focus
 
 - **Discovery loop optimization** - Better task quality, reduced noise
 - **Agent success rates** - Fallback tuning, model selection
 - **Memory utilization** - Patterns informing prompts
+- **GitHub workflow** - PR-based merge, security automation
 
 ## Not Yet Built
 
+- Registry UI panel (frontend for agent/provider/model management)
 - Agent performance benchmarking (success rates by agent/model/task-type)
 - Automated testing of generated code
 - Multi-user access control
+- Cursor pagination for large task lists (replace LIMIT/OFFSET)

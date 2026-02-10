@@ -119,6 +119,24 @@ export function saveAgentsConfig(config: AgentsConfig): void {
 }
 
 export function getAgentConfig(agentName: string): AgentConfigExtended | undefined {
+  // Try registry cache first (DB-backed)
+  try {
+    const { getCachedAgent, isCacheReady } = require('../agents/registry-cache')
+    if (isCacheReady()) {
+      const cached = getCachedAgent(agentName)
+      if (cached) {
+        return {
+          command: cached.command,
+          timeout_seconds: cached.timeout_seconds ?? 1800,
+          billing_type: 'subscription', // Default - registry doesn't store this on agent
+          enabled: cached.enabled ?? true,
+          default_model: cached.default_model ?? undefined,
+          description: cached.notes ?? undefined,
+        } as AgentConfigExtended
+      }
+    }
+  } catch { /* fall through to config store */ }
+
   const config = loadAgentsConfig()
   return config.agents[agentName]
 }
@@ -131,6 +149,21 @@ export function updateAgentConfig(
   if (!config.agents[agentName]) return undefined
   config.agents[agentName] = { ...config.agents[agentName], ...updates }
   saveAgentsConfig(config)
+
+  // Write through to registry DB + invalidate cache
+  try {
+    const { upsertAgent } = require('../db/registry-queries')
+    const { invalidateAgent } = require('../agents/registry-cache')
+    const regUpdates: Record<string, unknown> = {}
+    if (updates.enabled !== undefined) regUpdates.enabled = updates.enabled
+    if (updates.default_model !== undefined) regUpdates.default_model = updates.default_model
+    if (updates.timeout_seconds !== undefined) regUpdates.timeout_seconds = updates.timeout_seconds
+    if (Object.keys(regUpdates).length > 0) {
+      upsertAgent(agentName, regUpdates)
+      invalidateAgent(agentName)
+    }
+  } catch { /* registry not available yet */ }
+
   return config.agents[agentName]
 }
 
@@ -144,6 +177,18 @@ export function getEnabledAgents(): AgentConfigExtended[] {
 }
 
 export function isAgentEnabled(agentName: string): boolean {
+  // Try registry cache first (covers all 10 agents)
+  try {
+    const { getCachedAgent, isCacheReady } = require('../agents/registry-cache')
+    if (isCacheReady()) {
+      const cachedAgent = getCachedAgent(agentName)
+      if (cachedAgent !== undefined) {
+        return cachedAgent.enabled ?? true
+      }
+    }
+  } catch { /* fall through */ }
+
+  // Fallback to config file (only covers 5 agents)
   const config = loadAgentsConfig()
   return config.agents[agentName]?.enabled ?? false
 }

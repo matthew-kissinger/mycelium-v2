@@ -276,7 +276,7 @@ export async function setupSecurityAllRepos(): Promise<{
 
   // Filter to public repos with GitHub slug info
   const publicRepos = repos.filter(
-    (r) => (r as any).is_public === 1 && r.github_owner && r.github_repo
+    (r) => r.is_public === 1 && r.github_owner && r.github_repo
   )
 
   console.log(`[Security] Setting up security on ${publicRepos.length} public repos (${repos.length} total)`)

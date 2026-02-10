@@ -13,10 +13,22 @@ import {
   TaskRunRequest,
 } from '@mycelium/shared'
 import { dispatch, killProcess, clearDependencies } from '../agents'
-import { cleanupWorkspace } from '../agents/workspace'
+import { cleanupWorkspace, prepareWorkspace, captureWorktreeDiff, pushBranchToGithub } from '../agents/workspace'
+import { parseAgentOutput } from '../agents/output-parser'
+import { recordSuccess, recordFailure } from '../agents/health'
+import {
+  buildMycelContext,
+  buildSkillsSection,
+  buildMcpSection,
+  buildMemorySection,
+  selectTaskSkills,
+  detectAllSkillsForRepo,
+} from '../prompts/context'
 import { broadcast } from '../sse'
 import * as queries from '../db/queries'
-import { startTaskLog, appendLog, completeTaskLog, getTaskLogs, getLogBufferStats } from '../logs'
+import { startTaskLog, appendLog, completeTaskLog, getTaskLogs, getTaskLogEntries, getLogBufferStats } from '../logs'
+import { mergePR } from '../github/pr'
+import { runGh, formatSlug, type RepoSlug } from '../github/client'
 
 const app = new Hono()
 
@@ -484,7 +496,7 @@ app.post('/:id/cancel', async (c) => {
   })
 
   // Clean up worktree if present
-  if ((task as any).worktree_path) {
+  if (task.worktree_path) {
     cleanupWorkspace(id, task.repo_path, true).catch(err =>
       console.error(`[Cancel] Worktree cleanup error for task ${id.slice(0, 8)}:`, err)
     )
@@ -551,36 +563,128 @@ async function cancelDependentTasks(cancelledTaskId: string, cancelledTitle: str
 }
 
 // =============================================================================
-// Helper: Execute task in background
+// Helper: Execute task in background with full context enrichment
+// Mirrors dispatcher.ts:runTask() pipeline: worktree, context, health, sessions
 // =============================================================================
 async function executeTask(task: {
   id: string
+  title: string
   agent: string | null
   model: string | null
   provider?: string | null
   prompt: string | null
   repo_path: string
+  depends_on?: string | null
+  skills?: string | null
 }) {
+  const taskId = task.id
+  const agent = task.agent!
+  const model = task.model ?? undefined
+  const provider = task.provider as 'openrouter' | 'cline' | undefined
+  const repoPath = task.repo_path
+  const basePrompt = task.prompt ?? task.title
+
   // Create abort controller for cancellation
   const controller = new AbortController()
-  runningTasks.set(task.id, controller)
+  runningTasks.set(taskId, controller)
 
   // Start logging for this task
-  startTaskLog(task.id)
+  startTaskLog(taskId)
+
+  // --- Prepare isolated worktree workspace BEFORE building context ---
+  // so agents know their branch name and worktree path
+  let worktreePath: string | null = null
+  let branchName: string | null = null
+  try {
+    const workspace = await prepareWorkspace(taskId, repoPath)
+    worktreePath = workspace.worktreePath
+    branchName = workspace.branchName
+    console.log(`[ExecuteTask] Task ${taskId.slice(0, 8)} using worktree: ${worktreePath}`)
+
+    await queries.updateTask(taskId, {
+      worktree_path: worktreePath,
+      branch_name: branchName,
+    })
+  } catch (error) {
+    console.error(`[ExecuteTask] Failed to create worktree for task ${taskId.slice(0, 8)}, using repo directly:`, error)
+  }
+
+  const workingDir = worktreePath ?? repoPath
+
+  // --- Build enriched prompt (same pipeline as dispatcher) ---
+
+  // Fetch dependency results
+  let dependencySection = ''
+  const depIds = JSON.parse(task.depends_on ?? '[]') as string[]
+  if (depIds.length > 0) {
+    const depSummaries: string[] = []
+    for (const depId of depIds) {
+      const depTask = await queries.getTask(depId)
+      if (depTask && depTask.status === 'done') {
+        const depResult = depTask.result ?? '(no result recorded)'
+        const truncated = depResult.length > 500 ? depResult.slice(0, 500) + '...' : depResult
+        depSummaries.push(`### Task #${depId.slice(0, 8)}: ${depTask.title} (by ${depTask.agent ?? 'unknown'})\n${truncated}`)
+      }
+    }
+    if (depSummaries.length > 0) {
+      dependencySection = `\n\n## Completed Dependencies\n${depSummaries.join('\n\n')}\n`
+    }
+  }
+
+  const mycelContext = buildMycelContext({
+    role: 'task_agent',
+    agentId: agent,
+    model,
+    taskId,
+    taskTitle: task.title,
+    worktreePath: worktreePath ?? undefined,
+    branchName: branchName ?? undefined,
+  })
+
+  // Merge skills: explicit + keyword-matched + auto-detected
+  const explicitSkills: string[] = JSON.parse(task.skills ?? '[]')
+  const repoSkills = detectAllSkillsForRepo(repoPath)
+  const keywordSkills = selectTaskSkills(repoSkills, task.title, task.prompt ?? undefined)
+  const mergedSkills = [...new Set([...explicitSkills, ...keywordSkills])]
+  if (mergedSkills.length < 5) {
+    for (const skill of repoSkills) {
+      if (mergedSkills.length >= 5) break
+      if (!mergedSkills.includes(skill)) mergedSkills.push(skill)
+    }
+  }
+  const finalSkills = mergedSkills.slice(0, 5)
+
+  const skillsSection = buildSkillsSection(finalSkills, repoPath)
+  const mcpSection = buildMcpSection(agent)
+  const memorySection = await buildMemorySection(repoPath)
+
+  // Compose full enriched prompt
+  const prompt = `${basePrompt}${dependencySection}
+
+---
+
+${mycelContext}
+${skillsSection ? `\n${skillsSection}` : ''}
+${mcpSection ? `\n${mcpSection}` : ''}
+${memorySection ? `\n${memorySection}` : ''}`
 
   try {
     const result = await dispatch({
-      agent: task.agent as any,
-      prompt: task.prompt!,
-      cwd: task.repo_path,
-      model: task.model ?? undefined,
-      provider: task.provider as 'openrouter' | 'cline' | undefined,
-      taskId: task.id,  // Register process for cleanup
+      agent: agent as any,
+      prompt,
+      cwd: workingDir,
+      model,
+      provider,
+      taskId,
       onOutput: (chunk, stream = 'stdout') => {
-        // Store in log buffer
-        appendLog(task.id, chunk, stream)
-        // Broadcast to SSE
-        broadcast('task:output', { id: task.id, chunk, stream })
+        appendLog(taskId, chunk, stream)
+        broadcast('task:output', {
+          type: 'task:output',
+          task_id: taskId,
+          chunk,
+          stream,
+          timestamp: new Date().toISOString(),
+        })
       },
     })
 
@@ -592,24 +696,88 @@ async function executeTask(task: {
     const now = new Date().toISOString()
 
     if (result.success) {
-      await queries.updateTask(task.id, {
+      // Parse structured output markers
+      const parsed = parseAgentOutput(result.output)
+
+      await queries.updateTask(taskId, {
         status: 'done',
         result: result.output,
+        parsed_result: parsed ?? undefined,
         cost_usd: result.cost_usd ?? 0,
         duration_seconds: result.duration_seconds,
+        input_tokens: result.input_tokens,
+        output_tokens: result.output_tokens,
         completed_at: now,
       })
 
       broadcast('task:completed', {
-        id: task.id,
-        status: 'done',
-        cost_usd: result.cost_usd,
+        type: 'task:completed',
+        task_id: taskId,
         duration_seconds: result.duration_seconds,
+        cost_usd: result.cost_usd,
+        timestamp: now,
       })
+
+      // Record success in health tracking
+      recordSuccess(agent, model)
+
+      // Push branch to GitHub (non-blocking, best-effort)
+      if (branchName && worktreePath) {
+        pushBranchToGithub(repoPath, branchName).then((pushResult) => {
+          if (pushResult.pushed) {
+            broadcast('github:push', {
+              type: 'github:push' as const,
+              repo_path: repoPath,
+              branch: branchName!,
+              task_id: taskId,
+              timestamp: new Date().toISOString(),
+            })
+          }
+        }).catch((e) => console.error(`[ExecuteTask] GitHub push error for task ${taskId.slice(0, 8)}:`, e))
+      }
+
+      // Build context trace for fruiting session
+      const contextTrace = {
+        layers: [
+          { name: 'basePrompt', size: basePrompt.length },
+          ...(dependencySection ? [{ name: 'dependencySection', size: dependencySection.length, dep_ids: depIds }] : []),
+          { name: 'mycelContext', size: mycelContext.length },
+          { name: 'skillsSection', size: skillsSection.length },
+          { name: 'mcpSection', size: mcpSection.length },
+          ...(memorySection ? [{ name: 'memorySection', size: memorySection.length }] : []),
+        ],
+        total_size: prompt.length,
+      }
+
+      // Capture worktree diff
+      let worktreeDiff: { stat: string; diff: string; commits: number } | null = null
+      if (worktreePath) {
+        worktreeDiff = await captureWorktreeDiff(worktreePath)
+      }
+
+      // Record fruiting session
+      const logEntries = getTaskLogEntries(taskId)
+      queries.createFruitingSession({
+        task_id: taskId, repo_path: repoPath, agent, model,
+        context_trace: {
+          ...contextTrace,
+          ...(worktreeDiff ? {
+            worktree_diff: worktreeDiff.stat,
+            worktree_diff_full: worktreeDiff.diff,
+            commit_count: worktreeDiff.commits,
+          } : {}),
+        },
+        full_prompt: prompt,
+        session_log: logEntries ?? undefined,
+      }).catch((e) => console.error('[ExecuteTask] Failed to record fruiting session:', e))
+
     } else {
-      await queries.updateTask(task.id, {
+      // Task failed - use health tracking for clean error extraction
+      const { error: cleanError } = recordFailure(agent, model, result.output)
+
+      await queries.updateTask(taskId, {
         status: 'failed',
-        error: result.output,
+        error: cleanError,
         error_details: {
           error_type: 'execution_error',
           exit_code: result.exit_code,
@@ -619,11 +787,38 @@ async function executeTask(task: {
       })
 
       broadcast('task:failed', {
-        id: task.id,
-        status: 'failed',
-        error: result.output,
-        exit_code: result.exit_code,
+        type: 'task:failed',
+        task_id: taskId,
+        error: cleanError,
+        timestamp: now,
       })
+
+      // Record fruiting session even on failure
+      const contextTrace = {
+        layers: [
+          { name: 'basePrompt', size: basePrompt.length },
+          ...(dependencySection ? [{ name: 'dependencySection', size: dependencySection.length, dep_ids: depIds }] : []),
+          { name: 'mycelContext', size: mycelContext.length },
+          { name: 'skillsSection', size: skillsSection.length },
+          { name: 'mcpSection', size: mcpSection.length },
+          ...(memorySection ? [{ name: 'memorySection', size: memorySection.length }] : []),
+        ],
+        total_size: prompt.length,
+      }
+      const logEntries = getTaskLogEntries(taskId)
+      queries.createFruitingSession({
+        task_id: taskId, repo_path: repoPath, agent, model,
+        context_trace: contextTrace,
+        full_prompt: prompt,
+        session_log: logEntries ?? undefined,
+      }).catch((e) => console.error('[ExecuteTask] Failed to record fruiting session:', e))
+
+      // Clean up worktree on failure
+      if (worktreePath) {
+        cleanupWorkspace(taskId, repoPath).catch((e) =>
+          console.error(`[ExecuteTask] Worktree cleanup error for task ${taskId.slice(0, 8)}:`, e)
+        )
+      }
     }
   } catch (error) {
     // Check if cancelled during execution
@@ -631,20 +826,33 @@ async function executeTask(task: {
       return
     }
 
-    await queries.updateTask(task.id, {
+    const errorMsg = error instanceof Error ? error.message : String(error)
+
+    // Record failure in health tracking
+    recordFailure(agent, model, errorMsg)
+
+    await queries.updateTask(taskId, {
       status: 'failed',
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMsg,
       completed_at: new Date().toISOString(),
     })
 
     broadcast('task:failed', {
-      id: task.id,
-      status: 'failed',
-      error: String(error),
+      type: 'task:failed',
+      task_id: taskId,
+      error: errorMsg,
+      timestamp: new Date().toISOString(),
     })
+
+    // Clean up worktree on error
+    if (worktreePath) {
+      cleanupWorkspace(taskId, repoPath).catch((e) =>
+        console.error(`[ExecuteTask] Worktree cleanup error for task ${taskId.slice(0, 8)}:`, e)
+      )
+    }
   } finally {
-    runningTasks.delete(task.id)
-    completeTaskLog(task.id)
+    runningTasks.delete(taskId)
+    completeTaskLog(taskId)
   }
 }
 
@@ -677,20 +885,123 @@ app.post('/:id/merge', async (c) => {
     return c.json({ error: `Task is ${task.status}, must be done to merge` }, 400)
   }
 
-  // Parse result to get branch name if available
-  const parsedResult = task.parsed_result ? JSON.parse(task.parsed_result) : null
-  const branchName = parsedResult?.branch_name ?? `task/${id.slice(0, 8)}`
+  // Get branch name from task fields, then parsed_result fallback
+  const branchName = task.branch_name
+    ?? (task.parsed_result ? JSON.parse(task.parsed_result)?.branch_name : null)
+  if (!branchName) {
+    return c.json({ error: 'Task has no branch to merge' }, 400)
+  }
 
-  // TODO: Actually perform git merge using dispatch
-  // For now, return a placeholder response indicating the merge request was received
-  broadcast('task:updated', { id, action: 'merge_requested', branch: branchName })
+  // Get repo info for default branch and GitHub slug
+  const repo = await queries.getRepoByPath(task.repo_path)
+  const defaultBranch = repo?.github_default_branch ?? 'main'
 
-  return c.json({
-    message: 'Merge requested',
-    task_id: id,
-    branch: branchName,
-    status: 'pending',
-  })
+  // If the task has a GitHub PR, merge via GitHub API
+  if (task.github_pr_number && repo?.github_owner && repo?.github_repo) {
+    const slug: RepoSlug = { owner: repo.github_owner, repo: repo.github_repo }
+
+    // Parse optional merge method from request body
+    let method: 'merge' | 'squash' | 'rebase' = 'squash'
+    try {
+      const body = await c.req.json()
+      if (body.method && ['merge', 'squash', 'rebase'].includes(body.method)) {
+        method = body.method
+      }
+    } catch {
+      // No body, use default
+    }
+
+    const mergeResult = await mergePR({
+      slug,
+      prNumber: task.github_pr_number,
+      method,
+      commitTitle: `${task.title} (#${task.github_pr_number})`,
+      deleteAfterMerge: true,
+    })
+
+    if (!mergeResult.success) {
+      return c.json({
+        error: 'GitHub PR merge failed',
+        details: mergeResult.error,
+        task_id: id,
+        pr_number: task.github_pr_number,
+      }, 500)
+    }
+
+    broadcast('task:updated', { id, action: 'merged', branch: branchName, via: 'github_pr' })
+
+    return c.json({
+      message: 'PR merged successfully',
+      task_id: id,
+      branch: branchName,
+      pr_number: task.github_pr_number,
+      method,
+      status: 'merged',
+    })
+  }
+
+  // No PR - do a local git merge into the default branch
+  try {
+    const { spawn } = await import('bun')
+
+    // Checkout default branch
+    const checkout = spawn({
+      cmd: ['git', 'checkout', defaultBranch],
+      cwd: task.repo_path,
+      stdout: 'pipe',
+      stderr: 'pipe',
+      stdin: 'ignore',
+    })
+    const checkoutStderr = await new Response(checkout.stderr).text()
+    const checkoutExit = await checkout.exited
+    if (checkoutExit !== 0) {
+      return c.json({
+        error: `Failed to checkout ${defaultBranch}`,
+        details: checkoutStderr.trim(),
+      }, 500)
+    }
+
+    // Merge the task branch
+    const merge = spawn({
+      cmd: ['git', 'merge', '--no-ff', branchName, '-m', `Merge ${branchName}: ${task.title}`],
+      cwd: task.repo_path,
+      stdout: 'pipe',
+      stderr: 'pipe',
+      stdin: 'ignore',
+    })
+    const mergeStdout = await new Response(merge.stdout).text()
+    const mergeStderr = await new Response(merge.stderr).text()
+    const mergeExit = await merge.exited
+    if (mergeExit !== 0) {
+      // Abort the merge on conflict
+      spawn({
+        cmd: ['git', 'merge', '--abort'],
+        cwd: task.repo_path,
+        stdout: 'ignore',
+        stderr: 'ignore',
+        stdin: 'ignore',
+      })
+      return c.json({
+        error: 'Local merge failed (conflict or error)',
+        details: mergeStderr.trim() || mergeStdout.trim(),
+      }, 500)
+    }
+
+    broadcast('task:updated', { id, action: 'merged', branch: branchName, via: 'local_git' })
+
+    return c.json({
+      message: 'Branch merged locally',
+      task_id: id,
+      branch: branchName,
+      target: defaultBranch,
+      status: 'merged',
+    })
+  } catch (error) {
+    return c.json({
+      error: 'Merge failed',
+      details: error instanceof Error ? error.message : String(error),
+    }, 500)
+  }
 })
 
 // =============================================================================

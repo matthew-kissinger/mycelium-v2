@@ -34,11 +34,14 @@
 - **Automatic Discovery** - Agents scan repos for TODOs, lint errors, outdated deps, test failures
 - **Dependency Chains** - Wire tasks with `--depends-on` for sequential execution
 - **Parallel Execution** - Independent tasks run concurrently (configurable limit)
+- **Dynamic Registry** - DB-backed agent/provider/model registry with CLI auto-detection and provider API model fetching
 - **Health Tracking** - Monitors agent quotas, auto-backs off when limits hit
 - **Cost Tracking** - Per-task cost tracking for pay-per-use agents
 - **Fallback Chains** - Automatic retry with different models on failure
 - **Real-time Streaming** - SSE streaming of agent output to frontend
 - **Telegram Integration** - Notifications, alignment signals, remote control
+- **GitHub Integration** - PRs, webhooks, security scanning, rulesets, merge queue
+- **Startup Safety** - Orphaned tasks cleaned up on restart to prevent token burn
 
 ## Quick Start
 
@@ -91,6 +94,10 @@ SCHEDULER_AUTO_START=true
 # Telegram (optional)
 TELEGRAM_BOT_TOKEN=your_token
 TELEGRAM_CHAT_ID=your_chat_id
+
+# GitHub (optional - for PR creation, webhooks, security scanning)
+GITHUB_WEBHOOK_SECRET=your_webhook_secret
+# Also run: gh auth login
 ```
 
 ## Architecture
@@ -118,6 +125,8 @@ packages/
 | Compaction | 4h | Semantic memory cleanup (Haiku agent) |
 | Health Check | 60s | Monitor device connectivity, provider status |
 | Blocked Check | 15min | Detect stuck/orphaned tasks |
+| GitHub Sync | 30min | Cache repo slugs, default branches, enable security |
+| Registry Refresh | 6h | Re-detect agent CLIs, refresh provider models |
 
 ### Task Flow
 
@@ -195,6 +204,26 @@ mycel check
 mycel notify "Task completed successfully"
 ```
 
+### Registry
+
+```bash
+# View agent/provider/model matrix
+mycel registry
+
+# Agent management
+mycel registry agents
+mycel registry detect
+
+# Provider and model info
+mycel registry providers
+mycel registry models [--agent claude] [--free]
+
+# Refresh and health
+mycel registry refresh
+mycel registry health
+mycel registry fallback claude sonnet
+```
+
 ### System Control
 
 ```bash
@@ -266,7 +295,10 @@ PATCH  /api/tasks/:id          Update task
 DELETE /api/tasks/:id          Delete task
 POST   /api/tasks/:id/run      Execute task
 POST   /api/tasks/:id/cancel   Cancel running task
+POST   /api/tasks/:id/merge    Merge task branch (GitHub PR or local git)
 GET    /api/tasks/:id/logs     Get task output
+GET    /api/tasks/:id/context  Get enriched task context
+GET    /api/tasks/:id/sessions Get fruiting sessions
 GET    /api/tasks/graph        Get dependency graph
 ```
 
@@ -276,6 +308,34 @@ GET    /api/scheduler/status   Scheduler status
 POST   /api/scheduler/start    Start scheduler
 POST   /api/scheduler/stop     Stop scheduler
 GET    /api/health             Health check with agent status
+```
+
+### GitHub
+```
+POST   /api/github/webhook         Receive GitHub webhook events
+POST   /api/github/setup-security  Enable security features on repos
+POST   /api/github/rulesets/apply  Apply branch rulesets to public repos
+GET    /api/github/rulesets/:owner/:repo  List rulesets for a repo
+GET    /api/github/runner/status   Self-hosted runner status
+```
+
+### Registry
+```
+GET    /api/registry/agents              List agents with status
+GET    /api/registry/agents/:id          Agent detail + models + health
+PATCH  /api/registry/agents/:id          Update agent (enable/disable, timeout)
+GET    /api/registry/providers           List providers with credits
+GET    /api/registry/providers/:id       Provider detail + models
+PATCH  /api/registry/providers/:id       Update provider config
+POST   /api/registry/providers/:id/refresh  Fetch models for provider
+GET    /api/registry/models              List models (filter: ?agent=X&provider=Y&free=true)
+PATCH  /api/registry/models/:id          Update model
+GET    /api/registry/matrix              Full agent-provider-model matrix
+GET    /api/registry/health              Health summary
+POST   /api/registry/detect              Trigger CLI detection
+POST   /api/registry/refresh             Trigger full refresh
+GET    /api/registry/credentials         List available credential keys
+GET    /api/registry/fallback/:agent/:model  Show fallback chain
 ```
 
 ### Real-time

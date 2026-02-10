@@ -70,6 +70,12 @@ export const SSEEventType = z.enum([
   'device:updated',
   'device:removed',
 
+  // Registry events
+  'registry:agent_detected',
+  'registry:provider_refreshed',
+  'registry:refreshed',
+  'registry:agent_status',
+
   // System events
   'system:heartbeat',
   'system:error',

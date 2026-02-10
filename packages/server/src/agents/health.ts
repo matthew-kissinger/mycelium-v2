@@ -3,6 +3,10 @@
  *
  * Tracks usage, quota status, and error patterns for each agent.
  * Provides intelligent error extraction from agent output.
+ *
+ * DB-backed: health state persists across restarts via agent_stats table.
+ * In-memory Map is the hot path; DB writes happen on every record call.
+ * loadPersistedHealth() restores state on startup.
  */
 
 import { broadcast } from '../sse'
@@ -45,6 +49,75 @@ function getHealth(agent: string, model?: string): AgentHealth {
     })
   }
   return healthState.get(key)!
+}
+
+/**
+ * Persist health state to DB (fire-and-forget, non-blocking).
+ * Called after in-memory state is updated.
+ */
+function persistHealthToDb(key: string, health: AgentHealth): void {
+  try {
+    // Dynamic import to avoid circular deps and allow graceful fallback
+    import('../db/registry-queries').then(({ upsertAgentHealth }) => {
+      upsertAgentHealth(key, {
+        agent_id: key,
+        model: health.model ?? null,
+        provider: null,
+        status: health.status,
+        total_tasks: health.successCount + health.errorCount,
+        successful: health.successCount,
+        failed: health.errorCount,
+        success_rate: health.successCount > 0
+          ? health.successCount / (health.successCount + health.errorCount)
+          : 0,
+        quota_reset_at: health.quotaResetAt?.toISOString() ?? null,
+        last_error: health.lastError ?? null,
+        last_error_at: health.lastErrorAt?.toISOString() ?? null,
+        last_success_at: health.lastSuccessAt?.toISOString() ?? null,
+        error_count_recent: health.errorCount,
+      })
+    }).catch(() => {
+      // DB not ready yet (startup race) or write failed - silently ignore
+    })
+  } catch {
+    // Ignore - in-memory state is the source of truth during runtime
+  }
+}
+
+/**
+ * Load persisted health state from DB into in-memory Map.
+ * Called once on startup after DB init.
+ */
+export async function initHealthFromDb(): Promise<void> {
+  try {
+    const { getAllAgentHealth } = await import('../db/registry-queries')
+    const rows = getAllAgentHealth()
+
+    for (const row of rows) {
+      const key = row.agent_id
+      const parts = key.split('/')
+      const agent = parts[0]
+      const model = parts.length > 1 ? parts.slice(1).join('/') : undefined
+
+      healthState.set(key, {
+        agent,
+        model,
+        status: (row.status as AgentHealth['status']) ?? 'healthy',
+        errorCount: row.failed ?? 0,
+        successCount: row.successful ?? 0,
+        lastError: row.last_error ?? undefined,
+        lastErrorAt: row.last_error_at ? new Date(row.last_error_at) : undefined,
+        lastSuccessAt: row.last_success_at ? new Date(row.last_success_at) : undefined,
+        quotaResetAt: row.quota_reset_at ? new Date(row.quota_reset_at) : undefined,
+      })
+    }
+
+    if (rows.length > 0) {
+      console.log(`[Health] Loaded ${rows.length} health entries from DB`)
+    }
+  } catch (error) {
+    console.error('[Health] Failed to load from DB, starting fresh:', error)
+  }
 }
 
 /**
@@ -282,6 +355,9 @@ export function recordSuccess(agent: string, model?: string): void {
     health.status = 'healthy'
     health.quotaResetAt = undefined
   }
+
+  // Persist to DB (non-blocking)
+  persistHealthToDb(healthKey(agent, model), health)
 }
 
 /**
@@ -315,6 +391,9 @@ export function recordFailure(
       timestamp: new Date().toISOString(),
     })
 
+    // Persist to DB (non-blocking)
+    persistHealthToDb(healthKey(agent, model), health)
+
     return {
       error: extracted.error,
       shouldBackoff: true,
@@ -326,6 +405,9 @@ export function recordFailure(
   if (health.errorCount > 3 && health.status === 'healthy') {
     health.status = 'degraded'
   }
+
+  // Persist to DB (non-blocking)
+  persistHealthToDb(healthKey(agent, model), health)
 
   return {
     error: extracted.error,
@@ -692,5 +774,41 @@ export async function checkAllProviderStatus(): Promise<Omit<ProviderStatus, 'fe
   ])
 
   providerStatusCache = { groq, cerebras, mistral, fetchedAt: Date.now() }
+
+  // Persist provider status to DB (non-blocking)
+  persistProviderStatus({ groq, cerebras, mistral })
+
   return { groq, cerebras, mistral }
+}
+
+/**
+ * Persist provider rate limit / status info to the providers table.
+ */
+function persistProviderStatus(status: { groq: any; cerebras: any; mistral: any }): void {
+  import('../db/registry-queries').then(({ updateProviderStatus }) => {
+    if (status.groq) {
+      updateProviderStatus(
+        'groq',
+        status.groq.available ? 'available' : 'unavailable',
+        status.groq, // rate limit info (remainingRequests, resetAt)
+      )
+    }
+    if (status.cerebras) {
+      updateProviderStatus(
+        'cerebras',
+        status.cerebras.available ? 'available' : 'unavailable',
+        status.cerebras, // rate limit info (remainingRequestsDay, limitRequestsDay, etc.)
+      )
+    }
+    if (status.mistral) {
+      updateProviderStatus(
+        'mistral',
+        status.mistral.available ? 'available' : 'unavailable',
+        undefined,
+        status.mistral, // credits/model info
+      )
+    }
+  }).catch(() => {
+    // DB not ready - ignore
+  })
 }

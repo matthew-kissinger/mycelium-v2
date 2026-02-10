@@ -9,8 +9,8 @@
 
 | Component | Status |
 |-----------|--------|
-| Backend API | Hono + Bun, 70+ endpoints |
-| Scheduler | 8 cycles (dispatcher, discovery, shepherd, etc.) |
+| Backend API | Hono + Bun, 85+ endpoints |
+| Scheduler | 10 cycles (dispatcher, discovery, shepherd, github_sync, registry_refresh, etc.) |
 | Agent Dispatch | 10 agents (Claude, Codex, Gemini, Cline, Cursor, Kiro, Vibe, Pi, OpenCode, Copilot) across 12 providers |
 | Frontend | Three-column layout (sidebar, React Flow canvas, detail panel) |
 | Cost Tracking | Per-use (Cline/OpenRouter) vs subscription billing |
@@ -75,6 +75,16 @@ mycel repos
 mycel repos add <path>
 mycel repos discover [path]
 
+# Registry
+mycel registry                             # Full matrix view
+mycel registry agents                      # Agent list + status + version
+mycel registry providers                   # Provider list + credits
+mycel registry models [--agent X] [--free] # Model list
+mycel registry detect                      # CLI detection
+mycel registry refresh                     # Full refresh
+mycel registry health                      # Health summary
+mycel registry fallback <agent> <model>    # Fallback chain
+
 # Discovery
 mycel discover /path --agent --auto
 
@@ -98,6 +108,7 @@ GET/POST   /api/tasks
 GET        /api/tasks/:id
 POST       /api/tasks/:id/run
 POST       /api/tasks/:id/cancel
+POST       /api/tasks/:id/merge
 GET        /api/tasks/:id/context
 GET        /api/tasks/:id/sessions
 
@@ -115,6 +126,27 @@ GET        /api/shepherd/status
 GET        /api/stats
 GET        /api/health
 GET        /api/events              # SSE stream
+
+# GitHub
+POST       /api/github/webhook
+POST       /api/github/setup-security
+POST       /api/github/rulesets/apply
+GET        /api/github/rulesets/:owner/:repo
+
+# Registry
+GET        /api/registry/agents
+GET/PATCH  /api/registry/agents/:id
+GET        /api/registry/providers
+GET/PATCH  /api/registry/providers/:id
+POST       /api/registry/providers/:id/refresh
+GET        /api/registry/models
+PATCH      /api/registry/models/:id
+GET        /api/registry/matrix
+GET        /api/registry/health
+POST       /api/registry/detect
+POST       /api/registry/refresh
+GET        /api/registry/credentials
+GET        /api/registry/fallback/:agent/:model
 ```
 
 Full API list in README.md.
@@ -133,6 +165,8 @@ Full API list in README.md.
 | Compaction | 4h | Semantic memory cleanup (Haiku agent) |
 | Blocked Check | 15min | Detect stuck tasks, orphan cleanup |
 | Health Check | 60s | Provider status monitoring |
+| GitHub Sync | 30min | Cache repo slugs, default branches, enable security |
+| Registry Refresh | 6h | Re-detect CLIs, re-fetch provider models |
 
 ### Task Flow
 
@@ -148,7 +182,9 @@ Shepherd -> evaluates completed tasks
 
 ```sql
 tasks (id, title, prompt, status, agent, model, provider, repo_path,
-       depends_on, sequenced, cost_usd, duration_seconds, ...)
+       depends_on, sequenced, branch_name, worktree_path, github_pr_number,
+       github_pr_url, spec_context, retry_context, cost_usd, duration_seconds,
+       input_tokens, output_tokens, ...)
 
 repos (id, path, name, description, language, weight, ...)
 
@@ -161,6 +197,10 @@ fruiting_sessions (id, task_id, agent, model, context_trace, session_log, ...)
 
 config_overrides (key, value, updated_at)
 prompt_overrides (prompt_id, content, updated_at)
+
+providers (id, name, api_base, billing, status, credits_info, models_fetched_at, ...)
+agents (id, command, cli_version, timeout_seconds, default_provider, default_model, enabled, status, ...)
+models (id, provider_id, model_id, context_window, cost_input, cost_output, free, compatible_agents, fallback_model_id, ...)
 ```
 
 ---
@@ -178,10 +218,18 @@ prompt_overrides (prompt_id, content, updated_at)
 
 ### Context Injection
 
-- `buildMycelContext()` - CLI instructions, agent identity
-- `buildAgentsSectionWithCredits()` - Agent matrix with live credits/quota (async)
+- `buildMycelContext()` - CLI instructions, agent identity, worktree path, branch name
+- `buildAgentsSectionWithCredits()` - Agent matrix with live credits/quota (Discovery only)
 - `buildSkillsSection()` - Skills from ~/.claude/skills/
 - `buildMcpSection(agent)` - MCP servers for specific agent
+- `buildMemorySection(repoPath)` - Memory patterns/warnings for repo (task agents + shepherd)
+
+### Startup Safety
+
+- Orphaned running tasks marked as failed on server restart (prevents token burn)
+- Orphaned system agent runs cleaned up (>1h threshold)
+- Stale worktrees cleaned up
+- Manual `POST /api/tasks/:id/run` gets full context enrichment (matches dispatcher pipeline)
 
 ### Fallback & Health
 
@@ -189,6 +237,18 @@ prompt_overrides (prompt_id, content, updated_at)
 - Cross-agent fallback: codex->cursor, pi->opencode, opencode->gemini, vibe->cline
 - Quota tracking: Gemini, Groq, Cerebras, Codex (auto-backoff until reset)
 - OpenRouter credit monitoring: live balance via `/api/health`
+- Health state DB-backed (survives restarts)
+
+### Dynamic Registry
+
+- DB-backed agents/providers/models tables (replaces hardcoded AGENT_MATRIX)
+- Write-through in-memory cache for sub-ms dispatch reads
+- CLI auto-detection on startup + 6h refresh cycle
+- Provider model fetching from 7 APIs (OpenRouter, Anthropic, OpenAI, Groq, Cerebras, Mistral, Google)
+- Centralized credentials from `~/.config/mk-agent/`
+- `isCacheReady() ? getCached...() : HARDCODED_FALLBACK` pattern for graceful degradation
+- API: 14 endpoints under `/api/registry/`
+- CLI: `mycel registry` with 8 subcommands
 
 ---
 
@@ -202,6 +262,8 @@ prompt_overrides (prompt_id, content, updated_at)
 | macOS | `~/Library/Application Support/mycelium-v2/` |
 
 Contents: `mycelium.db`, `scheduler.json`, `agents.json`, `prompts/`
+
+DB path resolved via `platform/index.ts` - respects `MYCELIUM_DB_PATH` env var and platform conventions.
 
 ### Frontend Structure
 

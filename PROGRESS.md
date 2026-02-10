@@ -6,12 +6,37 @@
 ## Status Summary
 
 **Core System**: Complete
-- Backend API (70+ endpoints)
-- Scheduler (8 cycles: dispatcher, discovery, shepherd, armory, digest, compaction, blocked_check, health_check)
+- Backend API (85+ endpoints)
+- Scheduler (10 cycles: dispatcher, discovery, shepherd, armory, digest, compaction, blocked_check, health_check, github_sync, registry_refresh)
 - Agent dispatch (10 agents: Claude, Codex, Gemini, Cline, Cursor, Kiro, Vibe, Pi, OpenCode, Copilot)
 - Provider support (12 providers: anthropic, openai, google, cursor, aws, github, openrouter, cline, mistral, groq, cerebras, opencode-zen)
+- Dynamic registry (DB-backed agents/providers/models with auto-detection and API model fetching)
 - Frontend (three-column layout, React Flow)
 - CLI, MCP server
+- GitHub integration (PRs, webhooks, security scanning, rulesets, merge queue)
+
+**Recent Work** (2026-02-09):
+- Dynamic Agent/Provider Registry: replaced 440+ lines of hardcoded agent/provider/model data with DB-backed, self-healing registry
+  - 3 new DB tables: `providers` (12 rows), `agents` (10 rows), `models` (80+ rows seeded, grows via API fetch)
+  - Write-through in-memory cache (`registry-cache.ts`) with `isCacheReady()` guard for graceful degradation
+  - CLI auto-detection (`detect.ts`): probes 10 CLIs via `which` + `--version` (5s timeout per agent)
+  - Provider model fetching (`fetch-models.ts`): hits 7 provider APIs (OpenRouter, Anthropic, OpenAI, Groq, Cerebras, Mistral, Google)
+  - Centralized credentials (`credentials.ts`): loads from `~/.config/mk-agent/` env file + individual key files + groq config
+  - 14 new API endpoints under `/api/registry/` (agents, providers, models CRUD + detect/refresh/matrix/health/fallback/credentials)
+  - 8 new CLI subcommands under `mycel registry` (agents, providers, models, detect, refresh, health, fallback)
+  - Registry refresh scheduler cycle (6h interval)
+  - Health state now DB-backed via `agent_stats` table (survives restarts)
+  - All consumers (fallback, dispatch, dispatcher, context, config) read from cache with hardcoded fallback
+  - 4 new SSE events: `registry:agent_detected`, `registry:provider_refreshed`, `registry:refreshed`, `registry:agent_status`
+- Shepherd hardening: fixed 3 critical bugs (deferredTaskIds TDZ crash, worktree context ordering, unregistered process)
+- Shepherd prompt: memory section, 12K char diff limit (was 2K), worktree paths, GitHub PR info, tool-use instructions
+- Shared Task schema: added 11 fields (branch_name, worktree_path, spec_context, retry_context, github_pr_number, etc.)
+- Type safety: removed all `(task as any)` casts in shepherd, dispatcher, routes/tasks
+- E2E audit and hardening pass
+- Startup safety: orphaned running tasks marked failed on server restart (prevents token burn)
+- Unified task execution: manual `POST /api/tasks/:id/run` now gets full context enrichment matching dispatcher pipeline
+- Merge endpoint: `POST /api/tasks/:id/merge` with GitHub PR merge and local git fallback
+- Tests: 288 pass, 0 fail, 1 skip across 13 test files
 
 **Recent Work** (2026-02-06):
 - GitHub integration: client, PR, webhook, github-sync, shepherd PR workflow
@@ -55,15 +80,17 @@
 | Agents | Expansion, Health, Fallback | Complete |
 | Network | Fixes, Upgrades, GitHub | Complete |
 | Open Source | License, Security Policy, CI/CD | Complete |
+| Audit | E2E hardening, startup safety, unified execution | Complete |
+| Registry | DB tables, cache, consumers, auto-detection, API, CLI | Complete |
 
 ## What's Next
 
 Focus areas for continued development:
-- Implement merge endpoint (currently placeholder - `routes/tasks.ts:684`)
 - Add global unhandled rejection handler to server startup
 - Route-level integration tests (0 of 16 route files tested)
 - Fix context.test.ts timeout (buildMcpSection takes 5s+)
 - Pin dependency versions (all using `latest`)
 - Agent success rate analytics (per-agent/model/task-type metrics)
+- Registry UI panel (frontend for agent/provider/model management)
 - Memory compaction tuning
 - Cursor pagination for large task lists (replace LIMIT/OFFSET)

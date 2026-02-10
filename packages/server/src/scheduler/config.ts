@@ -47,6 +47,8 @@ export const DEFAULT_CONFIG: SchedulerConfig = {
   auto_prune_enabled: true,
   auto_prune_threshold: 100,
   auto_prune_keep: 30,
+  registry_refresh_enabled: true,
+  registry_refresh_interval_sec: 21600, // 6 hours
 }
 
 /**

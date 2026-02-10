@@ -231,3 +231,99 @@ export const scheduler_stats = sqliteTable('scheduler_stats', {
   last_error: text('last_error'),
   updated_at: text('updated_at'),
 })
+
+// =============================================================================
+// Dynamic Agent/Provider Registry
+// =============================================================================
+
+// Providers - API provider registry
+export const providers = sqliteTable('providers', {
+  id: text('id').primaryKey(), // e.g. 'anthropic', 'openrouter', 'groq'
+  name: text('name').notNull(),
+  api_base: text('api_base'), // e.g. 'https://api.anthropic.com'
+  billing: text('billing').notNull().default('subscription'), // 'subscription' | 'per_use' | 'free'
+  auth_type: text('auth_type'), // 'api_key' | 'oauth' | 'sso' | 'none'
+  auth_key_env: text('auth_key_env'), // env var name e.g. 'ANTHROPIC_API_KEY'
+
+  // Health/status
+  status: text('status').default('unknown'), // 'available' | 'unavailable' | 'degraded' | 'unknown'
+  last_checked_at: text('last_checked_at'),
+  last_error: text('last_error'),
+  rate_limit_info: text('rate_limit_info'), // JSON
+  credits_info: text('credits_info'), // JSON
+
+  // Model fetching
+  models_fetched_at: text('models_fetched_at'),
+
+  // Flexible config
+  config: text('config'), // JSON
+
+  created_at: text('created_at').notNull(),
+  updated_at: text('updated_at'),
+})
+
+// Agents - CLI agent registry
+export const agents = sqliteTable('agents', {
+  id: text('id').primaryKey(), // e.g. 'claude', 'codex'
+  command: text('command').notNull(), // CLI command e.g. 'claude', 'agent' (for cursor)
+  cli_version: text('cli_version'),
+  timeout_seconds: integer('timeout_seconds').default(1800),
+  max_turns: integer('max_turns'),
+  supports_streaming: integer('supports_streaming', { mode: 'boolean' }).default(true),
+
+  // Provider relationship
+  default_provider: text('default_provider'), // FK to providers.id
+  default_model: text('default_model'),
+  enabled: integer('enabled', { mode: 'boolean' }).default(true),
+  status: text('status').default('unknown'), // 'available' | 'unavailable' | 'degraded' | 'unknown'
+
+  // Capabilities
+  has_headless: integer('has_headless', { mode: 'boolean' }).default(true),
+  has_json_output: integer('has_json_output', { mode: 'boolean' }).default(false),
+  has_model_list_cmd: integer('has_model_list_cmd', { mode: 'boolean' }).default(false),
+  has_mcp: integer('has_mcp', { mode: 'boolean' }).default(false),
+  has_acp: integer('has_acp', { mode: 'boolean' }).default(false),
+  model_list_cmd: text('model_list_cmd'), // e.g. 'agent models', 'pi --list-models'
+
+  // Detection
+  cli_detected_at: text('cli_detected_at'),
+  notes: text('notes'),
+
+  // Flexible config (arg patterns, env vars, auth files)
+  config: text('config'), // JSON
+
+  created_at: text('created_at').notNull(),
+  updated_at: text('updated_at'),
+})
+
+// Models - Model registry across all providers
+export const models = sqliteTable('models', {
+  id: text('id').primaryKey(), // composite like 'anthropic/opus' or 'openrouter/moonshotai/kimi-k2.5'
+  provider_id: text('provider_id').notNull(), // FK to providers.id
+  model_id: text('model_id').notNull(), // provider-native ID e.g. 'opus', 'moonshotai/kimi-k2.5'
+  short_name: text('short_name'), // display alias e.g. 'kimi-k2.5'
+
+  // Capabilities
+  context_window: integer('context_window'), // in K tokens
+  cost_input: real('cost_input'), // per 1K tokens
+  cost_output: real('cost_output'), // per 1K tokens
+  strengths: text('strengths'), // JSON array
+  thinking: integer('thinking', { mode: 'boolean' }).default(false),
+  vision: integer('vision', { mode: 'boolean' }).default(false),
+  free: integer('free', { mode: 'boolean' }).default(false),
+
+  // Agent compatibility
+  compatible_agents: text('compatible_agents'), // JSON array of agent IDs
+
+  // Fallback chain
+  fallback_model_id: text('fallback_model_id'), // self FK for escalation chain
+
+  // Status
+  available: integer('available', { mode: 'boolean' }).default(true),
+  last_used_at: text('last_used_at'),
+  source: text('source').default('seed'), // 'seed' | 'api_fetch' | 'manual'
+
+  created_at: text('created_at').notNull(),
+  updated_at: text('updated_at'),
+})
+
