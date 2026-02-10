@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test, beforeAll } from 'bun:test'
 import {
   getFallbackModel,
   shouldRetry,
@@ -7,6 +7,14 @@ import {
   resolveModel,
   type RetryContext,
 } from './fallback'
+import { _markInitializedForTesting } from './registry-cache'
+
+// Registry cache must be marked initialized before tests can call
+// functions that read from it (the cache will be empty, so tests
+// exercise the hardcoded fallback paths).
+beforeAll(() => {
+  _markInitializedForTesting()
+})
 
 // =============================================================================
 // getFallbackModel
