@@ -1249,7 +1249,7 @@ async function processMergeViaGitHub(
 
       if (telegram?.isConnected()) {
         const msg = formatMergeSuccess(repoPath, branchName, task.agent ?? 'unknown', 0)
-        telegram.sendMessage(msg + (prUrl ? `\n[PR #${prNumber}](${prUrl})` : '')).catch(e => console.error('[Shepherd] Telegram error:', e))
+        telegram.sendMessage(msg + (prUrl ? `\n<a href="${prUrl}">PR #${prNumber}</a>` : '')).catch(e => console.error('[Shepherd] Telegram error:', e))
       }
     } else {
       console.log(`[Shepherd] PR #${prNumber} merge failed: ${mergeResult.error}`)

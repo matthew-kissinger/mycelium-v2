@@ -48,6 +48,11 @@ export {
   DIGEST_COMPLETE_MARKER,
   type DigestContext,
   type DigestOutput,
+  type DigestTrend,
+  type DigestAnomaly,
+  type DigestAgentPerformance,
+  type DigestRecommendation,
+  type DigestAlert,
   buildDigestPrompt,
   parseDigestOutput,
 } from './digest';

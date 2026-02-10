@@ -127,8 +127,24 @@ app.post('/align', zValidator('json', SignalCreateRequest), async (c) => {
     })
 
     if (data.options && data.options.length > 0) {
-      // Send with inline keyboard buttons
-      telegramMessageId = await telegram.sendButtons(formattedQuestion, data.options, 2)
+      // Send with inline keyboard buttons - embed signal ID in callback_data
+      // so the poller can match responses to the correct signal
+      const keyboard: Array<Array<{ text: string; callback_data: string }>> = []
+      let row: Array<{ text: string; callback_data: string }> = []
+      for (const opt of data.options) {
+        // Telegram limits callback_data to 64 bytes
+        const cbData = `signal:${id}:${opt}`.slice(0, 64)
+        row.push({ text: opt, callback_data: cbData })
+        if (row.length >= 2) {
+          keyboard.push(row)
+          row = []
+        }
+      }
+      if (row.length > 0) keyboard.push(row)
+
+      telegramMessageId = await telegram.sendMessage(formattedQuestion, {
+        replyMarkup: { inline_keyboard: keyboard },
+      })
     } else {
       // Send as plain message
       telegramMessageId = await telegram.sendMessage(formattedQuestion)

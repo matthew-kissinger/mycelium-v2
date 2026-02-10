@@ -113,6 +113,7 @@ export interface TelegramService {
   sendButtons(text: string, options: string[], columns?: number): Promise<number | null>
   getUpdates(timeout?: number): Promise<TelegramUpdate[]>
   getFile(fileId: string): Promise<Buffer | null>
+  answerCallbackQuery(queryId: string, text?: string): Promise<boolean>
   startPolling(onUpdate: (update: TelegramUpdate) => Promise<void>): void
   stopPolling(): void
 }
@@ -163,6 +164,38 @@ export function saveConfig(config: TelegramConfig): void {
     chat_id: config.chatId,
     enabled: config.enabled,
   }, null, 2))
+}
+
+// =============================================================================
+// Message Splitting (Telegram 4096 char limit)
+// =============================================================================
+
+/**
+ * Split a long message into chunks at newline boundaries.
+ * Exported for testing.
+ */
+export function splitMessage(text: string, maxLength: number): string[] {
+  if (text.length <= maxLength) return [text]
+
+  const chunks: string[] = []
+  let remaining = text
+
+  while (remaining.length > maxLength) {
+    // Find last newline within the limit
+    let splitAt = remaining.lastIndexOf('\n', maxLength)
+    if (splitAt <= 0) {
+      // No newline found - hard split at limit
+      splitAt = maxLength
+    }
+    chunks.push(remaining.slice(0, splitAt))
+    remaining = remaining.slice(splitAt + 1) // skip the newline
+  }
+
+  if (remaining.length > 0) {
+    chunks.push(remaining)
+  }
+
+  return chunks
 }
 
 // =============================================================================
@@ -282,6 +315,21 @@ class TelegramClient implements TelegramService {
   // ---------------------------------------------------------------------------
 
   async sendMessage(text: string, options?: SendMessageOptions): Promise<number | null> {
+    // Telegram limits messages to 4096 chars. Split long messages at newline boundaries.
+    const MAX_LENGTH = 4000 // leave margin for safety
+    if (text.length > MAX_LENGTH && !options?.replyMarkup) {
+      const chunks = splitMessage(text, MAX_LENGTH)
+      let lastMessageId: number | null = null
+      for (const chunk of chunks) {
+        lastMessageId = await this.sendMessageRaw(chunk, options)
+      }
+      return lastMessageId
+    }
+
+    return this.sendMessageRaw(text, options)
+  }
+
+  private async sendMessageRaw(text: string, options?: SendMessageOptions): Promise<number | null> {
     const data: Record<string, unknown> = {
       chat_id: this.config.chatId,
       text,

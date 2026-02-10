@@ -12,8 +12,9 @@ import { SchedulerConfig } from '@mycelium/shared'
 import * as queries from '../../db/queries'
 import { dispatch } from '../../agents/dispatch'
 import { broadcast } from '../../sse'
+import { buildMycelContext } from '../../prompts/context'
 import { registerActiveRun, unregisterActiveRun } from '../active-runs'
-import { buildArmoryPrompt, ArmorySkill, ArmoryMcpServer } from '../../prompts/armory'
+import { buildArmoryPrompt, parseArmoryOutput, ArmorySkill, ArmoryMcpServer } from '../../prompts/armory'
 import { getInstalledSkills, getMcpServers } from '../../config/inventory'
 import { homedir } from 'os'
 
@@ -93,12 +94,16 @@ export async function runArmoryCycle(config: SchedulerConfig): Promise<void> {
     console.log(`[Armory] Current inventory: ${skills.length} skills, ${mcps.length} MCPs`)
     console.log(`[Armory] Analyzing ${unreviewedTasks.length} tasks`)
 
-    // Build prompt
+    // Build prompt with mycel context
+    const mycelContext = buildMycelContext({
+      role: 'armory',
+      agentId: 'armory',
+    })
     const prompt = buildArmoryPrompt({
       tasksAnalyzed: unreviewedTasks.length,
       existingSkills,
       existingMcpServers,
-    })
+    }, mycelContext)
 
     // Collect session log entries
     const sessionLog: Array<{ chunk: string; stream: string; timestamp: string }> = []
@@ -120,7 +125,7 @@ export async function runArmoryCycle(config: SchedulerConfig): Promise<void> {
           stream,
           timestamp: new Date().toISOString(),
         })
-        if (chunk.includes('armory_update')) {
+        if (chunk.includes('armory_result')) {
           console.log('[Armory] Agent outputting manifest...')
         }
       },
@@ -138,6 +143,9 @@ export async function runArmoryCycle(config: SchedulerConfig): Promise<void> {
     }).catch((e) => console.error('[Armory] Failed to record fruiting session:', e))
 
     if (result.success) {
+      // Parse XML output
+      const armoryOutput = parseArmoryOutput(result.output)
+
       await queries.completeRun(run.id, result.output)
 
       // Mark tasks as reviewed
@@ -148,14 +156,32 @@ export async function runArmoryCycle(config: SchedulerConfig): Promise<void> {
         })
       }
 
-      console.log(`[Armory] Completed successfully, marked ${unreviewedTasks.length} tasks as reviewed`)
+      if (armoryOutput) {
+        console.log(`[Armory] ${armoryOutput.health}: ${armoryOutput.headline}`)
+        if (armoryOutput.skills_added.length > 0) {
+          console.log(`[Armory] Skills added: ${armoryOutput.skills_added.map(s => s.name).join(', ')}`)
+        }
+        if (armoryOutput.mcps_installed.length > 0) {
+          console.log(`[Armory] MCPs installed: ${armoryOutput.mcps_installed.map(m => m.name).join(', ')}`)
+        }
+        if (armoryOutput.gaps_remaining.length > 0) {
+          console.log(`[Armory] Gaps remaining: ${armoryOutput.gaps_remaining.length}`)
+        }
+      } else {
+        console.log(`[Armory] Completed successfully (could not parse output), marked ${unreviewedTasks.length} tasks as reviewed`)
+      }
 
-      // Broadcast completion
+      // Broadcast completion with parsed fields
       broadcast('agent:completed', {
         type: 'agent:completed',
         run_id: run.id,
         agent_type: 'armory',
         duration_seconds: result.duration_seconds,
+        health: armoryOutput?.health,
+        headline: armoryOutput?.headline,
+        skills_added: armoryOutput?.skills_added.length ?? 0,
+        mcps_installed: armoryOutput?.mcps_installed.length ?? 0,
+        gaps_remaining: armoryOutput?.gaps_remaining.length ?? 0,
         timestamp: new Date().toISOString(),
       })
     } else {

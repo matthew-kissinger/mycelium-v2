@@ -4,7 +4,7 @@
  * This is the single source of truth for all valid agent/provider/model combinations.
  * Discovery prompts use this to know exactly what they can dispatch.
  *
- * Updated: 2026-02-05
+ * Updated: 2026-02-09
  */
 
 import type { AgentType, ProviderType } from './task'
@@ -85,18 +85,28 @@ export const AGENT_MATRIX: AgentCapabilities[] = [
     agent: 'cursor',
     command: 'agent',
     timeout: 1800,
-    notes: 'CLI is "agent" not "cursor". 24 models available. opus-4.6-thinking is default.',
+    notes: 'CLI is "agent" (alias: "cursor" at ~/.local/bin/cursor). 37 models via `agent models`. Opus 4.6 is default. Composer 1.5 is new multi-file composition model.',
     providers: [{
       provider: 'cursor',
       billing: 'subscription',
       models: [
-        { id: 'opus-4.6-thinking', context: 200, strengths: ['default', 'best reasoning', 'architecture'], thinking: true },
-        { id: 'opus-4.6', context: 200, strengths: ['non-thinking opus', 'fast reasoning'] },
-        { id: 'composer-1', context: 200, strengths: ['multi-file composition', 'large refactors'] },
+        { id: 'auto', context: 200, strengths: ['auto-selects best model per task'] },
+        { id: 'opus-4.6-thinking', context: 200, strengths: ['best reasoning', 'architecture'], thinking: true },
+        { id: 'opus-4.6', context: 200, strengths: ['default', 'fast reasoning'] },
+        { id: 'opus-4.5', context: 200, strengths: ['previous gen opus'] },
+        { id: 'opus-4.5-thinking', context: 200, strengths: ['previous gen thinking'], thinking: true },
+        { id: 'composer-1.5', context: 200, strengths: ['latest multi-file composition', 'large refactors'] },
+        { id: 'composer-1', context: 200, strengths: ['multi-file composition'] },
         { id: 'sonnet-4.5-thinking', context: 200, strengths: ['balanced with thinking'], thinking: true },
         { id: 'sonnet-4.5', context: 200, strengths: ['balanced feature work'] },
+        { id: 'gpt-5.3-codex', context: 400, strengths: ['latest codex', 'code generation'] },
+        { id: 'gpt-5.3-codex-low', context: 400, strengths: ['codex low compute'] },
+        { id: 'gpt-5.3-codex-high', context: 400, strengths: ['codex high quality'] },
+        { id: 'gpt-5.3-codex-xhigh', context: 400, strengths: ['codex max quality'] },
+        { id: 'gpt-5.3-codex-fast', context: 400, strengths: ['codex fast mode'] },
+        { id: 'gpt-5.2', context: 400, strengths: ['general OpenAI', 'non-codex'] },
         { id: 'gpt-5.2-codex', context: 400, strengths: ['code generation', 'mechanical tasks'] },
-        { id: 'gpt-5.2-codex-xhigh', context: 400, strengths: ['highest quality codex'] },
+        { id: 'gpt-5.1-codex-max', context: 400, strengths: ['previous gen codex max'] },
         { id: 'gemini-3-flash', context: 1000, strengths: ['fast iteration', 'simple features'] },
         { id: 'grok', context: 128, strengths: ['alternative perspective'] },
       ],

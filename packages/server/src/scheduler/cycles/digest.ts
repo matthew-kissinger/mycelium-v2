@@ -2,7 +2,7 @@
  * Digest Cycle - intelligent status summaries
  *
  * Dispatches to Haiku with system data, lets it find what's interesting.
- * Simple output: status + headline + markdown report.
+ * Outputs structured XML with health, trends, anomalies, recommendations.
  */
 
 import { SchedulerConfig } from '@mycelium/shared'
@@ -112,13 +112,13 @@ export async function runDigestCycle(config: SchedulerConfig): Promise<void> {
         timestamp: new Date().toISOString(),
       })
     } else {
-      // Parse YAML output
+      // Parse output (XML with YAML fallback)
       const digestOutput = parseDigestOutput(result.output)
 
       if (digestOutput) {
         // Send digest via Telegram
         await sendDigest(context, digestOutput)
-        console.log(`[Digest] ${digestOutput.status}: ${digestOutput.headline}`)
+        console.log(`[Digest] ${digestOutput.health}: ${digestOutput.headline}`)
       } else {
         // Fallback if parsing fails
         console.log('[Digest] Could not parse agent output, sending simple digest')
@@ -131,6 +131,11 @@ export async function runDigestCycle(config: SchedulerConfig): Promise<void> {
         run_id: run.id,
         agent_type: 'digest',
         duration_seconds: result.duration_seconds,
+        health: digestOutput?.health,
+        headline: digestOutput?.headline,
+        recommendations_count: digestOutput?.recommendations?.length ?? 0,
+        alerts_count: digestOutput?.alerts?.length ?? 0,
+        anomalies_count: digestOutput?.anomalies?.length ?? 0,
         timestamp: new Date().toISOString(),
       })
     }
@@ -315,7 +320,7 @@ async function sendDigest(context: DigestContext, output: DigestOutput): Promise
   const lines: string[] = []
 
   // Header with status indicator
-  const statusEmoji = output.status === 'healthy' ? '🟢' : output.status === 'warning' ? '🟡' : '🔴'
+  const statusEmoji = output.health === 'healthy' ? '🟢' : output.health === 'warning' ? '🟡' : '🔴'
   lines.push(`${statusEmoji} <b>DIGEST</b> (${context.periodHours}h)`)
   lines.push('')
 
@@ -324,12 +329,34 @@ async function sendDigest(context: DigestContext, output: DigestOutput): Promise
   lines.push('')
 
   // Report (convert markdown to simple text)
-  const reportText = output.report
-    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')  // **bold** -> <b>bold</b>
-    .replace(/\*([^*]+)\*/g, '<i>$1</i>')       // *italic* -> <i>italic</i>
-    .replace(/^- /gm, '• ')                      // - bullets -> •
-    .replace(/^#{1,3} (.+)$/gm, '<b>$1</b>')   // headers -> bold
-  lines.push(escapeHtml(reportText))
+  if (output.report) {
+    const reportText = output.report
+      .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')  // **bold** -> <b>bold</b>
+      .replace(/\*([^*]+)\*/g, '<i>$1</i>')       // *italic* -> <i>italic</i>
+      .replace(/^- /gm, '• ')                      // - bullets -> •
+      .replace(/^#{1,3} (.+)$/gm, '<b>$1</b>')   // headers -> bold
+    lines.push(escapeHtml(reportText))
+  }
+
+  // Recommendations (high priority only)
+  if (output.recommendations?.length) {
+    const highPri = output.recommendations.filter(r => r.priority === 'high')
+    if (highPri.length > 0) {
+      lines.push('')
+      lines.push('<b>Recommendations:</b>')
+      for (const rec of highPri.slice(0, 3)) {
+        lines.push(`• ${escapeHtml(rec.description)}`)
+      }
+    }
+  }
+
+  // Alerts
+  if (output.alerts?.length) {
+    lines.push('')
+    for (const alert of output.alerts.slice(0, 3)) {
+      lines.push(`⚠️ ${escapeHtml(alert.description)}`)
+    }
+  }
 
   // Quick stats footer
   lines.push('')
@@ -342,7 +369,7 @@ async function sendDigest(context: DigestContext, output: DigestOutput): Promise
     lines.push(`📬 ${context.pendingSignals} signal${context.pendingSignals > 1 ? 's' : ''} waiting`)
   }
 
-  await telegram.sendMessage(lines.join('\n'), { parse_mode: 'HTML' }).catch((e) => {
+  await telegram.sendMessage(lines.join('\n')).catch((e) => {
     console.error('[Digest] Telegram send error:', e)
   })
 }
@@ -373,7 +400,7 @@ async function sendSimpleDigest(context: DigestContext): Promise<void> {
     lines.push(`📬 ${context.pendingSignals} signals waiting`)
   }
 
-  await telegram.sendMessage(lines.join('\n'), { parse_mode: 'HTML' }).catch((e) => {
+  await telegram.sendMessage(lines.join('\n')).catch((e) => {
     console.error('[Digest] Telegram send error:', e)
   })
 }
