@@ -24,6 +24,7 @@ import { runCompactionCycle } from './cycles/compaction'
 import { runArmoryCycle, shouldRunArmory } from './cycles/armory'
 import { runHealthCheckCycle } from './cycles/health'
 import { runGitHubSyncCycle } from './cycles/github-sync'
+import { runRegistryRefreshCycle } from './cycles/registry-refresh'
 import { getTaskStats, upsertSchedulerStats, getSchedulerStats } from '../db/queries'
 
 // Cycle names
@@ -37,6 +38,7 @@ export type CycleName =
   | 'blocked_check'
   | 'health_check'
   | 'github_sync'
+  | 'registry_refresh'
 
 // Internal cycle state (extends public CycleState with interval ref)
 interface InternalCycleState extends CycleState {
@@ -78,6 +80,7 @@ export function getSchedulerStatus(): SchedulerStatus {
       { name: 'blocked_check', enabled: true, running: false, runs_completed: 0, errors: 0 },
       { name: 'health_check', enabled: true, running: false, runs_completed: 0, errors: 0 },
       { name: 'github_sync', enabled: true, running: false, runs_completed: 0, errors: 0 },
+      { name: 'registry_refresh', enabled: true, running: false, runs_completed: 0, errors: 0 },
     ]
 
     return {
@@ -215,6 +218,15 @@ function initializeScheduler(config: SchedulerConfig): void {
     errors: 0,
   })
 
+  // Registry refresh cycle (agent detection + model fetching)
+  cycles.set('registry_refresh', {
+    name: 'registry_refresh',
+    enabled: config.registry_refresh_enabled,
+    running: false,
+    runs_completed: 0,
+    errors: 0,
+  })
+
   schedulerState = {
     config,
     running: false,
@@ -268,6 +280,7 @@ function computeNextRun(cycleName: CycleName): string | undefined {
     armory: 60 * 60,
     health_check: config.health_check_interval_sec,
     github_sync: config.github_sync_interval_sec,
+    registry_refresh: config.registry_refresh_interval_sec,
   }
   const interval = intervalMap[cycleName]
   if (!interval) return undefined
@@ -375,6 +388,7 @@ function startCycles(): void {
   startCycle('compaction', () => runCompactionCycle(config), config.compaction_interval_sec)
   startCycle('health_check', () => runHealthCheckCycle(config), config.health_check_interval_sec)
   startCycle('github_sync', () => runGitHubSyncCycle(config), config.github_sync_interval_sec)
+  startCycle('registry_refresh', () => runRegistryRefreshCycle(config), config.registry_refresh_interval_sec)
 
   // Armory cycle - check every hour if batch threshold met
   const armoryState = schedulerState.cycles.get('armory')!
@@ -529,16 +543,6 @@ export async function triggerShepherdForRepo(repoPath: string): Promise<void> {
   }
 }
 
-/**
- * Get the number of currently running tasks.
- * Used by dispatcher to check concurrency limits.
- */
-export function getRunningTaskCount(): number {
-  // This will be implemented to query the database
-  // For now, return 0
-  return 0
-}
-
 // Export cycle handlers for direct access (e.g., from API routes)
 export { runDispatcherCycle } from './cycles/dispatcher'
 export { runDiscoveryCycle } from './cycles/discovery'
@@ -549,3 +553,4 @@ export { runDigestCycle } from './cycles/digest'
 export { runCompactionCycle } from './cycles/compaction'
 export { runHealthCheckCycle } from './cycles/health'
 export { runGitHubSyncCycle } from './cycles/github-sync'
+export { runRegistryRefreshCycle } from './cycles/registry-refresh'

@@ -14,7 +14,7 @@ import { SchedulerConfig } from '@mycelium/shared'
 import * as queries from '../../db/queries'
 import { dispatch } from '../../agents/dispatch'
 import { broadcast } from '../../sse'
-import { buildMycelContext } from '../../prompts/context'
+import { buildMycelContext, buildMemorySection } from '../../prompts/context'
 import { getTelegramService } from '../../telegram'
 import { formatShepherdReport, formatMergeConflict, formatMergeSuccess } from '../../telegram/messages'
 import { registerActiveRun, unregisterActiveRun, isShepherdRunningForRepo } from '../active-runs'
@@ -132,6 +132,7 @@ async function runShepherdForRepo(
       prompt,
       cwd: repoPath,
       model: 'opus',
+      taskId: run.id,
       timeout: 1800, // 30 min timeout
       onOutput: (chunk, stream = 'stdout') => {
         sessionLog.push({ chunk, stream, timestamp: new Date().toISOString() })
@@ -327,9 +328,22 @@ async function buildShepherdPrompt(
 - Duration: ${duration}
 - Cost: ${cost}`
 
+    // Include worktree path if available
+    if (t.worktree_path) {
+      summary += `\n- Worktree: ${t.worktree_path}`
+    }
+
+    // Include GitHub PR info if available
+    if (t.github_pr_number) {
+      summary += `\n- PR: #${t.github_pr_number}`
+      if (t.github_pr_url) {
+        summary += ` (${t.github_pr_url})`
+      }
+    }
+
     // Include branch diff info if task has a branch
-    if ((t as any).branch_name) {
-      const branchName = (t as any).branch_name as string
+    if (t.branch_name) {
+      const branchName = t.branch_name
       summary += `\n- Branch: ${branchName}`
       tasksWithBranches.push(t.id.slice(0, 8))
 
@@ -339,8 +353,8 @@ async function buildShepherdPrompt(
           summary += `\n- Files changed: ${diff.filesChanged.length}`
           summary += `\n\nDiff stats:\n\`\`\`\n${diff.diffStat}\n\`\`\``
           // Include truncated diff content for code quality evaluation
-          const truncatedDiff = diff.diffContent.length > 2000
-            ? diff.diffContent.slice(0, 2000) + '\n[diff truncated]'
+          const truncatedDiff = diff.diffContent.length > 12000
+            ? diff.diffContent.slice(0, 12000) + '\n[diff truncated]'
             : diff.diffContent
           if (truncatedDiff) {
             summary += `\n\nDiff:\n\`\`\`diff\n${truncatedDiff}\n\`\`\``
@@ -372,6 +386,23 @@ async function buildShepherdPrompt(
 - DEFER: Code needs minor fixes or review - keep the branch alive`
     : ''
 
+  // Build memory section for repo context
+  const memorySection = await buildMemorySection(repoPath)
+
+  const toolInstructions = tasksWithBranches.length > 0
+    ? `\n## Investigation (Before Writing YAML)
+
+You have full tool access. Before making MERGE/REJECT/DEFER decisions, DO:
+
+1. **Read key files** in each branch's worktree to verify code quality
+2. **Run tests** if the repo has a test suite (\`bun test\`, \`npm test\`, etc.)
+3. **Check git log** for each branch to understand commit history
+4. **Look for regressions** - compare changed files against main branch
+
+Only write your YAML evaluation AFTER investigating. Do not rely solely on the diffs above.
+`
+    : ''
+
   return `You are the Shepherd Agent for Mycelium, evaluating completed work for ${repoName}.
 
 ## Your Task
@@ -384,11 +415,11 @@ Analyze the following completed tasks and provide:
 5. Recommendation for next steps
 6. Any patterns worth remembering
 7. Any warnings for future tasks${branchInstructions}
-
+${toolInstructions}
 ## Tasks to Evaluate
 
 ${taskSummaries}
-
+${memorySection ? `\n## Repository Memory\n\n${memorySection}\n` : ''}
 ## Output Format
 
 Provide your analysis in this YAML format:
@@ -561,6 +592,7 @@ async function processBranchEvaluations(
   tasks: Awaited<ReturnType<typeof queries.getUnevaluatedTasks>>,
   branchEvals: Array<{ task_id: string; decision: string; reason: string; merge_order?: number }>
 ): Promise<Set<string>> {
+  const deferredTaskIds = new Set<string>()
   const telegram = getTelegramService()
 
   // Detect if repo has a GitHub remote
@@ -593,7 +625,7 @@ async function processBranchEvaluations(
       continue
     }
 
-    const branchName = (task as any).branch_name as string | null
+    const branchName = task.branch_name as string | null
     if (!branchName) {
       console.log(`[Shepherd] MERGE: task ${evalItem.task_id} has no branch, skipping`)
       continue
@@ -669,14 +701,14 @@ async function processBranchEvaluations(
     const task = taskMap.get(evalItem.task_id)
     if (!task) continue
 
-    const branchName = (task as any).branch_name as string | null
+    const branchName = task.branch_name as string | null
     if (!branchName) continue
 
     console.log(`[Shepherd] REJECT: ${branchName} (${evalItem.reason})`)
 
     // Close PR on GitHub if one exists
-    if (slug && (task as any).github_pr_number) {
-      const prNum = (task as any).github_pr_number as number
+    if (slug && task.github_pr_number) {
+      const prNum = task.github_pr_number as number
       closePR(slug, prNum, `Rejected by shepherd: ${evalItem.reason}`).catch(err =>
         console.error(`[Shepherd] Failed to close PR #${prNum}:`, err)
       )
@@ -703,12 +735,11 @@ async function processBranchEvaluations(
   }
 
   // Process DEFERs - track count, force-reject if exceeded limit
-  const deferredTaskIds = new Set<string>()
   for (const evalItem of defers) {
     const task = taskMap.get(evalItem.task_id)
     if (!task) continue
 
-    const branchName = (task as any).branch_name as string | null
+    const branchName = task.branch_name as string | null
 
     // Increment defer count in spec_context
     let specCtx: Record<string, unknown> = {}
@@ -720,8 +751,8 @@ async function processBranchEvaluations(
       console.log(`[Shepherd] DEFER->REJECT: ${branchName ?? evalItem.task_id} (deferred ${deferCount} times, max ${MAX_DEFER_COUNT})`)
 
       // Close PR on GitHub if one exists
-      if (slug && (task as any).github_pr_number) {
-        const prNum = (task as any).github_pr_number as number
+      if (slug && task.github_pr_number) {
+        const prNum = task.github_pr_number as number
         closePR(slug, prNum, `Force-rejected: deferred ${deferCount} times (max ${MAX_DEFER_COUNT})`).catch(() => {})
       }
 
@@ -738,7 +769,7 @@ async function processBranchEvaluations(
       console.log(`[Shepherd] DEFER: ${branchName ?? evalItem.task_id} (${evalItem.reason}) [${deferCount}/${MAX_DEFER_COUNT}]`)
 
       // If no PR exists yet on GitHub, create one as "needs-review"
-      if (slug && branchName && !(task as any).github_pr_number) {
+      if (slug && branchName && !task.github_pr_number) {
         createPR({
           slug,
           head: branchName,
@@ -796,15 +827,15 @@ async function processBranchEvaluations(
  */
 async function processMergeViaGitHub(
   slug: RepoSlug,
-  task: { id: string; title: string; agent: string | null; model: string | null; cost_usd: number | null; duration_seconds: number | null; repo_path: string },
+  task: { id: string; title: string; agent: string | null; model: string | null; cost_usd: number | null; duration_seconds: number | null; repo_path: string; github_pr_number?: number | null; github_pr_url?: string | null },
   branchName: string,
   reason: string,
   repoPath: string,
   telegram: ReturnType<typeof getTelegramService>
 ): Promise<void> {
   // Create PR if one doesn't exist yet
-  let prNumber = (task as any).github_pr_number as number | null
-  let prUrl = (task as any).github_pr_url as string | null
+  let prNumber = task.github_pr_number ?? null
+  let prUrl = task.github_pr_url ?? null
 
   if (!prNumber) {
     const prBody = buildPRBody({

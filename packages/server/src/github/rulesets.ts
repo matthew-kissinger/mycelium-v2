@@ -222,7 +222,7 @@ export async function applyRulesetsToAllPublic(): Promise<ApplyRulesetsResult> {
 
   // Filter to public repos with GitHub slug info
   const publicRepos = repos.filter(
-    (r) => (r as any).is_public === 1 && r.github_owner && r.github_repo
+    (r) => r.is_public === 1 && r.github_owner && r.github_repo
   )
 
   console.log(`[Rulesets] Checking ${publicRepos.length} public repos (${repos.length} total)`)

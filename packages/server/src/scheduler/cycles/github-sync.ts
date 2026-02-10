@@ -31,12 +31,21 @@ export async function runGitHubSyncCycle(config: SchedulerConfig): Promise<void>
   let updated = 0
   let skipped = 0
 
+  const RESYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+
   for (const repo of repos) {
     try {
-      // Skip repos that already have GitHub info cached
-      if (repo.github_owner && repo.github_repo && repo.github_default_branch) {
-        skipped++
-        continue
+      const hasCachedInfo = repo.github_owner && repo.github_repo && repo.github_default_branch
+
+      // Skip repos that have cached info and were synced recently
+      if (hasCachedInfo) {
+        const lastSynced = repo.last_scanned_at ? new Date(repo.last_scanned_at).getTime() : 0
+        const age = Date.now() - lastSynced
+        if (age < RESYNC_INTERVAL_MS) {
+          skipped++
+          continue
+        }
+        // Stale cache - re-check below
       }
 
       // Detect GitHub remote
@@ -46,28 +55,37 @@ export async function runGitHubSyncCycle(config: SchedulerConfig): Promise<void>
         continue
       }
 
-      // Get default branch if not cached
-      let defaultBranch: string | undefined = repo.github_default_branch ?? undefined
-      if (!defaultBranch) {
-        defaultBranch = (await getGitHubDefaultBranch(slug)) ?? undefined
-      }
+      // Always fetch default branch (cheap single API call)
+      const defaultBranch = (await getGitHubDefaultBranch(slug)) ?? repo.github_default_branch ?? undefined
 
-      // Only update if something is new
-      if (repo.github_owner !== slug.owner || repo.github_repo !== slug.repo || !repo.github_default_branch) {
+      // Update if anything changed or this is a fresh sync
+      if (
+        repo.github_owner !== slug.owner ||
+        repo.github_repo !== slug.repo ||
+        repo.github_default_branch !== defaultBranch ||
+        !hasCachedInfo
+      ) {
         await updateRepo(repo.id, {
           github_owner: slug.owner,
           github_repo: slug.repo,
           github_default_branch: defaultBranch,
+          last_scanned_at: new Date().toISOString(),
         })
 
         updated++
         console.log(
           `[GitHub Sync] ${repo.name}: cached ${formatSlug(slug)} (default: ${defaultBranch ?? 'unknown'})`
         )
+      } else {
+        // No changes, just update last_scanned_at
+        await updateRepo(repo.id, {
+          last_scanned_at: new Date().toISOString(),
+        })
+        skipped++
       }
 
       // Check visibility and enable security features for public repos
-      if ((repo as any).is_public === null || (repo as any).is_public === undefined) {
+      if (repo.is_public === null || repo.is_public === undefined) {
         const visResult = await runGh([
           'api', `repos/${formatSlug(slug)}`, '--jq', '.visibility',
         ])

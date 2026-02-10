@@ -181,7 +181,7 @@ describe('applyRulesetsToAllPublic filtering', () => {
 
     // Replicate the filter logic from applyRulesetsToAllPublic
     const publicRepos = repos.filter(
-      (r) => (r as any).is_public === 1 && r.github_owner && r.github_repo
+      (r) => r.is_public === 1 && r.github_owner && r.github_repo
     )
 
     expect(publicRepos).toHaveLength(2)

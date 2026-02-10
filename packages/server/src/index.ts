@@ -16,6 +16,7 @@ import promptsRoutes from './routes/prompts'
 import inventoryRoutes from './routes/inventory'
 import devicesRoutes from './routes/devices'
 import githubWebhookRoutes from './routes/github-webhook'
+import registryRoutes from './routes/registry'
 import {
   systemAgentsRoutes,
   discoveryRoutes,
@@ -126,6 +127,7 @@ app.route('/api/prompts', promptsRoutes)
 app.route('/api/inventory', inventoryRoutes)
 app.route('/api/devices', devicesRoutes)
 app.route('/api/github', githubWebhookRoutes)
+app.route('/api/registry', registryRoutes)
 
 // Initialize database tables
 async function initDb() {
@@ -139,19 +141,33 @@ async function initDb() {
       status TEXT NOT NULL DEFAULT 'pending',
       agent TEXT,
       model TEXT,
+      provider TEXT,
       repo_path TEXT NOT NULL,
       prompt TEXT,
       depends_on TEXT DEFAULT '[]',
-      sequenced INTEGER DEFAULT 0,
+      sequenced INTEGER DEFAULT 1,
+      branch_name TEXT,
+      github_url TEXT,
+      github_pr_number INTEGER,
+      github_pr_url TEXT,
+      spec_context TEXT,
+      retry_context TEXT,
+      user_input TEXT,
+      enrich_with_opus INTEGER DEFAULT 0,
+      timeout_seconds INTEGER,
       result TEXT,
       parsed_result TEXT,
       error TEXT,
       error_details TEXT,
       cost_usd REAL DEFAULT 0,
       duration_seconds REAL,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
       created_at TEXT NOT NULL,
       started_at TEXT,
       completed_at TEXT,
+      worktree_path TEXT,
+      skills TEXT DEFAULT '[]',
       shepherd_evaluated_at TEXT,
       armory_reviewed_at TEXT
     );
@@ -362,6 +378,96 @@ async function initDb() {
     updated_at TEXT
   );`)
 
+  // ==========================================================================
+  // Dynamic Agent/Provider Registry tables
+  // ==========================================================================
+
+  // Drop legacy table name from earlier attempt (if exists)
+  try { sqlite.exec(`DROP TABLE IF EXISTS registry_agents;`) } catch { /* ignore */ }
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS providers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      api_base TEXT,
+      billing TEXT NOT NULL DEFAULT 'subscription',
+      auth_type TEXT,
+      auth_key_env TEXT,
+      status TEXT DEFAULT 'unknown',
+      last_checked_at TEXT,
+      last_error TEXT,
+      rate_limit_info TEXT,
+      credits_info TEXT,
+      models_fetched_at TEXT,
+      config TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS agents (
+      id TEXT PRIMARY KEY,
+      command TEXT NOT NULL,
+      cli_version TEXT,
+      timeout_seconds INTEGER DEFAULT 1800,
+      max_turns INTEGER,
+      supports_streaming INTEGER DEFAULT 1,
+      default_provider TEXT,
+      default_model TEXT,
+      enabled INTEGER DEFAULT 1,
+      status TEXT DEFAULT 'unknown',
+      has_headless INTEGER DEFAULT 1,
+      has_json_output INTEGER DEFAULT 0,
+      has_model_list_cmd INTEGER DEFAULT 0,
+      has_mcp INTEGER DEFAULT 0,
+      has_acp INTEGER DEFAULT 0,
+      model_list_cmd TEXT,
+      cli_detected_at TEXT,
+      notes TEXT,
+      config TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS models (
+      id TEXT PRIMARY KEY,
+      provider_id TEXT NOT NULL,
+      model_id TEXT NOT NULL,
+      short_name TEXT,
+      context_window INTEGER,
+      cost_input REAL,
+      cost_output REAL,
+      strengths TEXT,
+      thinking INTEGER DEFAULT 0,
+      vision INTEGER DEFAULT 0,
+      free INTEGER DEFAULT 0,
+      compatible_agents TEXT,
+      fallback_model_id TEXT,
+      available INTEGER DEFAULT 1,
+      last_used_at TEXT,
+      source TEXT DEFAULT 'seed',
+      created_at TEXT NOT NULL,
+      updated_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_models_provider ON models(provider_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_stats_status ON agent_stats(updated_at);
+  `)
+
+  // Extend agent_stats with health persistence columns
+  const agentStatsMigrations = [
+    `ALTER TABLE agent_stats ADD COLUMN model TEXT;`,
+    `ALTER TABLE agent_stats ADD COLUMN provider TEXT;`,
+    `ALTER TABLE agent_stats ADD COLUMN status TEXT DEFAULT 'healthy';`,
+    `ALTER TABLE agent_stats ADD COLUMN quota_reset_at TEXT;`,
+    `ALTER TABLE agent_stats ADD COLUMN last_error TEXT;`,
+    `ALTER TABLE agent_stats ADD COLUMN last_error_at TEXT;`,
+    `ALTER TABLE agent_stats ADD COLUMN last_success_at TEXT;`,
+    `ALTER TABLE agent_stats ADD COLUMN error_count_recent INTEGER DEFAULT 0;`,
+  ]
+  for (const migration of agentStatsMigrations) {
+    try { sqlite.exec(migration) } catch { /* Column already exists */ }
+  }
+
   // Create fruiting_sessions table if it doesn't exist
   sqlite.exec(`CREATE TABLE IF NOT EXISTS fruiting_sessions (
     id TEXT PRIMARY KEY,
@@ -402,6 +508,15 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_history_key ON config_history(config_key, changed_at);
   `)
 
+  // Seed registry tables from AGENT_MATRIX (INSERT OR IGNORE - manual edits win)
+  try {
+    const { seedRegistry, mergeCompatibleAgents } = await import('./db/seed-registry')
+    seedRegistry(sqlite)
+    mergeCompatibleAgents(sqlite)
+  } catch (error) {
+    console.error('[Registry] Seed failed:', error)
+  }
+
   console.log('Database initialized')
 }
 
@@ -421,12 +536,64 @@ async function initTelegram() {
 const port = parseInt(process.env.PORT ?? '8765')
 
 initDb().then(async () => {
+  // Initialize registry cache (in-memory for sub-ms reads)
+  try {
+    const { initRegistryCache } = await import('./agents/registry-cache')
+    await initRegistryCache()
+  } catch (error) {
+    console.error('[Registry] Cache init failed:', error)
+  }
+
+  // Load persisted health state from DB
+  try {
+    const { initHealthFromDb } = await import('./agents/health')
+    await initHealthFromDb()
+  } catch (error) {
+    console.error('[Health] DB init failed:', error)
+  }
+
+  // Load credentials (non-blocking)
+  try {
+    const { loadCredentials } = await import('./agents/credentials')
+    const creds = loadCredentials()
+    console.log(`[Credentials] Loaded ${Object.keys(creds).length} credentials`)
+  } catch (error) {
+    console.error('[Credentials] Load failed:', error)
+  }
+
+  // Background: detect agent CLIs and fetch provider models (non-blocking)
+  import('./agents/detect').then(({ detectAllAgents }) =>
+    detectAllAgents().catch(e => console.error('[Startup] Agent detection failed:', e))
+  ).catch(() => {})
+  import('./agents/fetch-models').then(async ({ fetchAllProviderModels, persistFetchedModels }) => {
+    const results = await fetchAllProviderModels()
+    const successful = results.filter(r => !r.error)
+    if (successful.length > 0) {
+      await persistFetchedModels(successful)
+    }
+  }).catch(e => console.error('[Startup] Model fetch failed:', e))
+
   console.log(`Server running at http://localhost:${port}`)
 
   // Clean up orphaned system agent runs from previous sessions
   const cleaned = await cleanupOrphanedRuns(1) // 1 hour threshold
   if (cleaned > 0) {
     console.log(`[Startup] Cleaned up ${cleaned} orphaned system agent runs`)
+  }
+
+  // Clean up tasks stuck in 'running' status from previous sessions
+  // These tasks have no agent process listening - letting them stay burns tokens
+  try {
+    const now = new Date().toISOString()
+    const result = (db as any).session.client.prepare(
+      `UPDATE tasks SET status = 'failed', error = 'Server restarted - task orphaned', completed_at = ? WHERE status = 'running'`
+    ).run(now)
+    const orphanedTasks = result.changes
+    if (orphanedTasks > 0) {
+      console.log(`[Startup] Marked ${orphanedTasks} orphaned running tasks as failed`)
+    }
+  } catch (error) {
+    console.error('[Startup] Error cleaning orphaned tasks:', error)
   }
 
   // Clean up stale worktrees from previous sessions

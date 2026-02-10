@@ -116,11 +116,25 @@ const AGENT_DEFAULT_MODELS: Record<string, string> = {
 /**
  * Pure lookup: get the fallback model for an agent/model combo.
  * Returns null if no fallback exists (already top tier or unknown model).
+ *
+ * Tries registry cache first (DB-backed), falls back to hardcoded map.
  */
 export function getFallbackModel(agent: string, model: string | null | undefined): string | null {
   const resolvedModel = model ?? AGENT_DEFAULT_MODELS[agent]
   if (!resolvedModel) return null
 
+  // Try registry cache first (DB-backed fallback chain)
+  try {
+    const { getCachedFallbackModel, isCacheReady } = require('./registry-cache')
+    if (isCacheReady()) {
+      const cachedFallback = getCachedFallbackModel(agent, resolvedModel)
+      if (cachedFallback) return cachedFallback
+    }
+  } catch {
+    // Cache not available, fall through to hardcoded map
+  }
+
+  // Hardcoded fallback (seed data)
   const agentMap = FALLBACK_MODEL_MAP[agent]
   if (!agentMap) return null
 
@@ -154,7 +168,17 @@ export function shouldRetry(
   }
 
   // In-agent fallback exhausted - try cross-agent fallback
-  const crossFallback = CROSS_AGENT_FALLBACK[agent]
+  // Try registry cache first, then hardcoded
+  let crossFallback: { agent: string; model: string } | null = null
+  try {
+    const { getCachedCrossAgentFallback, isCacheReady } = require('./registry-cache')
+    if (isCacheReady()) {
+      crossFallback = getCachedCrossAgentFallback(agent)
+    }
+  } catch { /* fall through */ }
+  if (!crossFallback) {
+    crossFallback = CROSS_AGENT_FALLBACK[agent] ?? null
+  }
   if (crossFallback) {
     // Don't cross-agent fallback if we already did (check history)
     if (existing?.history.some(h => h.agent === crossFallback.agent)) {
@@ -225,7 +249,19 @@ export function parseRetryContext(str: string | null | undefined): RetryContext 
 
 /**
  * Get the resolved model name for a task (handles null/undefined).
+ * Tries registry cache first, then hardcoded defaults.
  */
 export function resolveModel(agent: string, model: string | null | undefined): string {
-  return model ?? AGENT_DEFAULT_MODELS[agent] ?? 'unknown'
+  if (model) return model
+
+  // Try registry cache
+  try {
+    const { getCachedDefaultModel, isCacheReady } = require('./registry-cache')
+    if (isCacheReady()) {
+      const cached = getCachedDefaultModel(agent)
+      if (cached) return cached
+    }
+  } catch { /* fall through */ }
+
+  return AGENT_DEFAULT_MODELS[agent] ?? 'unknown'
 }

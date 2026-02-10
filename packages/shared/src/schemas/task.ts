@@ -13,6 +13,10 @@ export const AgentType = z.enum([
 ])
 export type AgentType = z.infer<typeof AgentType>
 
+// Extended agent type for DB-registered agents (accepts any string for dynamically added agents)
+export const AgentTypeExtended = z.union([AgentType, z.string()])
+export type AgentTypeExtended = z.infer<typeof AgentTypeExtended>
+
 // Provider types - backends that can power agents
 export const ProviderType = z.enum([
   // Multi-model providers (API-based)
@@ -95,9 +99,26 @@ export const Task = z.object({
   // Execution config
   timeout_seconds: z.number().optional(),
 
+  // Workspace isolation
+  branch_name: z.string().optional().nullable(),
+  worktree_path: z.string().optional().nullable(),
+
+  // Orchestrator metadata
+  spec_context: z.string().optional().nullable(),   // JSON blob
+  retry_context: z.string().optional().nullable(),   // Previous error context for retries
+  user_input: z.string().optional().nullable(),
+  enrich_with_opus: z.boolean().optional().nullable(),
+
+  // GitHub integration
+  github_url: z.string().optional().nullable(),
+  github_pr_number: z.number().optional().nullable(),
+  github_pr_url: z.string().optional().nullable(),
+
   // Metrics
   cost_usd: z.number().default(0),
   duration_seconds: z.number().optional(),
+  input_tokens: z.number().optional().nullable(),
+  output_tokens: z.number().optional().nullable(),
 
   // Timestamps
   created_at: z.string().datetime(),

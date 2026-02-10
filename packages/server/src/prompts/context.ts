@@ -423,6 +423,16 @@ export function buildAgentsSection(creditsInfo?: AgentCreditsInfo, taskDistribut
   lines.push('- `pi`: --provider groq|cerebras|openrouter|mistral|google|anthropic|openai')
   lines.push('')
 
+  // Get enabled agents from registry cache (if available)
+  let enabledAgentIds: Set<string> | null = null
+  try {
+    const { getCachedEnabledAgents, isCacheReady } = require('../agents/registry-cache')
+    if (isCacheReady()) {
+      const enabled = getCachedEnabledAgents()
+      enabledAgentIds = new Set(enabled.map((a: { id: string }) => a.id))
+    }
+  } catch { /* fall through - show all agents */ }
+
   // Compact matrix table
   lines.push('### Valid Combinations')
   lines.push('')
@@ -430,6 +440,8 @@ export function buildAgentsSection(creditsInfo?: AgentCreditsInfo, taskDistribut
   lines.push('|-------|----------|---------|----------------|----------|')
 
   for (const ac of AGENT_MATRIX) {
+    // Skip disabled agents if registry is available
+    if (enabledAgentIds && !enabledAgentIds.has(ac.agent)) continue
     for (const pm of ac.providers) {
       const topModels = pm.models.slice(0, 3).map(m => m.short ?? m.id).join(', ')
       const bestFor = pm.models[0]?.strengths.slice(0, 2).join(', ') ?? ''

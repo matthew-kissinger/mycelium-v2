@@ -43,4 +43,42 @@ export {
   checkMistralStatus,
   checkAllProviderStatus,
   resetHealth,
+  initHealthFromDb,
 } from './health'
+export {
+  initRegistryCache,
+  reloadCache,
+  isCacheReady,
+  getCachedAgent,
+  getCachedAllAgents,
+  getCachedEnabledAgents,
+  getCachedProvider,
+  getCachedAllProviders,
+  getCachedModel,
+  getCachedModelsForAgent,
+  getCachedModelsForProvider,
+  getCachedDefaultModel,
+  getCachedFallbackModel,
+  getCachedCrossAgentFallback,
+  getCachedHealthState,
+  getCachedAllHealth,
+} from './registry-cache'
+export {
+  loadCredentials,
+  getCredential,
+  hasCredential,
+  getAvailableCredentialKeys,
+  reloadCredentials,
+} from './credentials'
+export {
+  detectAgent,
+  detectAllAgents,
+  fetchAgentModels,
+} from './detect'
+export {
+  fetchProviderModels,
+  fetchAllProviderModels,
+  persistFetchedModels,
+  type FetchResult,
+  type FetchedModel,
+} from './fetch-models'

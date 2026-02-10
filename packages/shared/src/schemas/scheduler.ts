@@ -52,6 +52,10 @@ export const SchedulerConfig = z.object({
   github_sync_enabled: z.boolean().default(true),
   github_sync_interval_sec: z.number().int().positive().default(1800), // 30 minutes
 
+  // Registry refresh cycle (agent detection + model fetching)
+  registry_refresh_enabled: z.boolean().default(true),
+  registry_refresh_interval_sec: z.number().int().positive().default(21600), // 6 hours
+
   // Auto-prune
   auto_prune_enabled: z.boolean().default(true),
   auto_prune_threshold: z.number().int().positive().default(100),

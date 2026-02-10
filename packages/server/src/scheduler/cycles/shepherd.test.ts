@@ -61,6 +61,7 @@ mock.module('../../sse', () => ({
 // Mock context
 mock.module('../../prompts/context', () => ({
   buildMycelContext: mock(() => '## Mock Shepherd Context'),
+  buildMemorySection: mock(async () => ''),
 }))
 
 // Mock telegram
@@ -93,6 +94,23 @@ mock.module('../active-runs', () => ({
   registerActiveRun: mockRegisterActiveRun,
   unregisterActiveRun: mockUnregisterActiveRun,
   isShepherdRunningForRepo: mockIsShepherdRunningForRepo,
+}))
+
+// Mock GitHub
+mock.module('../../github', () => ({
+  getRepoSlug: mock(async () => null),
+  createPR: mock(async () => null),
+  mergePR: mock(async () => ({ success: false, error: 'mock' })),
+  closePR: mock(async () => {}),
+  buildPRBody: mock(() => 'mock PR body'),
+  ensureLabels: mock(async () => {}),
+  AGENT_LABELS: ['mycelium', 'auto-merge', 'needs-review'],
+  createCommitStatus: mock(async () => {}),
+  getBranchSha: mock(async () => null),
+}))
+
+mock.module('../../github/merge-queue', () => ({
+  processMergeQueue: mock(async () => ({ merged: [], deferred: [], failed: [] })),
 }))
 
 // Mock workspace
@@ -835,5 +853,135 @@ describe('runShepherdCycle - fruiting sessions', () => {
     expect(sessionArg.model).toBe('opus')
     expect(sessionArg.context_trace.agent_type).toBe('shepherd')
     expect(sessionArg.repo_path).toBe('/home/test/repo')
+  })
+})
+
+// =============================================================================
+// Regression Tests
+// =============================================================================
+
+describe('runShepherdCycle - regression tests', () => {
+  beforeEach(resetAllMocks)
+
+  test('Bug 1: DEFER during local merge queue does not crash with TDZ (deferredTaskIds)', async () => {
+    // Regression: deferredTaskIds was declared AFTER it was used in the merge queue
+    // deferred handler, causing a TDZ crash. Fix: declare at top of processBranchEvaluations.
+    const config = configFixture({ shepherd_batch_size: 2 })
+    const repo = makeRepo()
+    mockGetRepos.mockImplementation(async () => [repo])
+
+    // Tasks with branches - one will MERGE (triggering merge queue) and one will DEFER
+    const tasks = [
+      makeTask('task-001-aaa-bbb-ccc', { branch_name: 'mycel/task-task-001' }),
+      makeTask('task-002-ddd-eee-fff', { branch_name: 'mycel/task-task-002' }),
+    ]
+    mockGetUnevaluatedTasks.mockImplementation(async () => tasks)
+
+    const output = makeEvalOutput({
+      headline: 'Mixed results',
+      branch_evaluations: [
+        { task_id: 'task-001', decision: 'DEFER', reason: 'Needs review' },
+      ],
+    })
+
+    mockDispatchFn.mockImplementation(async () => ({
+      success: true,
+      output,
+      exit_code: 0,
+      duration_seconds: 60,
+    }))
+
+    // Should not throw TDZ error
+    await runShepherdCycle(config)
+
+    // Deferred task should NOT be marked as evaluated
+    const evalCalls = mockUpdateTask.mock.calls.filter(
+      (c) => c[1].shepherd_evaluated_at
+    )
+    // Only the non-deferred tasks get shepherd_evaluated_at
+    // task-002 is not in branch_evaluations, so it gets evaluated
+    // task-001 is DEFER, so it does NOT get evaluated
+    const deferredEvals = evalCalls.filter((c) => c[0] === 'task-001-aaa-bbb-ccc')
+    expect(deferredEvals.length).toBe(0)
+  })
+
+  test('Bug 3: dispatch call includes taskId for process registration', async () => {
+    const config = configFixture({ shepherd_batch_size: 2 })
+    const repo = makeRepo()
+    mockGetRepos.mockImplementation(async () => [repo])
+
+    const tasks = [makeTask('t1'), makeTask('t2')]
+    mockGetUnevaluatedTasks.mockImplementation(async () => tasks)
+
+    mockDispatchFn.mockImplementation(async () => ({
+      success: true,
+      output: makeEvalOutput(),
+      exit_code: 0,
+      duration_seconds: 60,
+    }))
+
+    await runShepherdCycle(config)
+
+    expect(mockDispatchFn).toHaveBeenCalledTimes(1)
+    const dispatchOptions = mockDispatchFn.mock.calls[0][0]
+    // taskId should be set to the run ID for process registration
+    expect(dispatchOptions.taskId).toBe('run-test-001')
+  })
+
+  test('task summaries include worktree_path when available', async () => {
+    const config = configFixture({ shepherd_batch_size: 2 })
+    const repo = makeRepo()
+    mockGetRepos.mockImplementation(async () => [repo])
+
+    const tasks = [
+      makeTask('task-001-aaa-bbb-ccc', {
+        branch_name: 'mycel/task-task-001',
+        worktree_path: '/home/test/.mycelium/worktrees/task-task-001',
+      }),
+      makeTask('task-002-ddd-eee-fff'),
+    ]
+    mockGetUnevaluatedTasks.mockImplementation(async () => tasks)
+
+    mockDispatchFn.mockImplementation(async () => ({
+      success: true,
+      output: makeEvalOutput(),
+      exit_code: 0,
+      duration_seconds: 60,
+    }))
+
+    await runShepherdCycle(config)
+
+    const dispatchCall = mockDispatchFn.mock.calls[0][0]
+    // The prompt should contain the worktree path
+    expect(dispatchCall.prompt).toContain('/home/test/.mycelium/worktrees/task-task-001')
+  })
+
+  test('task summaries include github_pr_number when available', async () => {
+    const config = configFixture({ shepherd_batch_size: 2 })
+    const repo = makeRepo()
+    mockGetRepos.mockImplementation(async () => [repo])
+
+    const tasks = [
+      makeTask('task-001-aaa-bbb-ccc', {
+        branch_name: 'mycel/task-task-001',
+        github_pr_number: 42,
+        github_pr_url: 'https://github.com/user/repo/pull/42',
+      }),
+      makeTask('task-002-ddd-eee-fff'),
+    ]
+    mockGetUnevaluatedTasks.mockImplementation(async () => tasks)
+
+    mockDispatchFn.mockImplementation(async () => ({
+      success: true,
+      output: makeEvalOutput(),
+      exit_code: 0,
+      duration_seconds: 60,
+    }))
+
+    await runShepherdCycle(config)
+
+    const dispatchCall = mockDispatchFn.mock.calls[0][0]
+    expect(dispatchCall.prompt).toContain('#42')
+    expect(dispatchCall.prompt).toContain('https://github.com/user/repo/pull/42')
   })
 })

@@ -17,7 +17,6 @@ import { broadcast } from '../../sse'
 import { startTaskLog, appendLog, completeTaskLog, getTaskLogEntries } from '../../logs'
 import {
   buildMycelContext,
-  buildAgentsSectionWithCredits,
   buildSkillsSection,
   buildMcpSection,
   buildMemorySection,
@@ -62,16 +61,36 @@ function releaseRepoSlot(repoPath: string): void {
  * Subscription agents to use as defaults for unassigned tasks.
  * Rotates through them to maximize paid subscriptions.
  * Free agents are for simple tasks assigned explicitly by discovery.
+ *
+ * Tries registry cache first (enabled agents from DB), falls back to hardcoded list.
  */
-const DEFAULT_AGENTS = ['claude', 'cursor', 'codex', 'gemini', 'copilot', 'kiro'] as const
+const FALLBACK_DEFAULT_AGENTS = ['claude', 'cursor', 'codex', 'gemini', 'copilot', 'kiro'] as const
 let defaultAgentIndex = 0
 
 /**
+ * Get the list of enabled default agents.
+ * Reads from registry cache if available, otherwise uses hardcoded list.
+ */
+function getDefaultAgents(): string[] {
+  try {
+    const { getCachedEnabledAgents, isCacheReady } = require('../../agents/registry-cache')
+    if (isCacheReady()) {
+      const enabledAgents = getCachedEnabledAgents()
+      if (enabledAgents.length > 0) {
+        return enabledAgents.map((a: { id: string }) => a.id)
+      }
+    }
+  } catch { /* fall through */ }
+  return [...FALLBACK_DEFAULT_AGENTS]
+}
+
+/**
  * Pick a subscription agent for tasks with no assigned agent.
- * Round-robins through subscription agents to maximize paid usage.
+ * Round-robins through enabled agents to maximize paid usage.
  */
 function pickDefaultAgent(): string {
-  const agent = DEFAULT_AGENTS[defaultAgentIndex % DEFAULT_AGENTS.length]
+  const agents = getDefaultAgents()
+  const agent = agents[defaultAgentIndex % agents.length]
   defaultAgentIndex++
   return agent
 }
@@ -240,11 +259,58 @@ async function runTask(task: Awaited<ReturnType<typeof queries.getTask>>): Promi
   const taskId = task.id
   const agent = (task.agent ?? pickDefaultAgent()) as AgentType
   const model = task.model ?? undefined
-  const provider = (task as any).provider as 'openrouter' | 'cline' | undefined
+  const provider = task.provider as 'openrouter' | 'cline' | undefined
   const repoPath = task.repo_path
 
   // Build context-enriched prompt
   const basePrompt = task.prompt ?? task.title
+
+  console.log(`[Dispatcher] Running task ${taskId.slice(0, 8)}: ${task.title}`)
+
+  // Track running task
+  runningTasks.set(taskId, { startTime: Date.now(), agent, repoPath })
+
+  // Update task status to running
+  const startTime = new Date().toISOString()
+  await queries.updateTask(taskId, {
+    status: 'running',
+    started_at: startTime,
+  })
+
+  // Broadcast task started event
+  broadcast('task:started', {
+    type: 'task:started',
+    task_id: taskId,
+    agent,
+    model,
+    timestamp: startTime,
+  })
+
+  // Start logging for this task
+  startTaskLog(taskId)
+
+  // Prepare isolated worktree workspace BEFORE building context
+  // so agents know their branch name and worktree path
+  let worktreePath: string | null = null
+  let branchName: string | null = null
+  try {
+    const workspace = await prepareWorkspace(taskId, repoPath)
+    worktreePath = workspace.worktreePath
+    branchName = workspace.branchName
+    console.log(`[Dispatcher] Task ${taskId.slice(0, 8)} using worktree: ${worktreePath}`)
+
+    // Store worktree info immediately
+    await queries.updateTask(taskId, {
+      worktree_path: worktreePath,
+      branch_name: branchName,
+    })
+  } catch (error) {
+    console.error(`[Dispatcher] Failed to create worktree for task ${taskId.slice(0, 8)}, using repo directly:`, error)
+    // Fall back to running in the original repo if worktree creation fails
+  }
+
+  // Use worktree path if available, otherwise fall back to repo path
+  const workingDir = worktreePath ?? repoPath
 
   // Fetch dependency results for tasks with depends_on
   let dependencySection = ''
@@ -270,12 +336,12 @@ async function runTask(task: Awaited<ReturnType<typeof queries.getTask>>): Promi
     model,
     taskId,
     taskTitle: task.title,
+    worktreePath: worktreePath ?? undefined,
+    branchName: branchName ?? undefined,
   })
-  // Use async version to include live credits/quota info
-  const agentsSection = await buildAgentsSectionWithCredits()
 
   // Merge skills: explicit (from task) + keyword-matched + auto-detected
-  const explicitSkills: string[] = JSON.parse((task as any).skills ?? '[]')
+  const explicitSkills: string[] = JSON.parse(task.skills ?? '[]')
   const repoSkills = detectAllSkillsForRepo(repoPath)
   const keywordSkills = selectTaskSkills(repoSkills, task.title, task.prompt ?? undefined)
   // Dedup: explicit first, then keyword, fill remaining up to 5
@@ -307,57 +373,9 @@ async function runTask(task: Awaited<ReturnType<typeof queries.getTask>>): Promi
 ---
 
 ${mycelContext}
-
-${agentsSection}
 ${skillsSection ? `\n${skillsSection}` : ''}
 ${mcpSection ? `\n${mcpSection}` : ''}
 ${memorySection ? `\n${memorySection}` : ''}`
-
-  console.log(`[Dispatcher] Running task ${taskId.slice(0, 8)}: ${task.title}`)
-
-  // Track running task
-  runningTasks.set(taskId, { startTime: Date.now(), agent, repoPath })
-
-  // Update task status to running
-  const startTime = new Date().toISOString()
-  await queries.updateTask(taskId, {
-    status: 'running',
-    started_at: startTime,
-  })
-
-  // Broadcast task started event
-  broadcast('task:started', {
-    type: 'task:started',
-    task_id: taskId,
-    agent,
-    model,
-    timestamp: startTime,
-  })
-
-  // Start logging for this task
-  startTaskLog(taskId)
-
-  // Prepare isolated worktree workspace
-  let worktreePath: string | null = null
-  let branchName: string | null = null
-  try {
-    const workspace = await prepareWorkspace(taskId, repoPath)
-    worktreePath = workspace.worktreePath
-    branchName = workspace.branchName
-    console.log(`[Dispatcher] Task ${taskId.slice(0, 8)} using worktree: ${worktreePath}`)
-
-    // Store worktree info immediately
-    await queries.updateTask(taskId, {
-      worktree_path: worktreePath,
-      branch_name: branchName,
-    })
-  } catch (error) {
-    console.error(`[Dispatcher] Failed to create worktree for task ${taskId.slice(0, 8)}, using repo directly:`, error)
-    // Fall back to running in the original repo if worktree creation fails
-  }
-
-  // Use worktree path if available, otherwise fall back to repo path
-  const workingDir = worktreePath ?? repoPath
 
   // Check for Claude session ID from a previous attempt (for --resume on retry)
   let resumeSessionId: string | undefined
@@ -476,7 +494,6 @@ ${memorySection ? `\n${memorySection}` : ''}`
           { name: 'basePrompt', size: basePrompt.length },
           ...(dependencySection ? [{ name: 'dependencySection', size: dependencySection.length, dep_ids: depIds }] : []),
           { name: 'mycelContext', size: mycelContext.length },
-          { name: 'agentsSection', size: agentsSection.length },
           { name: 'skillsSection', size: skillsSection.length },
           { name: 'mcpSection', size: mcpSection.length },
           ...(memorySection ? [{ name: 'memorySection', size: memorySection.length }] : []),
@@ -518,7 +535,6 @@ ${memorySection ? `\n${memorySection}` : ''}`
           { name: 'basePrompt', size: basePrompt.length },
           ...(dependencySection ? [{ name: 'dependencySection', size: dependencySection.length, dep_ids: depIds }] : []),
           { name: 'mycelContext', size: mycelContext.length },
-          { name: 'agentsSection', size: agentsSection.length },
           { name: 'skillsSection', size: skillsSection.length },
           { name: 'mcpSection', size: mcpSection.length },
           ...(memorySection ? [{ name: 'memorySection', size: memorySection.length }] : []),

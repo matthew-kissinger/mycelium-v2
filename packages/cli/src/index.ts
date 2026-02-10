@@ -22,6 +22,7 @@ import { registerTriggerCommands } from './commands/trigger.ts'
 import { registerConfigCommands } from './commands/config.ts'
 import { registerLogsCommands } from './commands/logs.ts'
 import { registerInventoryCommands } from './commands/inventory.ts'
+import { registerRegistryCommands } from './commands/registry.ts'
 
 const VERSION = '0.1.0'
 const DEFAULT_API_URL = 'http://localhost:8765'
@@ -59,6 +60,7 @@ registerTriggerCommands(program)   // trigger discovery/shepherd/digest/compacti
 registerConfigCommands(program)    // config agents/prompts/hooks/history (extends existing config)
 registerLogsCommands(program)      // logs <task-id>, export tasks/stats/memory
 registerInventoryCommands(program) // inventory, inventory skills/mcps/scan
+registerRegistryCommands(program)  // registry, registry agents/providers/models/detect/refresh/health/fallback
 
 // Parse and execute
 program.parse()
