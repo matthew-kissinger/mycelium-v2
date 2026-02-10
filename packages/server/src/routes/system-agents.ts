@@ -11,6 +11,7 @@ import {
   startScheduler,
   stopScheduler,
   triggerShepherdForRepo,
+  triggerMaxAlignmentForRepo,
   getActiveRuns,
 } from '../scheduler'
 import { runDiscoveryForRepo } from '../scheduler/cycles/discovery'
@@ -252,6 +253,66 @@ shepherdRoutes.post('/reset-counter', async (c) => {
       message: 'Shepherd evaluation counter reset for all tasks',
     })
   }
+})
+
+// =============================================================================
+// Max Alignment Routes (/api/max-alignment)
+// =============================================================================
+
+export const maxAlignmentRoutes = new Hono()
+
+// POST /api/max-alignment/trigger - Manually trigger max alignment for a repo
+maxAlignmentRoutes.post('/trigger', zValidator('json', z.object({ repo_path: z.string() })), async (c) => {
+  const { repo_path } = c.req.valid('json')
+
+  const repo = await queries.getRepoByPath(repo_path)
+  if (!repo) {
+    return c.json({ error: 'Repo not found' }, 404)
+  }
+
+  // Trigger async (don't wait)
+  triggerMaxAlignmentForRepo(repo_path).catch((e) => {
+    console.error('[API] Max alignment trigger error:', e)
+  })
+
+  return c.json({
+    message: `Max alignment triggered for ${repo_path}`,
+    repo_path,
+  }, 202)
+})
+
+// GET /api/max-alignment/status - Show repos eligible for alignment + recent runs
+maxAlignmentRoutes.get('/status', async (c) => {
+  const config = getSchedulerConfig()
+  const repos = await queries.getRepos()
+
+  // Check eligibility for each repo
+  const { shouldRunMaxAlignment } = await import('../scheduler/cycles/max-alignment')
+  const repoStatus: Record<string, { eligible: boolean; last_run?: string }> = {}
+
+  for (const repo of repos) {
+    const eligible = await shouldRunMaxAlignment(repo.path, config).catch(() => false)
+    repoStatus[repo.path] = { eligible }
+  }
+
+  // Get recent max_alignment runs
+  const recentRuns = await queries.getRuns({ agent_type: 'max_alignment', limit: 10 })
+
+  // Attach last_run to repo status
+  for (const run of recentRuns) {
+    if (run.repo_path && repoStatus[run.repo_path] && !repoStatus[run.repo_path].last_run) {
+      repoStatus[run.repo_path].last_run = run.completed_at ?? run.started_at
+    }
+  }
+
+  return c.json({
+    shepherd_trigger: config.max_alignment_shepherd_trigger,
+    repos: repoStatus,
+    eligible_repos: Object.entries(repoStatus)
+      .filter(([_, s]) => s.eligible)
+      .map(([path, s]) => ({ path, ...s })),
+    recent_runs: recentRuns.map(queries.parseRun),
+  })
 })
 
 // =============================================================================

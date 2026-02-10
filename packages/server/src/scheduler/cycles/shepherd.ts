@@ -4,7 +4,7 @@
  * Responsibilities:
  * - Get repos with 5+ unevaluated completed tasks
  * - Spawn Shepherd agent per repo
- * - Parse YAML output and create evaluation record
+ * - Parse XML/YAML output and create evaluation record
  * - Mark tasks as evaluated
  * - Extract patterns and warnings
  */
@@ -21,6 +21,41 @@ import { registerActiveRun, unregisterActiveRun, isShepherdRunningForRepo } from
 import { getBranchDiff, cleanupWorkspace } from '../../agents/workspace'
 import { getRepoSlug, createPR, mergePR, closePR, buildPRBody, ensureLabels, AGENT_LABELS, createCommitStatus, getBranchSha, type RepoSlug } from '../../github'
 import { processMergeQueue, type MergeQueueEntry } from '../../github/merge-queue'
+import * as registryQueries from '../../db/registry-queries'
+
+// =============================================================================
+// Shepherd Evaluation Types
+// =============================================================================
+
+interface ShepherdEvaluation {
+  health: 'healthy' | 'warning' | 'critical'
+  headline: string
+  concerns?: string[]
+  wins?: string[]
+  recommendation?: string
+  patterns?: Array<{ content: string; tags?: string[] }>
+  warnings?: Array<{ content: string; severity?: string }>
+  branch_evaluations?: Array<{
+    task_id: string
+    decision: string
+    reason: string
+    confidence?: number
+    merge_order?: number
+    agent?: string
+    files_modified?: string[]
+    files_created?: string[]
+    files_deleted?: string[]
+    tests?: { passed: number; failed: number; skipped: number }
+    commits?: Array<{ hash?: string; message: string }>
+    patterns?: Array<{ content: string; tags?: string[] }>
+    warnings?: Array<{ content: string; severity?: string }>
+  }>
+  agent_feedback?: Array<{
+    agent: string
+    best_for?: string
+    avoid_for?: string
+  }>
+}
 
 /**
  * Run the Shepherd cycle.
@@ -214,6 +249,31 @@ async function runShepherdForRepo(
         })
       }
 
+      // Store per-task patterns and warnings from branch evaluations
+      for (const branchEval of evaluation.branch_evaluations ?? []) {
+        for (const pattern of branchEval.patterns ?? []) {
+          await queries.createPattern({
+            content: pattern.content ?? pattern,
+            source: 'shepherd',
+            repo_path: repoPath,
+            tags: [...(pattern.tags ?? []), `task:${branchEval.task_id}`],
+          })
+        }
+        for (const warning of branchEval.warnings ?? []) {
+          await queries.createWarning({
+            content: warning.content ?? warning,
+            severity: warning.severity ?? 'medium',
+            repo_path: repoPath,
+          })
+        }
+      }
+
+      // Store agent performance feedback into agent_stats
+      for (const feedback of evaluation.agent_feedback ?? []) {
+        const agentName = feedback.agent.split('/')[0]
+        await appendAgentFeedback(agentName, feedback.best_for, feedback.avoid_for)
+      }
+
       console.log(`[Shepherd] ${repoName}: ${evaluation.health} - ${evaluation.headline}`)
 
       // Send Telegram notification
@@ -370,6 +430,28 @@ async function buildShepherdPrompt(
     summary += `\n\n${t.result ? `Result:\n\`\`\`\n${t.result.slice(0, 1000)}\n\`\`\`` : ''}`
     summary += `${t.error ? `\nError:\n\`\`\`\n${t.error.slice(0, 500)}\n\`\`\`` : ''}`
 
+    // Inject structured parsed_result if available
+    if (t.parsed_result) {
+      try {
+        const pr = typeof t.parsed_result === 'string'
+          ? JSON.parse(t.parsed_result) : t.parsed_result
+
+        const parts: string[] = []
+        if (pr.summary) parts.push(`Summary: ${pr.summary}`)
+        if (pr.status) parts.push(`Agent Status: ${pr.status}`)
+        if (pr.files_modified?.length) parts.push(`Modified: ${pr.files_modified.join(', ')}`)
+        if (pr.files_created?.length) parts.push(`Created: ${pr.files_created.join(', ')}`)
+        if (pr.files_deleted?.length) parts.push(`Deleted: ${pr.files_deleted.join(', ')}`)
+        if (pr.tests) parts.push(`Tests: ${pr.tests.passed} passed, ${pr.tests.failed} failed, ${pr.tests.skipped} skipped`)
+        if (pr.commits?.length) {
+          parts.push(`Commits:\n${pr.commits.map((c: { hash?: string; message: string }) => `  - ${c.hash ?? '???'} ${c.message}`).join('\n')}`)
+        }
+        if (pr.git_backed) parts.push(`(Data scraped from git - agent did not produce structured output)`)
+
+        if (parts.length > 0) summary += `\n\nStructured Result:\n${parts.join('\n')}`
+      } catch { /* ignore parse errors */ }
+    }
+
     taskSummaryParts.push(summary)
   }
 
@@ -390,7 +472,7 @@ async function buildShepherdPrompt(
   const memorySection = await buildMemorySection(repoPath)
 
   const toolInstructions = tasksWithBranches.length > 0
-    ? `\n## Investigation (Before Writing YAML)
+    ? `\n## Investigation (Before Writing XML)
 
 You have full tool access. Before making MERGE/REJECT/DEFER decisions, DO:
 
@@ -399,7 +481,7 @@ You have full tool access. Before making MERGE/REJECT/DEFER decisions, DO:
 3. **Check git log** for each branch to understand commit history
 4. **Look for regressions** - compare changed files against main branch
 
-Only write your YAML evaluation AFTER investigating. Do not rely solely on the diffs above.
+Only write your XML evaluation AFTER investigating. Do not rely solely on the diffs above.
 `
     : ''
 
@@ -422,48 +504,267 @@ ${taskSummaries}
 ${memorySection ? `\n## Repository Memory\n\n${memorySection}\n` : ''}
 ## Output Format
 
-Provide your analysis in this YAML format:
+Provide your evaluation as a <shepherd_result> XML block.
 
-\`\`\`yaml
-health: healthy  # or warning, critical
-headline: "Brief summary of the work"
-concerns:
-  - "Concern 1"
-  - "Concern 2"
-wins:
-  - "Win 1"
-  - "Win 2"
-recommendation: "What to focus on next"
-patterns:
-  - content: "Pattern description"
-    tags: ["tag1", "tag2"]
-warnings:
-  - content: "Warning description"
-    severity: medium  # low, medium, high
-branch_evaluations:
-  - task_id: "abc12345"
-    decision: MERGE  # or REJECT, DEFER
-    reason: "Why this decision"
-    merge_order: 1  # order to merge (1 = first, only for MERGE decisions)
-\`\`\`
+<shepherd_result health="healthy|warning|critical">
+  <headline>Brief 1-sentence summary of this batch</headline>
+  <recommendation>What to focus on next</recommendation>
 
-Be concise but thorough. Focus on actionable insights.${tasksWithBranches.length > 0 ? `\n\n**IMPORTANT:** Tasks with branches that need evaluation: ${tasksWithBranches.join(', ')}. You MUST include a branch_evaluation entry for each.` : ''}
+  <concerns>
+    <item>Specific concern needing attention</item>
+  </concerns>
+
+  <wins>
+    <item>Notable achievement worth celebrating</item>
+  </wins>
+
+  <patterns>
+    <pattern tags="typescript,testing">Pattern that applies across this repo</pattern>
+  </patterns>
+
+  <warnings>
+    <warning severity="high">Warning that applies across this repo</warning>
+  </warnings>
+
+  <branch_evaluations>
+    <evaluation task_id="abc12345" decision="MERGE" confidence="0.9" merge_order="1" agent="claude/sonnet">
+      <reason>Code is clean, tests pass, follows conventions</reason>
+      <files_changed>
+        <file action="modified">src/auth.ts</file>
+        <file action="created">src/middleware/jwt.ts</file>
+      </files_changed>
+      <tests>
+        <passed>12</passed>
+        <failed>0</failed>
+        <skipped>1</skipped>
+      </tests>
+      <commits>
+        <commit hash="abc1234">feat: add JWT authentication</commit>
+        <commit hash="def5678">test: add auth tests</commit>
+      </commits>
+      <patterns>
+        <pattern tags="auth">JWT middleware pattern works well here</pattern>
+      </patterns>
+      <warnings>
+        <warning severity="low">No error handling on token expiry</warning>
+      </warnings>
+    </evaluation>
+  </branch_evaluations>
+
+  <agent_feedback>
+    <agent name="claude/sonnet">
+      <best_for>Complex refactoring with many file changes</best_for>
+      <avoid_for>Simple one-line fixes (over-engineers)</avoid_for>
+    </agent>
+  </agent_feedback>
+</shepherd_result>
+
+Field reference:
+- health: "healthy" | "warning" | "critical"
+- decision: MERGE (into main) | REJECT (discard branch) | DEFER (keep for later)
+- confidence: 0.0-1.0 how sure you are about the decision
+- merge_order: sequence number for MERGE decisions (1 = merge first)
+- agent: which agent/model ran this task (echo from input)
+- files_changed: echo the files this task modified/created/deleted
+- tests: echo the test results if the task ran tests
+- commits: echo the commits this task made
+- Per-evaluation patterns/warnings: learnings specific to this task
+- Global patterns/warnings: learnings that apply across the repo
+- agent_feedback: observations about agent performance (optional)
+- tags: comma-separated, used for memory search
+- severity: low | medium | high
+
+You MUST output the <shepherd_result> XML block. The system parses it to record evaluations, store patterns, and track agent performance.${tasksWithBranches.length > 0 ? `\n\n**IMPORTANT:** Tasks with branches that need evaluation: ${tasksWithBranches.join(', ')}. You MUST include a branch_evaluation entry for each.` : ''}
 `
 }
 
 /**
- * Parse Shepherd YAML output.
+ * Parse Shepherd output - tries XML first, falls back to YAML.
  */
-function parseShepherdOutput(output: string): {
-  health: 'healthy' | 'warning' | 'critical'
-  headline: string
-  concerns?: string[]
-  wins?: string[]
-  recommendation?: string
-  patterns?: Array<{ content: string; tags?: string[] }>
-  warnings?: Array<{ content: string; severity?: string }>
-  branch_evaluations?: Array<{ task_id: string; decision: string; reason: string; merge_order?: number }>
-} | null {
+function parseShepherdOutput(output: string): ShepherdEvaluation | null {
+  const xml = parseShepherdXml(output)
+  if (xml) return xml
+  return parseShepherdYaml(output)
+}
+
+// =============================================================================
+// XML Parser
+// =============================================================================
+
+function parsePatternElements(block: string): Array<{ content: string; tags?: string[] }> {
+  const patterns: Array<{ content: string; tags?: string[] }> = []
+  const regex = /<pattern(?:\s+tags="([^"]*)")?\s*>([\s\S]*?)<\/pattern>/g
+  let m
+  while ((m = regex.exec(block)) !== null) {
+    patterns.push({
+      content: m[2].trim(),
+      tags: m[1] ? m[1].split(',').map(t => t.trim()) : undefined,
+    })
+  }
+  return patterns
+}
+
+function parseWarningElements(block: string): Array<{ content: string; severity?: string }> {
+  const warnings: Array<{ content: string; severity?: string }> = []
+  const regex = /<warning(?:\s+severity="([^"]*)")?\s*>([\s\S]*?)<\/warning>/g
+  let m
+  while ((m = regex.exec(block)) !== null) {
+    warnings.push({
+      content: m[2].trim(),
+      severity: m[1] || undefined,
+    })
+  }
+  return warnings
+}
+
+function parseShepherdXml(output: string): ShepherdEvaluation | null {
+  const blockMatch = output.match(/<shepherd_result\s+health="(healthy|warning|critical)">([\s\S]*?)<\/shepherd_result>/)
+  if (!blockMatch) return null
+
+  const health = blockMatch[1] as ShepherdEvaluation['health']
+  const body = blockMatch[2]
+
+  const result: ShepherdEvaluation = { health, headline: '' }
+
+  // Simple text elements
+  const headlineMatch = body.match(/<headline>([\s\S]*?)<\/headline>/)
+  if (headlineMatch) result.headline = headlineMatch[1].trim()
+
+  const recMatch = body.match(/<recommendation>([\s\S]*?)<\/recommendation>/)
+  if (recMatch) result.recommendation = recMatch[1].trim()
+
+  // <concerns><item>...</item></concerns>
+  const concernsBlock = body.match(/<concerns>([\s\S]*?)<\/concerns>/)
+  if (concernsBlock) {
+    const items: string[] = []
+    const itemRegex = /<item>([\s\S]*?)<\/item>/g
+    let m
+    while ((m = itemRegex.exec(concernsBlock[1])) !== null) items.push(m[1].trim())
+    if (items.length > 0) result.concerns = items
+  }
+
+  // <wins><item>...</item></wins>
+  const winsBlock = body.match(/<wins>([\s\S]*?)<\/wins>/)
+  if (winsBlock) {
+    const items: string[] = []
+    const itemRegex = /<item>([\s\S]*?)<\/item>/g
+    let m
+    while ((m = itemRegex.exec(winsBlock[1])) !== null) items.push(m[1].trim())
+    if (items.length > 0) result.wins = items
+  }
+
+  // Top-level <patterns>
+  const topPatternsBlock = body.match(/<patterns>([\s\S]*?)<\/patterns>/)
+  if (topPatternsBlock) {
+    const parsed = parsePatternElements(topPatternsBlock[1])
+    if (parsed.length > 0) result.patterns = parsed
+  }
+
+  // Top-level <warnings>
+  const topWarningsBlock = body.match(/<warnings>([\s\S]*?)<\/warnings>/)
+  if (topWarningsBlock) {
+    const parsed = parseWarningElements(topWarningsBlock[1])
+    if (parsed.length > 0) result.warnings = parsed
+  }
+
+  // <branch_evaluations> with <evaluation> children
+  const evalsBlock = body.match(/<branch_evaluations>([\s\S]*?)<\/branch_evaluations>/)
+  if (evalsBlock) {
+    const evals: NonNullable<ShepherdEvaluation['branch_evaluations']> = []
+    const evalRegex = /<evaluation\s+([^>]*)>([\s\S]*?)<\/evaluation>/g
+    let evalMatch
+    while ((evalMatch = evalRegex.exec(evalsBlock[1])) !== null) {
+      const attrs = evalMatch[1]
+      const evalBody = evalMatch[2]
+
+      const taskId = attrs.match(/task_id="([^"]*)"/)
+      const decision = attrs.match(/decision="([^"]*)"/)
+      const confidence = attrs.match(/confidence="([^"]*)"/)
+      const mergeOrder = attrs.match(/merge_order="([^"]*)"/)
+      const agent = attrs.match(/agent="([^"]*)"/)
+
+      const reasonMatch = evalBody.match(/<reason>([\s\S]*?)<\/reason>/)
+      const summaryMatch = evalBody.match(/<summary>([\s\S]*?)<\/summary>/)
+
+      // Per-evaluation files
+      const filesModified: string[] = []
+      const filesCreated: string[] = []
+      const filesDeleted: string[] = []
+      const fileRegex = /<file\s+action="(modified|created|deleted)">([\s\S]*?)<\/file>/g
+      let fileMatch
+      while ((fileMatch = fileRegex.exec(evalBody)) !== null) {
+        if (fileMatch[1] === 'modified') filesModified.push(fileMatch[2].trim())
+        else if (fileMatch[1] === 'created') filesCreated.push(fileMatch[2].trim())
+        else if (fileMatch[1] === 'deleted') filesDeleted.push(fileMatch[2].trim())
+      }
+
+      // Per-evaluation tests
+      let tests: { passed: number; failed: number; skipped: number } | undefined
+      const testsMatch = evalBody.match(/<tests>([\s\S]*?)<\/tests>/)
+      if (testsMatch) {
+        const p = testsMatch[1].match(/<passed>(\d+)<\/passed>/)
+        const f = testsMatch[1].match(/<failed>(\d+)<\/failed>/)
+        const s = testsMatch[1].match(/<skipped>(\d+)<\/skipped>/)
+        tests = { passed: p ? +p[1] : 0, failed: f ? +f[1] : 0, skipped: s ? +s[1] : 0 }
+      }
+
+      // Per-evaluation commits
+      const commits: Array<{ hash?: string; message: string }> = []
+      const commitRegex = /<commit(?:\s+hash="([^"]*)")?>([\s\S]*?)<\/commit>/g
+      let commitMatch
+      while ((commitMatch = commitRegex.exec(evalBody)) !== null) {
+        commits.push({ hash: commitMatch[1] || undefined, message: commitMatch[2].trim() })
+      }
+
+      // Per-evaluation patterns and warnings
+      const evalPatternsBlock = evalBody.match(/<patterns>([\s\S]*?)<\/patterns>/)
+      const evalWarningsBlock = evalBody.match(/<warnings>([\s\S]*?)<\/warnings>/)
+
+      evals.push({
+        task_id: taskId?.[1] ?? '',
+        decision: decision?.[1] ?? 'DEFER',
+        reason: reasonMatch?.[1]?.trim() ?? summaryMatch?.[1]?.trim() ?? '',
+        confidence: confidence ? parseFloat(confidence[1]) : undefined,
+        merge_order: mergeOrder ? parseInt(mergeOrder[1], 10) : undefined,
+        agent: agent?.[1],
+        files_modified: filesModified.length > 0 ? filesModified : undefined,
+        files_created: filesCreated.length > 0 ? filesCreated : undefined,
+        files_deleted: filesDeleted.length > 0 ? filesDeleted : undefined,
+        tests,
+        commits: commits.length > 0 ? commits : undefined,
+        patterns: evalPatternsBlock ? parsePatternElements(evalPatternsBlock[1]) : undefined,
+        warnings: evalWarningsBlock ? parseWarningElements(evalWarningsBlock[1]) : undefined,
+      })
+    }
+    if (evals.length > 0) result.branch_evaluations = evals
+  }
+
+  // <agent_feedback> with <agent> children
+  const feedbackBlock = body.match(/<agent_feedback>([\s\S]*?)<\/agent_feedback>/)
+  if (feedbackBlock) {
+    const feedback: Array<{ agent: string; best_for?: string; avoid_for?: string }> = []
+    const agentRegex = /<agent\s+name="([^"]*)">([\s\S]*?)<\/agent>/g
+    let agentMatch
+    while ((agentMatch = agentRegex.exec(feedbackBlock[1])) !== null) {
+      const bestFor = agentMatch[2].match(/<best_for>([\s\S]*?)<\/best_for>/)
+      const avoidFor = agentMatch[2].match(/<avoid_for>([\s\S]*?)<\/avoid_for>/)
+      feedback.push({
+        agent: agentMatch[1],
+        best_for: bestFor?.[1]?.trim(),
+        avoid_for: avoidFor?.[1]?.trim(),
+      })
+    }
+    if (feedback.length > 0) result.agent_feedback = feedback
+  }
+
+  return result
+}
+
+// =============================================================================
+// YAML Parser (fallback)
+// =============================================================================
+
+function parseShepherdYaml(output: string): ShepherdEvaluation | null {
   // Extract YAML block
   const yamlMatch = output.match(/```yaml\n([\s\S]*?)```/)
   if (!yamlMatch) return null
@@ -571,6 +872,43 @@ function parseShepherdOutput(output: string): {
 }
 
 // =============================================================================
+// Agent Feedback
+// =============================================================================
+
+/**
+ * Append shepherd's best_for/avoid_for feedback to agent_stats.
+ * Keeps a rolling window of the 10 most recent entries per field.
+ */
+async function appendAgentFeedback(agentId: string, bestFor?: string, avoidFor?: string): Promise<void> {
+  if (!bestFor && !avoidFor) return
+
+  const existing = registryQueries.getAgentHealth(agentId)
+  // best_for/avoid_for are JSON arrays stored as text in the agent_stats table
+  let currentBestFor: string[] = []
+  let currentAvoidFor: string[] = []
+  try {
+    if (existing && (existing as any).best_for) currentBestFor = JSON.parse((existing as any).best_for)
+  } catch { /* ignore parse errors */ }
+  try {
+    if (existing && (existing as any).avoid_for) currentAvoidFor = JSON.parse((existing as any).avoid_for)
+  } catch { /* ignore parse errors */ }
+
+  if (bestFor && !currentBestFor.includes(bestFor)) {
+    currentBestFor.push(bestFor)
+    if (currentBestFor.length > 10) currentBestFor.shift()
+  }
+  if (avoidFor && !currentAvoidFor.includes(avoidFor)) {
+    currentAvoidFor.push(avoidFor)
+    if (currentAvoidFor.length > 10) currentAvoidFor.shift()
+  }
+
+  registryQueries.upsertAgentHealth(agentId, {
+    best_for: JSON.stringify(currentBestFor),
+    avoid_for: JSON.stringify(currentAvoidFor),
+  } as any)
+}
+
+// =============================================================================
 // Branch Evaluation Processing (MERGE / REJECT / DEFER)
 // =============================================================================
 
@@ -590,7 +928,7 @@ async function processBranchEvaluations(
   repoPath: string,
   repoName: string,
   tasks: Awaited<ReturnType<typeof queries.getUnevaluatedTasks>>,
-  branchEvals: Array<{ task_id: string; decision: string; reason: string; merge_order?: number }>
+  branchEvals: NonNullable<ShepherdEvaluation['branch_evaluations']>
 ): Promise<Set<string>> {
   const deferredTaskIds = new Set<string>()
   const telegram = getTelegramService()

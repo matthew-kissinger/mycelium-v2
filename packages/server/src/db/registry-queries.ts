@@ -312,6 +312,8 @@ export function upsertAgentHealth(key: string, data: Partial<HealthRow>): void {
     if (data.error_count_recent !== undefined) updates.error_count_recent = data.error_count_recent
     if (data.model !== undefined) updates.model = data.model
     if (data.provider !== undefined) updates.provider = data.provider
+    if ((data as any).best_for !== undefined) updates.best_for = (data as any).best_for
+    if ((data as any).avoid_for !== undefined) updates.avoid_for = (data as any).avoid_for
 
     db.update(schema.agent_stats).set(updates).where(eq(schema.agent_stats.agent_id, key)).run()
   } else {
@@ -336,6 +338,8 @@ export function upsertAgentHealth(key: string, data: Partial<HealthRow>): void {
     if (data.error_count_recent !== undefined) updates.error_count_recent = data.error_count_recent
     if (data.model) updates.model = data.model
     if (data.provider) updates.provider = data.provider
+    if ((data as any).best_for) updates.best_for = (data as any).best_for
+    if ((data as any).avoid_for) updates.avoid_for = (data as any).avoid_for
 
     if (Object.keys(updates).length > 0) {
       db.update(schema.agent_stats).set(updates).where(eq(schema.agent_stats.agent_id, key)).run()

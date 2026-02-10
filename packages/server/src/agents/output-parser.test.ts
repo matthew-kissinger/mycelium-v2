@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { parseAgentOutput, parseClaudeSessionId } from './output-parser'
+import { parseAgentOutput, parseClaudeSessionId, parseTaskResult } from './output-parser'
 
 // =============================================================================
 // parseAgentOutput
@@ -117,6 +117,163 @@ Updated validation logic.
     expect(result!.branch).toBe('feature/fix')
     expect(result!.files_changed).toBeUndefined()
     expect(result!.tests_run).toBeUndefined()
+  })
+})
+
+// =============================================================================
+// parseTaskResult (XML + legacy fallback)
+// =============================================================================
+
+describe('parseTaskResult', () => {
+  test('parses full XML with all fields', () => {
+    const output = `I've completed the work.
+
+<task_result status="success">
+  <summary>Added user authentication with JWT tokens</summary>
+  <files_changed>
+    <file action="modified">src/auth.ts</file>
+    <file action="created">src/middleware/jwt.ts</file>
+    <file action="deleted">src/old-auth.ts</file>
+  </files_changed>
+  <tests>
+    <passed>12</passed>
+    <failed>0</failed>
+    <skipped>1</skipped>
+  </tests>
+  <commits>
+    <commit hash="abc1234">feat: add JWT authentication</commit>
+    <commit hash="def5678">test: add auth middleware tests</commit>
+  </commits>
+</task_result>`
+
+    const result = parseTaskResult(output)
+    expect(result).not.toBeNull()
+    expect(result!.status).toBe('success')
+    expect(result!.summary).toBe('Added user authentication with JWT tokens')
+    expect(result!.files_modified).toEqual(['src/auth.ts'])
+    expect(result!.files_created).toEqual(['src/middleware/jwt.ts'])
+    expect(result!.files_deleted).toEqual(['src/old-auth.ts'])
+    expect(result!.tests).toEqual({ passed: 12, failed: 0, skipped: 1 })
+    expect(result!.commits).toHaveLength(2)
+    expect(result!.commits[0]).toEqual({ hash: 'abc1234', message: 'feat: add JWT authentication' })
+    expect(result!.commits[1]).toEqual({ hash: 'def5678', message: 'test: add auth middleware tests' })
+  })
+
+  test('parses partial XML (missing optional sections)', () => {
+    const output = `<task_result status="success">
+  <summary>Fixed the login bug</summary>
+  <files_changed>
+    <file action="modified">src/login.ts</file>
+  </files_changed>
+</task_result>`
+
+    const result = parseTaskResult(output)
+    expect(result).not.toBeNull()
+    expect(result!.status).toBe('success')
+    expect(result!.summary).toBe('Fixed the login bug')
+    expect(result!.files_modified).toEqual(['src/login.ts'])
+    expect(result!.tests).toBeUndefined()
+    expect(result!.commits).toEqual([])
+  })
+
+  test('parses status="partial"', () => {
+    const output = `<task_result status="partial">
+  <summary>Started refactoring but hit a blocker</summary>
+</task_result>`
+
+    const result = parseTaskResult(output)
+    expect(result).not.toBeNull()
+    expect(result!.status).toBe('partial')
+  })
+
+  test('parses status="blocked"', () => {
+    const output = `<task_result status="blocked">
+  <summary>Cannot proceed without API key</summary>
+</task_result>`
+
+    const result = parseTaskResult(output)
+    expect(result).not.toBeNull()
+    expect(result!.status).toBe('blocked')
+  })
+
+  test('parses commits without hashes', () => {
+    const output = `<task_result status="success">
+  <summary>Done</summary>
+  <commits>
+    <commit>feat: add new feature</commit>
+  </commits>
+</task_result>`
+
+    const result = parseTaskResult(output)
+    expect(result).not.toBeNull()
+    expect(result!.commits).toHaveLength(1)
+    expect(result!.commits[0]).toEqual({ hash: undefined, message: 'feat: add new feature' })
+  })
+
+  test('falls back to legacy [MARKER] format', () => {
+    const output = `[FILES_CHANGED] src/app.ts, src/routes.ts
+[TESTS_RUN] 5 passed, 0 failed
+[BRANCH] mycel/task-12345678`
+
+    const result = parseTaskResult(output)
+    expect(result).not.toBeNull()
+    expect(result!.files_modified).toEqual(['src/app.ts', 'src/routes.ts'])
+    expect(result!.tests).toEqual({ passed: 5, failed: 0, skipped: 0 })
+    expect(result!.branch).toBe('mycel/task-12345678')
+    expect(result!.commits).toEqual([])
+    expect(result!.files_created).toEqual([])
+    expect(result!.files_deleted).toEqual([])
+  })
+
+  test('returns null for empty/garbage output', () => {
+    expect(parseTaskResult('')).toBeNull()
+    expect(parseTaskResult('Task completed successfully.')).toBeNull()
+    expect(parseTaskResult('random text with no markers')).toBeNull()
+  })
+
+  test('handles malformed XML gracefully', () => {
+    const output = `<task_result status="success">
+  <summary>Incomplete XML...`
+    // Should not throw, just return null (no closing tag match)
+    const result = parseTaskResult(output)
+    expect(result).toBeNull()
+  })
+
+  test('prefers XML over legacy markers when both present', () => {
+    const output = `<task_result status="success">
+  <summary>XML result</summary>
+  <files_changed>
+    <file action="created">new.ts</file>
+  </files_changed>
+</task_result>
+[FILES_CHANGED] old.ts
+[BRANCH] legacy-branch`
+
+    const result = parseTaskResult(output)
+    expect(result).not.toBeNull()
+    expect(result!.status).toBe('success')
+    expect(result!.files_created).toEqual(['new.ts'])
+    // Should NOT have legacy data
+    expect(result!.branch).toBeUndefined()
+  })
+
+  test('handles multiple file actions correctly', () => {
+    const output = `<task_result status="success">
+  <summary>Refactored modules</summary>
+  <files_changed>
+    <file action="modified">src/a.ts</file>
+    <file action="modified">src/b.ts</file>
+    <file action="created">src/c.ts</file>
+    <file action="created">src/d.ts</file>
+    <file action="deleted">src/e.ts</file>
+  </files_changed>
+</task_result>`
+
+    const result = parseTaskResult(output)
+    expect(result).not.toBeNull()
+    expect(result!.files_modified).toEqual(['src/a.ts', 'src/b.ts'])
+    expect(result!.files_created).toEqual(['src/c.ts', 'src/d.ts'])
+    expect(result!.files_deleted).toEqual(['src/e.ts'])
   })
 })
 

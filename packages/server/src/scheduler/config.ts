@@ -49,6 +49,9 @@ export const DEFAULT_CONFIG: SchedulerConfig = {
   auto_prune_keep: 30,
   registry_refresh_enabled: true,
   registry_refresh_interval_sec: 21600, // 6 hours
+  max_alignment_enabled: true,
+  max_alignment_interval_sec: 900, // 15 minutes (checks trigger threshold each tick)
+  max_alignment_shepherd_trigger: 2, // Run after N shepherd evaluations per repo
 }
 
 /**

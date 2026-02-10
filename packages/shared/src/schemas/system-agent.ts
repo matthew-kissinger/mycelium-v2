@@ -8,6 +8,7 @@ export const SystemAgentType = z.enum([
   'armory',
   'digest',
   'compaction',
+  'max_alignment',
 ])
 export type SystemAgentType = z.infer<typeof SystemAgentType>
 

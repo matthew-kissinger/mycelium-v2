@@ -10,7 +10,7 @@
 | Component | Status |
 |-----------|--------|
 | Backend API | Hono + Bun, 85+ endpoints |
-| Scheduler | 10 cycles (dispatcher, discovery, shepherd, github_sync, registry_refresh, etc.) |
+| Scheduler | 11 cycles (dispatcher, discovery, shepherd, max_alignment, github_sync, registry_refresh, etc.) |
 | Agent Dispatch | 10 agents (Claude, Codex, Gemini, Cline, Cursor, Kiro, Vibe, Pi, OpenCode, Copilot) across 12 providers |
 | Frontend | Three-column layout (sidebar, React Flow canvas, detail panel) |
 | Cost Tracking | Per-use (Cline/OpenRouter) vs subscription billing |
@@ -121,6 +121,8 @@ POST       /api/scheduler/stop
 POST       /api/discovery/trigger
 POST       /api/shepherd/trigger
 GET        /api/shepherd/status
+POST       /api/max-alignment/trigger
+GET        /api/max-alignment/status
 
 # Health
 GET        /api/stats
@@ -167,6 +169,7 @@ Full API list in README.md.
 | Health Check | 60s | Provider status monitoring |
 | GitHub Sync | 30min | Cache repo slugs, default branches, enable security |
 | Registry Refresh | 6h | Re-detect CLIs, re-fetch provider models |
+| Max Alignment | 15min | Repo-level health audit after N shepherd evaluations |
 
 ### Task Flow
 
@@ -214,6 +217,7 @@ models (id, provider_id, model_id, context_window, cost_input, cost_output, free
 | Digest | haiku | Trend analysis, anomaly detection, recommendations |
 | Compaction | haiku | Semantic deduplication, pattern consolidation |
 | Armory | sonnet | Skill/MCP inventory |
+| Max Alignment | opus | Repo-level health audit, cleanup, docs, runtime verification |
 | Genesis | opus | Create new repos (manual only) |
 
 ### Context Injection

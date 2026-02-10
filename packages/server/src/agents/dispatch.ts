@@ -15,6 +15,7 @@ export interface DispatchOptions {
   timeout?: number
   taskId?: string  // Required for process registry tracking
   sessionId?: string  // Claude session ID for --resume on retry
+  extraEnv?: Record<string, string>  // Additional env vars merged into spawn environment
   onOutput?: (chunk: string, stream?: 'stdout' | 'stderr') => void
   onStart?: (pid: number) => void  // Called with PID after process spawns
 }
@@ -64,7 +65,7 @@ function parseCostFromOutput(output: string): number | undefined {
  * Registers process with the registry for cleanup on cancel/shutdown.
  */
 export async function dispatch(options: DispatchOptions): Promise<AgentExecuteResult> {
-  const { agent, prompt, cwd, model, provider, timeout, taskId, sessionId, onOutput, onStart } = options
+  const { agent, prompt, cwd, model, provider, timeout, taskId, sessionId, extraEnv, onOutput, onStart } = options
 
   // Look up adapter for this agent
   const adapter = getAdapter(agent)
@@ -139,7 +140,7 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
       stdout: 'pipe',
       stderr: 'pipe',
       stdin: usesStdin ? 'pipe' : 'ignore',
-      env: { ...process.env, ...env },
+      env: { ...process.env, ...env, ...extraEnv },
     })
 
     // Register process for cleanup on cancel/shutdown

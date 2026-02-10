@@ -111,8 +111,38 @@ Reply: all, 1 2 3, none, or custom"
 - End with "Reply: all, 1 2 3, none, or custom"
 - NEVER use \`--wait\`. You are a system agent - use async align and exit. Daemon handles continuation.
 
-After sending, output:
-<discovery_sent>true</discovery_sent>
+## Output Format (REQUIRED)
+
+After sending your align report, you MUST output this structured XML block as your final output.
+Include ALL relevant data - the system parses this to track what discovery found.
+
+\`\`\`xml
+<discovery_result mode="align">
+  <health>healthy</health>
+  <headline>Brief summary of findings</headline>
+  <suggested_tasks count="N">
+    <task agent="claude" model="sonnet" tier="subscription">Task title here</task>
+    <task agent="codex" model="gpt-5.2-codex" tier="subscription">Another task</task>
+    <task agent="opencode" model="kimi-k2.5-free" tier="free">Simple task</task>
+  </suggested_tasks>
+  <findings>
+    <finding severity="high">Critical issue description</finding>
+    <finding severity="medium">Moderate issue description</finding>
+    <finding severity="low">Minor issue description</finding>
+  </findings>
+  <inbox_checked>true</inbox_checked>
+</discovery_result>
+\`\`\`
+
+**Field reference:**
+- \`health\`: overall repo health - "healthy", "warning", or "critical"
+- \`headline\`: one-line summary of what you found
+- \`suggested_tasks\`: each task you suggested in the align report, with agent/model/tier
+- \`tier\`: "subscription", "free", or "per_use"
+- \`findings\`: key issues discovered (severity: high/medium/low)
+- \`inbox_checked\`: whether you checked the inbox before analyzing
+
+You MUST output this XML block. Do NOT skip it.
 `
 
 /**
@@ -287,20 +317,52 @@ A good task prompt includes:
 - Check pending tasks in context to avoid duplicates
 - NEVER use \`--wait\`. You are a system agent - notify and exit. Daemon handles continuation.
 
+## Output Format (REQUIRED)
+
+When ALL steps are complete, you MUST output this structured XML block.
+**Capture the task ID from each \`mycel task create\` output** and include it in the XML.
+
+\`\`\`xml
+<discovery_result mode="auto">
+  <health>healthy</health>
+  <headline>Created N tasks, updated X docs</headline>
+  <tasks_created count="N">
+    <task id="abc12345" agent="claude" model="sonnet" tier="subscription">Task title</task>
+    <task id="def67890" agent="codex" model="gpt-5.2-codex" tier="subscription" depends_on="abc12345">Dependent task</task>
+    <task id="ghi11111" agent="opencode" model="kimi-k2.5-free" tier="free">Simple task</task>
+  </tasks_created>
+  <docs_updated>
+    <doc>CLAUDE.md</doc>
+    <doc>README.md</doc>
+  </docs_updated>
+  <agent_distribution>
+    <tier name="subscription" count="2" />
+    <tier name="free" count="1" />
+  </agent_distribution>
+  <inbox_checked>true</inbox_checked>
+</discovery_result>
+\`\`\`
+
+**Field reference:**
+- \`health\`: overall repo health - "healthy", "warning", or "critical"
+- \`headline\`: one-line summary of what you did
+- \`tasks_created\`: each task created, with the ID from \`mycel task create\` output (first 8 chars of UUID)
+- \`id\`: task ID from create output (use the short 8-char prefix)
+- \`depends_on\`: ID of the task this one depends on (if any)
+- \`tier\`: "subscription", "free", or "per_use"
+- \`docs_updated\`: list of docs you updated directly
+- \`agent_distribution\`: count of tasks per billing tier
+- \`inbox_checked\`: whether you checked the inbox before analyzing
+
 ## Completion Checklist
 
 Before you finish, verify you have done ALL of these:
 - [ ] Created 1-5 tasks via \`mycel task create\`
 - [ ] Used at least 2-3 different agents across tasks
 - [ ] Sent notification via \`mycel notify\` (the human is waiting for this!)
-- [ ] Output the completion marker below
+- [ ] Output the \`<discovery_result>\` XML block above
 
-When ALL steps are complete, output this marker:
-\`\`\`
-<discovery_auto>complete</discovery_auto>
-\`\`\`
-
-**YOUR JOB IS NOT DONE UNTIL YOU SEND THE NOTIFICATION AND OUTPUT THE MARKER.**
+**YOUR JOB IS NOT DONE UNTIL YOU SEND THE NOTIFICATION AND OUTPUT THE XML BLOCK.**
 `
 
 /**
@@ -628,6 +690,9 @@ export const DISCOVERY_SENT_MARKER = '<discovery_sent>true</discovery_sent>'
 
 /** Marker output by Discovery agent in autonomous mode after completion */
 export const DISCOVERY_AUTO_MARKER = '<discovery_auto>complete</discovery_auto>'
+
+/** Regex to detect new structured discovery result XML */
+export const DISCOVERY_RESULT_REGEX = /<discovery_result\s+mode="(align|auto)">/
 
 /** Regex to extract task count from Task Creator output */
 export const TASKS_CREATED_REGEX = /<tasks_created>(\d+)<\/tasks_created>/
