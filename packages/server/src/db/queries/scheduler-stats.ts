@@ -57,11 +57,21 @@ export async function upsertSchedulerStats(
 }
 
 export async function getSchedulerStats(): Promise<SchedulerCycleStats[]> {
-  return db.select().from(schema.scheduler_stats)
+  const rows = await db.select().from(schema.scheduler_stats)
+  return rows.map(r => ({
+    ...r,
+    runs_completed: r.runs_completed ?? 0,
+    errors: r.errors ?? 0,
+  }))
 }
 
 export async function getSchedulerStatsForCycle(cycleName: string): Promise<SchedulerCycleStats | null> {
   const rows = await db.select().from(schema.scheduler_stats)
     .where(eq(schema.scheduler_stats.cycle_name, cycleName))
-  return rows[0] ?? null
+  if (!rows[0]) return null
+  return {
+    ...rows[0],
+    runs_completed: rows[0].runs_completed ?? 0,
+    errors: rows[0].errors ?? 0,
+  }
 }

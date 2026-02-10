@@ -154,7 +154,7 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
     }
 
     // Write prompt to stdin for stdin-based agents (e.g. kiro)
-    if (usesStdin && adapter.prepareStdin) {
+    if (usesStdin && adapter.prepareStdin && proc.stdin) {
       try {
         const stdinData = adapter.prepareStdin(prompt)
         proc.stdin.write(stdinData)
@@ -234,7 +234,7 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
     if (cachedAgent?.default_provider) {
       const providerRow = getCachedProvider(cachedAgent.default_provider)
       if (providerRow?.billing) {
-        billingType = providerRow.billing
+        billingType = providerRow.billing as typeof billingType
       }
     }
 

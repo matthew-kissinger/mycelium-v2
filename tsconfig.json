@@ -25,5 +25,10 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
-  }
+  },
+  "references": [
+    { "path": "packages/shared" },
+    { "path": "packages/server" }
+  ],
+  "files": []
 }

@@ -43,6 +43,9 @@ export { useInventoryStore } from './inventoryStore'
 export { useAgentStore } from './agentStore'
 export { useConnectionStore } from './connectionStore'
 export { useFlowStore } from './flowStore'
+export { useRegistryStore } from './registryStore'
+export { useGitHubStore } from './githubStore'
+export { useMaxAlignmentStore } from './maxAlignmentStore'
 
 // Import domain stores for delegation
 import { useUIStore } from './uiStore'

@@ -424,8 +424,9 @@ export function buildShepherdContext(
       if (task.parsed_result.commits?.length) {
         parts.push(`- **Commits**: ${task.parsed_result.commits.join(', ')}`)
       }
-      if (task.parsed_result.pr_url) {
-        parts.push(`- **PR**: ${task.parsed_result.pr_url}`)
+      const prUrl = (task.parsed_result as Record<string, unknown>).pr_url
+      if (prUrl) {
+        parts.push(`- **PR**: ${prUrl}`)
       }
     }
 

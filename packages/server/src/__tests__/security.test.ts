@@ -19,7 +19,7 @@ describe('security alert parsing', () => {
   })
 
   it('handles undefined severity gracefully', () => {
-    const rawSeverity: string | undefined = undefined
+    const rawSeverity: string | undefined = undefined as string | undefined
     const severity = rawSeverity?.toUpperCase() ?? 'UNKNOWN'
     expect(severity).toBe('UNKNOWN')
   })

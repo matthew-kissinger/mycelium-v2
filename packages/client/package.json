@@ -12,23 +12,23 @@
   },
   "dependencies": {
     "@mycelium/shared": "workspace:*",
-    "@tanstack/react-query": "latest",
-    "@xyflow/react": "latest",
+    "@tanstack/react-query": "^5.90.20",
+    "@xyflow/react": "^12.10.0",
     "clsx": "^2.1.1",
-    "react": "latest",
-    "react-dom": "latest",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "tailwind-merge": "^3.4.0",
-    "zod": "latest",
-    "zustand": "latest"
+    "zod": "^4.3.6",
+    "zustand": "^5.0.11"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.1",
-    "@tailwindcss/vite": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "@vitejs/plugin-react": "latest",
-    "autoprefixer": "latest",
-    "tailwindcss": "latest",
-    "vite": "latest"
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/react": "^19.2.11",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.3",
+    "autoprefixer": "^10.4.24",
+    "tailwindcss": "^4.1.18",
+    "vite": "^7.3.1"
   }
 }
