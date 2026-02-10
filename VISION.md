@@ -28,6 +28,8 @@ Like the underground fungal networks that connect trees in a forest, Mycelium co
          |
     Shepherd evaluates results
          |
+    Max Alignment audits repo health
+         |
     Memory captures patterns
          |
          v
@@ -69,6 +71,10 @@ Like the underground fungal networks that connect trees in a forest, Mycelium co
 - Health state persistence (survives restarts via DB-backed agent_stats)
 - Startup safety (orphaned tasks/worktrees cleaned, no token burn on restart)
 - Unified execution pipeline (manual runs get same context enrichment as scheduler)
+- Max Alignment agent (repo-level health audit, runtime verification, doc rewriting, cruft cleanup)
+- Agent adapter architecture (10 per-agent adapters behind common interface)
+- Query domain split (11 files under db/queries/)
+- Drizzle migrations (replacing raw SQL initDb)
 - Memory patterns and warnings injected into task context
 
 ## Current Focus

@@ -1,3 +1,5 @@
+> **HISTORICAL** - Completed 2026-02-04. Architecture has since been refactored to per-agent adapters in `agents/adapters/`.
+
 # Agent Expansion Implementation
 
 > Adding 5 new agents and expanding provider support in mycelium-v2

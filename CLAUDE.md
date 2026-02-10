@@ -22,7 +22,7 @@
 ### Dev Management Script (Recommended)
 
 ```bash
-cd ~/repos/mycelium-v2
+cd ~/mycelium-v2
 bun run dev:manage start       # Start backend + frontend
 bun run dev:manage stop        # Stop all services
 bun run dev:manage restart     # Restart all services

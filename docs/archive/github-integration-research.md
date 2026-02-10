@@ -1,3 +1,5 @@
+> **HISTORICAL** - Research from 2026-02-06. Findings have been implemented. See docs/archive/github-network-integration-plan.md for the plan.
+
 # GitHub Integration Research for Mycelium v2
 
 Research conducted: 2026-02-06

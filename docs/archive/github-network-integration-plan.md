@@ -1,3 +1,5 @@
+> **HISTORICAL** - Plan from 2026-02-06. Most phases have been implemented. See PROGRESS.md for current state.
+
 # GitHub Network Integration Plan
 
 Deep research completed 2026-02-06. 5 research agents, 59 repos analyzed, full API/ecosystem audit.

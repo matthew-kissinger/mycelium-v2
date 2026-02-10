@@ -19,7 +19,7 @@ NixOS gets the full declarative treatment with flakes and home-manager.
 
 ```bash
 # Enter development shell
-cd ~/repos/mycelium-v2
+cd ~/mycelium-v2
 nix develop
 
 # Build packages
@@ -34,7 +34,7 @@ Add to your `flake.nix` inputs:
 ```nix
 {
   inputs = {
-    mycelium.url = "github:yourusername/mycelium-v2";
+    mycelium.url = "github:matthew-kissinger/mycelium-v2";
     # or local:
     # mycelium.url = "path:/home/dev/repos/mycelium-v2";
   };
@@ -114,7 +114,7 @@ For running Mycelium as a system service:
 ```bash
 # Install direnv hook in your shell config
 # Then allow the project:
-cd ~/repos/mycelium-v2
+cd ~/mycelium-v2
 direnv allow
 
 # The Nix shell activates automatically when entering the directory
@@ -142,7 +142,7 @@ sudo dnf install nodejs
 ### Installation
 
 ```bash
-cd ~/repos/mycelium-v2
+cd ~/mycelium-v2
 
 # Install dependencies
 bun install
@@ -225,7 +225,7 @@ brew install node@22
 Same as Linux:
 
 ```bash
-cd ~/repos/mycelium-v2
+cd ~/mycelium-v2
 bun install
 bun run build
 cd packages/cli && bun link
@@ -361,12 +361,17 @@ Mycelium dispatches to these agent CLIs (must be in PATH):
 | Agent | Command | Installation |
 |-------|---------|--------------|
 | Claude Code | `claude` | `npm install -g @anthropic-ai/claude-code` |
-| Codex | `codex` | Codex CLI |
-| Gemini | `gemini` | Gemini CLI |
+| Codex | `codex` | `bun install -g @openai/codex` |
+| Gemini | `gemini` | `bun install -g @anthropic-ai/gemini-cli` |
 | Cline | `cline` | Cline CLI |
 | Cursor | `agent` | Cursor Agent CLI |
+| Kiro | `kiro-cli` | AWS Kiro CLI |
+| Vibe | `vibe` | Mistral Vibe CLI |
+| Pi | `pi` | Pi coding agent |
+| OpenCode | `opencode` | OpenCode CLI |
+| Copilot | `copilot` | GitHub Copilot CLI |
 
-Configure available agents in `~/.config/mycelium-v2/agents.json`.
+Agents are auto-detected on startup and managed via the DB-backed registry. Use `mycel registry detect` to re-detect.
 
 ---
 

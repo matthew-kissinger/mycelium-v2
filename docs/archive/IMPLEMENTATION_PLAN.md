@@ -1,3 +1,5 @@
+> **HISTORICAL** - This document is from the initial implementation. The architecture has since been significantly refactored (adapters, pipeline, migrations, registry). See CLAUDE.md and PROGRESS.md for current state.
+
 # Mycelium v2 Implementation Plan
 
 > **Parallel Agent Execution**: Phases marked with same number can run simultaneously.

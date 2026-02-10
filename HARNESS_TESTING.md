@@ -1,7 +1,8 @@
 # Agent Harness Testing Guide
 
 > Test primitives against ALL harnesses before marking phases complete.
-> Source of truth: `packages/server/src/agents/dispatch.ts`
+> Source of truth: `packages/server/src/agents/adapters/` (10 per-agent adapter files behind `AgentAdapter` interface)
+> Dispatch entry point: `packages/server/src/agents/dispatch.ts` (delegates to adapters)
 
 ## Quick Auth Check
 
