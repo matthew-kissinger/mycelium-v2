@@ -18,7 +18,11 @@ import {
   LiveLogViewer,
   ReposPanel,
   InventoryPanel,
+  RegistryPanel,
+  GitHubPanel,
+  MaxAlignmentPanel,
 } from '../panels'
+import { useGitHubStore } from '../stores/githubStore'
 
 interface PanelProps {
   type: PanelType
@@ -50,6 +54,9 @@ export function Panel({ type, nodeId, data, onClose }: PanelProps) {
     logs: `Task Logs${data?.taskTitle ? `: ${(data.taskTitle as string).slice(0, 30)}` : ''}`,
     repos: 'Network Repos',
     inventory: 'Skills & MCPs',
+    registry: 'Agent Registry',
+    github: 'GitHub Integration',
+    maxAlignment: 'Max Alignment',
   }[type || 'scheduler']
 
   return (
@@ -260,6 +267,31 @@ function PanelContent({
           onTriggerArmory={store.triggerArmory}
         />
       )
+
+    case 'registry':
+      return <RegistryPanel />
+
+    case 'github': {
+      const gh = useGitHubStore()
+      return (
+        <GitHubPanel
+          repos={gh.repos}
+          prs={gh.prs}
+          rulesets={gh.rulesets}
+          securityResults={gh.securityResults}
+          loading={gh.loading}
+          error={gh.error}
+          onFetchRepos={gh.fetchRepos}
+          onSetupSecurity={gh.setupSecurity}
+          onGetRulesets={gh.getRulesets}
+          onApplyRulesets={gh.applyRulesets}
+          onMergeTask={gh.mergeTask}
+        />
+      )
+    }
+
+    case 'maxAlignment':
+      return <MaxAlignmentPanel />
 
     default:
       return <div className="text-zinc-500">Unknown panel type</div>

@@ -491,7 +491,7 @@ describe('Max Alignment Cycle', () => {
       expect(startEvent).toBeTruthy()
       const completeEvent = broadcastCalls.find(([ev]) => ev === 'max_alignment:completed')
       expect(completeEvent).toBeTruthy()
-      expect(completeEvent![1].health).toBe('healthy')
+      expect((completeEvent![1] as any).health).toBe('healthy')
     })
 
     test('records failure when dispatch fails', async () => {
@@ -574,7 +574,7 @@ describe('Max Alignment Cycle', () => {
 
       const rewriteEvent = mockBroadcastFn.mock.calls.find(([ev]) => ev === 'max_alignment:claude_md_rewritten')
       expect(rewriteEvent).toBeTruthy()
-      expect(rewriteEvent![1].summary).toBe('Trimmed from 300 to 100 lines')
+      expect((rewriteEvent![1] as any).summary).toBe('Trimmed from 300 to 100 lines')
     })
 
     test('broadcasts cleanup event when files/branches deleted', async () => {
@@ -597,8 +597,8 @@ describe('Max Alignment Cycle', () => {
 
       const cleanupEvent = mockBroadcastFn.mock.calls.find(([ev]) => ev === 'max_alignment:cleanup')
       expect(cleanupEvent).toBeTruthy()
-      expect(cleanupEvent![1].deleted_files).toBe(1)
-      expect(cleanupEvent![1].deleted_branches).toBe(1)
+      expect((cleanupEvent![1] as any).deleted_files).toBe(1)
+      expect((cleanupEvent![1] as any).deleted_branches).toBe(1)
     })
 
     test('broadcasts critical bug event', async () => {
@@ -624,7 +624,7 @@ describe('Max Alignment Cycle', () => {
 
       const bugEvent = mockBroadcastFn.mock.calls.find(([ev]) => ev === 'max_alignment:critical_bug_found')
       expect(bugEvent).toBeTruthy()
-      expect(bugEvent![1].bug_count).toBe(1)
+      expect((bugEvent![1] as any).bug_count).toBe(1)
     })
 
     test('sends telegram notification', async () => {

@@ -381,6 +381,7 @@ describe('dispatcher', () => {
           output: 'Error: something went wrong',
           exit_code: 1,
           duration_seconds: 5,
+          cost_usd: 0,
         }
       })
 
@@ -434,6 +435,7 @@ describe('dispatcher', () => {
           output: 'Crashed',
           exit_code: 1,
           duration_seconds: 2,
+          cost_usd: 0,
         }
       })
 

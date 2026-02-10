@@ -13,6 +13,9 @@ import { useMemoryStore } from './memoryStore'
 import { useRepoStore } from './repoStore'
 import { useInventoryStore } from './inventoryStore'
 import { useAgentStore } from './agentStore'
+import { useRegistryStore } from './registryStore'
+import { useGitHubStore } from './githubStore'
+import { useMaxAlignmentStore } from './maxAlignmentStore'
 
 // Reconnect constants
 const RECONNECT_BASE_MS = 1000
@@ -180,6 +183,98 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     // Scheduler cycle events
     eventSource.addEventListener('scheduler:cycle:completed', () => {
       useSchedulerStore.getState().fetchSchedulerStatus()
+    })
+
+    // Registry events
+    eventSource.addEventListener('registry:agent_detected', () => {
+      useRegistryStore.getState().fetchAgents()
+    })
+    eventSource.addEventListener('registry:provider_refreshed', () => {
+      useRegistryStore.getState().fetchProviders()
+      useRegistryStore.getState().fetchModels()
+    })
+    eventSource.addEventListener('registry:refreshed', () => {
+      useRegistryStore.getState().fetchAgents()
+      useRegistryStore.getState().fetchProviders()
+      useRegistryStore.getState().fetchModels()
+    })
+    eventSource.addEventListener('registry:agent_status', () => {
+      useRegistryStore.getState().fetchAgents()
+      useRegistryStore.getState().fetchHealth()
+    })
+
+    // GitHub events
+    eventSource.addEventListener('github:pr_created', (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        useGitHubStore.getState().addPR({
+          repo_path: data.repo_path,
+          pr_number: data.pr_number,
+          pr_url: data.pr_url,
+          branch: data.branch,
+          title: data.title,
+          status: 'open',
+          timestamp: data.timestamp || new Date().toISOString(),
+        })
+      } catch {
+        // Ignore parse errors
+      }
+    })
+    eventSource.addEventListener('github:pr_merged', (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        useGitHubStore.getState().updatePR(data.repo_path, data.pr_number, { status: 'merged' })
+      } catch {
+        // Ignore parse errors
+      }
+    })
+    eventSource.addEventListener('github:workflow_triggered', () => {
+      useGitHubStore.getState().fetchRepos()
+    })
+    eventSource.addEventListener('github:rulesets_applied', () => {
+      useGitHubStore.getState().fetchRepos()
+    })
+
+    // Max Alignment events
+    eventSource.addEventListener('max_alignment:started', (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        useMaxAlignmentStore.getState().setRunning(data.repo_path || data.repo)
+      } catch {
+        // Ignore parse errors
+      }
+    })
+    eventSource.addEventListener('max_alignment:completed', (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        useMaxAlignmentStore.getState().setCompleted({
+          repo_path: data.repo_path,
+          repo_name: data.repo_name || data.repo_path?.split('/').pop() || '',
+          health: data.health || 'warning',
+          headline: data.headline || 'Completed',
+          findings: data.findings || [],
+          timestamp: data.timestamp || new Date().toISOString(),
+          duration_seconds: data.duration_seconds,
+        })
+      } catch {
+        // Ignore parse errors
+      }
+    })
+    eventSource.addEventListener('max_alignment:failed', (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        useMaxAlignmentStore.getState().setFailed(data.error || 'Unknown error')
+      } catch {
+        // Ignore parse errors
+      }
+    })
+    eventSource.addEventListener('max_alignment:finding', (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        useMaxAlignmentStore.getState().addFinding(data)
+      } catch {
+        // Ignore parse errors
+      }
     })
 
     // Error handling with auto-reconnect

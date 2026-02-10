@@ -6,6 +6,9 @@ import { useEffect } from 'react'
 import { useUIStore } from '../stores/uiStore'
 import { useSystemStore } from '../stores/system'
 import { useSchedulerStore } from '../stores/schedulerStore'
+import { useRegistryStore } from '../stores/registryStore'
+import { useGitHubStore } from '../stores/githubStore'
+import { useMaxAlignmentStore } from '../stores/maxAlignmentStore'
 import type { PanelType } from '../flow/types'
 
 interface SidebarItem {
@@ -179,6 +182,18 @@ export function LeftSidebar() {
           getValue: getShepherdValue,
           subItems: shepherdSubItems,
         },
+        {
+          type: 'maxAlignment' as PanelType,
+          label: 'Max Align',
+          shortLabel: 'MAX',
+          nodeId: 'max-alignment',
+          getValue: () => {
+            const s = useMaxAlignmentStore.getState()
+            if (s.status === 'running') return 'running'
+            if (s.lastRun) return s.lastRun.health
+            return 'idle'
+          },
+        },
       ],
     },
     {
@@ -279,6 +294,20 @@ export function LeftSidebar() {
             return formatNextRun(c?.next_run, c?.last_run)
           },
         },
+        {
+          type: 'registry' as PanelType,
+          label: 'Registry',
+          shortLabel: 'REG',
+          nodeId: 'registry',
+          getValue: () => {
+            const r = useRegistryStore.getState()
+            if (r.agents.length > 0) {
+              const online = r.agents.filter(a => a.status === 'online').length
+              return `${online}/${r.agents.length}`
+            }
+            return '-'
+          },
+        },
       ],
     },
     {
@@ -302,6 +331,18 @@ export function LeftSidebar() {
           label: 'Repos',
           shortLabel: 'REP',
           getValue: () => `${repos.length}`,
+        },
+        {
+          type: 'github' as PanelType,
+          label: 'GitHub',
+          shortLabel: 'GH',
+          nodeId: 'github',
+          getValue: () => {
+            const gh = useGitHubStore.getState()
+            const synced = gh.repos.filter(r => r.synced).length
+            if (gh.repos.length > 0) return `${synced}/${gh.repos.length}`
+            return '-'
+          },
         },
         {
           type: 'inventory',

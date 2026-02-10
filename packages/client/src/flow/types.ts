@@ -140,6 +140,9 @@ export type PanelType =
   | 'logs'
   | 'repos'
   | 'inventory'
+  | 'registry'
+  | 'github'
+  | 'maxAlignment'
   | null
 
 export interface PanelState {

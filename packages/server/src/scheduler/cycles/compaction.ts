@@ -290,7 +290,7 @@ async function compactRepoMemory(repoPath: string, repoName: string): Promise<Co
   })
 
   if (!result.success) {
-    console.log(`[Compaction] ${repoName}: Agent failed - ${result.error || 'unknown error'}`)
+    console.log(`[Compaction] ${repoName}: Agent failed - ${result.output || 'unknown error'}`)
     return null
   }
 

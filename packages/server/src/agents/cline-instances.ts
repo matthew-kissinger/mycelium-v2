@@ -69,7 +69,7 @@ export async function acquireClineInstance(): Promise<string> {
 
     // Wrap resolve to clear the timeout
     const originalResolve = entry.resolve
-    entry.resolve = (addr: string) => {
+    entry.resolve = (addr: string | PromiseLike<string>) => {
       clearTimeout(timer)
       originalResolve(addr)
     }

@@ -6,6 +6,7 @@
 import { useEffect, lazy, Suspense } from 'react'
 import { useUIStore } from '../stores/uiStore'
 import { useSystemStore } from '../stores/system'
+import { useGitHubStore } from '../stores/githubStore'
 import type { PanelType } from '../flow/types'
 
 // Lazy load panel components for code splitting
@@ -19,6 +20,9 @@ const PromptsPanel = lazy(() => import('../panels/PromptsPanel').then(m => ({ de
 const LiveLogViewer = lazy(() => import('../panels/LogsPanel').then(m => ({ default: m.LiveLogViewer })))
 const ReposPanel = lazy(() => import('../panels/ReposPanel').then(m => ({ default: m.ReposPanel })))
 const InventoryPanel = lazy(() => import('../panels/InventoryPanel').then(m => ({ default: m.InventoryPanel })))
+const RegistryPanel = lazy(() => import('../panels/RegistryPanel').then(m => ({ default: m.RegistryPanel })))
+const GitHubPanel = lazy(() => import('../panels/GitHubPanel').then(m => ({ default: m.GitHubPanel })))
+const MaxAlignmentPanel = lazy(() => import('../panels/MaxAlignmentPanel').then(m => ({ default: m.MaxAlignmentPanel })))
 
 // Loading fallback for lazy-loaded panels
 function PanelLoadingFallback() {
@@ -62,6 +66,9 @@ export function RightPanel() {
     logs: `Task Logs${panel.data?.taskTitle ? `: ${(panel.data.taskTitle as string).slice(0, 30)}` : ''}`,
     repos: 'Network Repos',
     inventory: 'Skills & MCPs',
+    registry: 'Agent Registry',
+    github: 'GitHub Integration',
+    maxAlignment: 'Max Alignment',
   }
 
   return (
@@ -263,7 +270,35 @@ function PanelContent({ type, data, nodeId }: { type: PanelType; data?: Record<s
         />
       )
 
+    case 'registry':
+      return <RegistryPanel />
+
+    case 'github':
+      return <GitHubPanelWrapper />
+
+    case 'maxAlignment':
+      return <MaxAlignmentPanel />
+
     default:
       return <div className="text-zinc-500 text-sm">Unknown panel: {type}</div>
   }
+}
+
+function GitHubPanelWrapper() {
+  const gh = useGitHubStore()
+  return (
+    <GitHubPanel
+      repos={gh.repos}
+      prs={gh.prs}
+      rulesets={gh.rulesets}
+      securityResults={gh.securityResults}
+      loading={gh.loading}
+      error={gh.error}
+      onFetchRepos={gh.fetchRepos}
+      onSetupSecurity={gh.setupSecurity}
+      onGetRulesets={gh.getRulesets}
+      onApplyRulesets={gh.applyRulesets}
+      onMergeTask={gh.mergeTask}
+    />
+  )
 }

@@ -882,9 +882,9 @@ describe('runShepherdCycle - SSE events', () => {
     const completedEvents = mockBroadcastFn.mock.calls.filter((c) => c[0] === 'agent:completed')
 
     expect(startEvents.length).toBe(1)
-    expect(startEvents[0][1].agent_type).toBe('shepherd')
+    expect((startEvents[0][1] as any).agent_type).toBe('shepherd')
     expect(completedEvents.length).toBe(1)
-    expect(completedEvents[0][1].agent_type).toBe('shepherd')
+    expect((completedEvents[0][1] as any).agent_type).toBe('shepherd')
   })
 
   test('registers and unregisters active run', async () => {

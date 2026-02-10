@@ -76,6 +76,13 @@ export const SSEEventType = z.enum([
   'registry:refreshed',
   'registry:agent_status',
 
+  // Max Alignment events
+  'max_alignment:started',
+  'max_alignment:completed',
+  'max_alignment:claude_md_rewritten',
+  'max_alignment:cleanup',
+  'max_alignment:critical_bug_found',
+
   // System events
   'system:heartbeat',
   'system:error',

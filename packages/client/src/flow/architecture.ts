@@ -260,6 +260,45 @@ export const compactionNode: Node<CycleNodeData> = {
   },
 }
 
+// --- New nodes ---
+
+export const registryNode: Node = {
+  id: 'registry',
+  type: 'registry',
+  position: pos(80, 380),
+  data: {
+    label: 'Registry',
+    agent_count: 0,
+    provider_count: 0,
+    status: 'healthy',
+  },
+}
+
+export const githubNode: Node = {
+  id: 'github',
+  type: 'github',
+  position: pos(620, 380),
+  data: {
+    label: 'GitHub',
+    synced_count: 0,
+    total_repos: 0,
+    active_prs: 0,
+    status: 'idle',
+  },
+}
+
+export const maxAlignmentNode: Node = {
+  id: 'max-alignment',
+  type: 'maxAlignment',
+  position: pos(350, 880),
+  data: {
+    label: 'Max Alignment',
+    status: 'idle',
+    lastHealth: undefined,
+    lastRepo: undefined,
+  },
+}
+
 // =============================================================================
 // All Nodes (all visible)
 // =============================================================================
@@ -273,13 +312,16 @@ export const SYSTEM_NODES: Node[] = [
   agentSlotsNode,
   shepherdNode,
   memoryNode,
+  maxAlignmentNode,
   // Right column - data/analysis
   reposNode,
+  githubNode,
   digestNode,
   healthCheckNode,
   // Left column - support/monitoring
   alignmentNode,
   blockedCheckNode,
+  registryNode,
   armoryNode,
   compactionNode,
 ]
@@ -469,6 +511,42 @@ export const SYSTEM_EDGES: Edge[] = [
     target: 'memory',
     sourceHandle: 'right',
     targetHandle: 'left',
+    type: 'smoothstep',
+    style: supportEdgeStyle,
+    markerEnd: supportArrowMarker,
+  },
+
+  // === New feature edges ===
+
+  // Shepherd -> Max Alignment (triggered after N shepherd evaluations)
+  {
+    id: 'e-shepherd-maxalignment',
+    source: 'shepherd',
+    target: 'max-alignment',
+    sourceHandle: 'bottom',
+    targetHandle: 'top',
+    type: 'smoothstep',
+    style: supportEdgeStyle,
+    markerEnd: supportArrowMarker,
+  },
+  // Registry -> Dispatcher (left column to center)
+  {
+    id: 'e-registry-dispatcher',
+    source: 'registry',
+    target: 'dispatcher',
+    sourceHandle: 'right',
+    targetHandle: 'left',
+    type: 'smoothstep',
+    style: supportEdgeStyle,
+    markerEnd: supportArrowMarker,
+  },
+  // Repos -> GitHub (right column, repos above github)
+  {
+    id: 'e-repos-github',
+    source: 'repos',
+    target: 'github',
+    sourceHandle: 'bottom',
+    targetHandle: 'top',
     type: 'smoothstep',
     style: supportEdgeStyle,
     markerEnd: supportArrowMarker,

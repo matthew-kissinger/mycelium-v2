@@ -242,7 +242,7 @@ async function buildDigestContext(since: Date, periodHours: number): Promise<Dig
   const recentFailures = recentFailed.slice(0, 15).map((t) => ({
     title: t.title,
     agent: t.agent ?? 'claude',
-    model: t.model,
+    model: t.model ?? undefined,
     error: t.error?.slice(0, 200),
     repo: t.repo_path,
   }))
@@ -253,7 +253,7 @@ async function buildDigestContext(since: Date, periodHours: number): Promise<Dig
   for (const [key, h] of Object.entries(healthSummary)) {
     agentHealth[key] = {
       status: h.status as 'healthy' | 'degraded' | 'quota_exceeded' | 'error',
-      reason: h.error,
+      reason: h.lastError,
     }
   }
 
