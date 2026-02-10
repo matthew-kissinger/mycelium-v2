@@ -40,14 +40,15 @@ const FALLBACK_MODEL_MAP: Record<string, Record<string, string | null>> = {
     'gemini-3-flash': 'composer-1',
     'gpt-5.2-codex': 'composer-1',
     'sonnet-4.5': 'composer-1',
-    'composer-1': 'opus-4.6-thinking',
+    'composer-1': 'composer-1.5',
+    'composer-1.5': 'opus-4.6-thinking',
     'opus-4.6-thinking': null,
   },
 }
 
 const CROSS_AGENT_FALLBACK: Record<string, { agent: string; model: string }> = {
   claude: { agent: 'codex', model: 'gpt-5.2-codex' },
-  codex: { agent: 'cursor', model: 'composer-1' },
+  codex: { agent: 'cursor', model: 'composer-1.5' },
   cursor: { agent: 'claude', model: 'sonnet' },
   gemini: { agent: 'pi', model: 'google/gemini-2.5-flash' },
   cline: { agent: 'pi', model: 'qwen/qwen3-coder' },

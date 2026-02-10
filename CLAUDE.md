@@ -238,7 +238,7 @@ models (id, provider_id, model_id, context_window, cost_input, cost_output, free
 ### Fallback & Health
 
 - Fallback chains: auto-retry with more capable model on failure (up to 2 retries)
-- Cross-agent fallback: codex->cursor, pi->opencode, opencode->gemini, vibe->cline
+- Cross-agent fallback: codex->cursor/composer-1.5, pi->opencode, opencode->gemini, vibe->cline
 - Quota tracking: Gemini, Groq, Cerebras, Codex (auto-backoff until reset)
 - OpenRouter credit monitoring: live balance via `/api/health`
 - Health state DB-backed (survives restarts)

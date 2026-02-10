@@ -86,12 +86,20 @@ export async function runCompactionCycle(config: SchedulerConfig): Promise<void>
 
     const repoResults: string[] = []
     let totalRemoved = 0
+    let totalPatternsBefore = 0
+    let totalPatternsAfter = 0
+    let totalWarningsBefore = 0
+    let totalWarningsAfter = 0
 
     // For each repo, run intelligent compaction
     for (const repo of repos) {
       const result = await compactRepoMemory(repo.path, repo.name)
       if (result) {
         totalRemoved += result.removed
+        totalPatternsBefore += result.patternsBefore
+        totalPatternsAfter += result.patternsAfter
+        totalWarningsBefore += result.warningsBefore
+        totalWarningsAfter += result.warningsAfter
         if (result.removed > 0 || result.changed) {
           repoResults.push(`${repo.name}: -${result.removed}`)
         }
@@ -120,13 +128,14 @@ export async function runCompactionCycle(config: SchedulerConfig): Promise<void>
       timestamp: new Date().toISOString(),
     })
 
-    // Broadcast compaction-specific event with memory stats
+    // Broadcast compaction-specific event with actual memory stats
     broadcast('memory:compaction_completed', {
       type: 'memory:compaction_completed',
-      patterns_before: 0, // Exact counts not tracked in auto cycle
-      patterns_after: 0,
-      warnings_before: 0,
-      warnings_after: 0,
+      patterns_before: totalPatternsBefore,
+      patterns_after: totalPatternsAfter,
+      warnings_before: totalWarningsBefore,
+      warnings_after: totalWarningsAfter,
+      repos_processed: repos.length,
       timestamp: new Date().toISOString(),
     })
   } catch (error) {
@@ -230,7 +239,16 @@ export async function runCompactionCycleManual(config: SchedulerConfig): Promise
  * Compact memory for a single repo using Haiku.
  * Agent outputs new memory directly - we replace old with new.
  */
-async function compactRepoMemory(repoPath: string, repoName: string): Promise<{ removed: number; changed: boolean } | null> {
+interface CompactResult {
+  removed: number
+  changed: boolean
+  patternsBefore: number
+  patternsAfter: number
+  warningsBefore: number
+  warningsAfter: number
+}
+
+async function compactRepoMemory(repoPath: string, repoName: string): Promise<CompactResult | null> {
   // Get current patterns and warnings
   const patterns = await queries.getPatterns({ repo_path: repoPath, limit: 200 })
   const warnings = await queries.getWarnings({ repo_path: repoPath, limit: 200 })
@@ -241,13 +259,13 @@ async function compactRepoMemory(repoPath: string, repoName: string): Promise<{ 
   // Skip if no memory to compact
   if (patternsBefore === 0 && warningsBefore === 0) {
     console.log(`[Compaction] ${repoName}: No memory to compact`)
-    return { removed: 0, changed: false }
+    return { removed: 0, changed: false, patternsBefore: 0, patternsAfter: 0, warningsBefore: 0, warningsAfter: 0 }
   }
 
   // For very small memory sets, skip agent (not worth the API call)
   if (patternsBefore < 3 && warningsBefore < 2) {
     console.log(`[Compaction] ${repoName}: Memory too small to compact (${patternsBefore}p/${warningsBefore}w)`)
-    return { removed: 0, changed: false }
+    return { removed: 0, changed: false, patternsBefore, patternsAfter: patternsBefore, warningsBefore, warningsAfter: warningsBefore }
   }
 
   console.log(`[Compaction] ${repoName}: Analyzing ${patternsBefore} patterns, ${warningsBefore} warnings`)
@@ -296,7 +314,14 @@ async function compactRepoMemory(repoPath: string, repoName: string): Promise<{ 
     console.log(`[Compaction] ${repoName}: No changes needed`)
   }
 
-  return { removed: applied.removed, changed: applied.removed > 0 || applied.added > 0 }
+  return {
+    removed: applied.removed,
+    changed: applied.removed > 0 || applied.added > 0,
+    patternsBefore,
+    patternsAfter: output.patterns.length,
+    warningsBefore,
+    warningsAfter: output.warnings.length,
+  }
 }
 
 /**
@@ -479,7 +504,7 @@ async function sendCompactionNotification(
     }
   }
 
-  await telegram.sendMessage(lines.join('\n'), { parse_mode: 'HTML' }).catch((e) => {
+  await telegram.sendMessage(lines.join('\n')).catch((e) => {
     console.error('[Compaction] Telegram send error:', e)
   })
 }

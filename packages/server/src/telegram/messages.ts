@@ -402,32 +402,6 @@ export function formatSignalQuestion(signal: SignalInfo): string {
   return message
 }
 
-export function formatSignalButtons(signal: SignalInfo): string[][] {
-  if (!signal.options || signal.options.length === 0) {
-    return []
-  }
-
-  // Create buttons with callback data that includes signal ID
-  // Format: signal:uuid:response
-  const buttons: string[][] = []
-  let row: string[] = []
-
-  for (const opt of signal.options) {
-    row.push(opt)
-    // 2 buttons per row for better mobile display
-    if (row.length >= 2) {
-      buttons.push(row)
-      row = []
-    }
-  }
-
-  if (row.length > 0) {
-    buttons.push(row)
-  }
-
-  return buttons
-}
-
 // =============================================================================
 // Notification Messages
 // =============================================================================

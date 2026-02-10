@@ -10,7 +10,7 @@
  * Matches v1 behavior from telegram_poller.py
  */
 
-import { eq, desc } from 'drizzle-orm'
+import { eq, desc, sql } from 'drizzle-orm'
 import { spawn } from 'bun'
 import { db, schema } from '../db'
 import * as queries from '../db/queries'
@@ -585,9 +585,7 @@ async function handleCallbackQuery(
     }
 
     // Acknowledge callback
-    if ('answerCallbackQuery' in telegram) {
-      await (telegram as any).answerCallbackQuery(query.id, 'Response recorded')
-    }
+    await telegram.answerCallbackQuery(query.id, 'Response recorded')
     return
   }
 
@@ -613,9 +611,7 @@ async function handleCallbackQuery(
   }
 
   // Acknowledge unknown callback
-  if ('answerCallbackQuery' in telegram) {
-    await (telegram as any).answerCallbackQuery(query.id)
-  }
+  await telegram.answerCallbackQuery(query.id)
 }
 
 /**
@@ -669,26 +665,34 @@ async function handleCommand(
  * Send system status message.
  */
 async function sendStatusMessage(telegram: TelegramService): Promise<void> {
-  const tasks = await db.select().from(schema.tasks)
-  const pending = tasks.filter((t) => t.status === 'pending').length
-  const running = tasks.filter((t) => t.status === 'running').length
-  const done = tasks.filter((t) => t.status === 'done').length
-  const failed = tasks.filter((t) => t.status === 'failed').length
+  // Use SQL aggregation instead of loading all tasks into memory
+  const taskCounts = await db
+    .select({
+      status: schema.tasks.status,
+      count: sql<number>`count(*)`.as('count'),
+    })
+    .from(schema.tasks)
+    .groupBy(schema.tasks.status)
 
-  const pendingSignals = await db
-    .select()
+  const counts: Record<string, number> = {}
+  for (const row of taskCounts) {
+    counts[row.status] = row.count
+  }
+
+  const signalCount = await db
+    .select({ count: sql<number>`count(*)`.as('count') })
     .from(schema.signals)
     .where(eq(schema.signals.status, 'pending'))
 
   const message =
     `<b>Mycelium Status</b>\n\n` +
     `<b>Tasks:</b>\n` +
-    `  Pending: ${pending}\n` +
-    `  Running: ${running}\n` +
-    `  Completed: ${done}\n` +
-    `  Failed: ${failed}\n\n` +
+    `  Pending: ${counts['pending'] ?? 0}\n` +
+    `  Running: ${counts['running'] ?? 0}\n` +
+    `  Completed: ${counts['done'] ?? 0}\n` +
+    `  Failed: ${counts['failed'] ?? 0}\n\n` +
     `<b>Signals:</b>\n` +
-    `  Pending: ${pendingSignals.length}`
+    `  Pending: ${signalCount[0]?.count ?? 0}`
 
   await telegram.sendMessage(message)
 }

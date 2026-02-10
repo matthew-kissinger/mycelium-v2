@@ -55,40 +55,38 @@ Review the current patterns and warnings for this repository and output a cleane
 
 ## Output Format
 
-Output the cleaned-up memory in this YAML format:
+Output the cleaned-up memory in this XML format (no backtick fencing):
 
-\`\`\`yaml
-summary:
-  patterns_before: 15
-  patterns_after: 8
-  warnings_before: 5
-  warnings_after: 3
-  health: good  # good, needs_attention, or cluttered
+<compaction_result health="good|needs_attention|cluttered">
+  <headline>Brief summary of changes made</headline>
+  <summary>
+    <patterns before="15" after="8"/>
+    <warnings before="5" after="3"/>
+  </summary>
+  <patterns>
+    <pattern tags="validation,zod,api">Validate all API inputs using Zod schemas defined in src/schemas/</pattern>
+    <pattern tags="state,react-query,zustand">Use React Query for server state, Zustand for client state</pattern>
+    <pattern tags="testing,ci">Run bun test before committing - CI will fail on test failures</pattern>
+  </patterns>
+  <warnings>
+    <warning severity="medium">Payment webhook can timeout under load - needs retry logic</warning>
+    <warning severity="low">Legacy auth endpoints still in use by mobile app v2.x</warning>
+  </warnings>
+  <removed>
+    <item reason="duplicate">Use Zod for validation (merged into comprehensive pattern)</item>
+    <item reason="stale">Auth v1 endpoint is flaky (v2 shipped)</item>
+    <item reason="merged">Always run tests (merged into testing pattern)</item>
+  </removed>
+  <notes>Consolidated 3 Zod patterns into one. Removed 2 stale warnings about old auth system.</notes>
+</compaction_result>
 
-patterns:
-  - content: "Validate all API inputs using Zod schemas defined in src/schemas/"
-    tags: ["validation", "zod", "api"]
-  - content: "Use React Query for server state, Zustand for client state"
-    tags: ["state", "react-query", "zustand"]
-  - content: "Run bun test before committing - CI will fail on test failures"
-    tags: ["testing", "ci"]
+You MUST output the <compaction_result> XML block. The system parses it to update the repository's memory state.
 
-warnings:
-  - content: "Payment webhook can timeout under load - needs retry logic"
-    severity: medium
-  - content: "Legacy auth endpoints still in use by mobile app v2.x"
-    severity: low
-
-removed:
-  - "Duplicate: 'Use Zod for validation' (merged into comprehensive pattern)"
-  - "Stale: 'Auth v1 endpoint is flaky' (v2 shipped)"
-  - "Duplicate: 'Always run tests' (merged into testing pattern)"
-
-notes: "Consolidated 3 Zod patterns into one. Removed 2 stale warnings about old auth system."
-\`\`\`
-
-If the memory is already clean (no changes needed), output it as-is with summary showing before = after counts.
-If there are no patterns or warnings, output empty arrays.
+Notes:
+- If the memory is already clean (no changes needed), output it as-is with before = after counts
+- If there are no patterns or warnings, output empty sections
+- The "removed" section helps track what was cleaned up and why
+- Valid reasons for removal: duplicate, stale, merged, irrelevant
 `
 
 // =============================================================================
@@ -176,7 +174,7 @@ export function buildCompactionPrompt(
   dataParts.push('')
   dataParts.push('---')
   dataParts.push('')
-  dataParts.push('Output the cleaned-up memory in the YAML format specified above.')
+  dataParts.push('Analyze this memory and output the <compaction_result> XML block.')
   dataParts.push('Your output becomes the new memory state for this repository.')
 
   return `${prompt}\n\n${dataParts.join('\n')}`
@@ -194,6 +192,7 @@ export interface CompactionOutput {
     warnings_after: number
     health: 'good' | 'needs_attention' | 'cluttered'
   }
+  headline?: string
   patterns: Array<{
     content: string
     tags?: string[]
@@ -207,10 +206,115 @@ export interface CompactionOutput {
 }
 
 /**
- * Parse Compaction agent YAML output.
+ * Parse Compaction agent output.
+ * Tries XML first, falls back to legacy YAML for backwards compatibility.
  */
 export function parseCompactionOutput(output: string): CompactionOutput | null {
-  // Extract YAML block
+  // Try XML first
+  const xmlResult = parseCompactionXml(output)
+  if (xmlResult) return xmlResult
+
+  // Fallback: try legacy YAML format
+  return parseCompactionYamlLegacy(output)
+}
+
+function parseCompactionXml(output: string): CompactionOutput | null {
+  const blockMatch = output.match(
+    /<compaction_result\s+health="(good|needs_attention|cluttered)">([\s\S]*?)<\/compaction_result>/
+  )
+  if (!blockMatch) return null
+
+  const health = blockMatch[1] as NonNullable<CompactionOutput['summary']>['health']
+  const body = blockMatch[2]
+
+  const result: CompactionOutput = {
+    patterns: [],
+    warnings: [],
+    removed: [],
+  }
+
+  // Headline
+  const headlineMatch = body.match(/<headline>([\s\S]*?)<\/headline>/)
+  if (headlineMatch) result.headline = headlineMatch[1].trim()
+
+  // Summary
+  const summaryBlock = body.match(/<summary>([\s\S]*?)<\/summary>/)
+  if (summaryBlock) {
+    const sb = summaryBlock[1]
+    const patternsMatch = sb.match(/<patterns\s+before="(\d+)"\s+after="(\d+)"/)
+    const warningsMatch = sb.match(/<warnings\s+before="(\d+)"\s+after="(\d+)"/)
+    result.summary = {
+      patterns_before: patternsMatch ? +patternsMatch[1] : 0,
+      patterns_after: patternsMatch ? +patternsMatch[2] : 0,
+      warnings_before: warningsMatch ? +warningsMatch[1] : 0,
+      warnings_after: warningsMatch ? +warningsMatch[2] : 0,
+      health,
+    }
+  } else {
+    // Even without summary block, set health from root attribute
+    result.summary = {
+      patterns_before: 0,
+      patterns_after: 0,
+      warnings_before: 0,
+      warnings_after: 0,
+      health,
+    }
+  }
+
+  // Patterns
+  const patternsBlock = body.match(/<patterns>([\s\S]*?)<\/patterns>/)
+  if (patternsBlock) {
+    const patternRegex = /<pattern(?:\s+tags="([^"]*)")?\s*>([\s\S]*?)<\/pattern>/g
+    let m
+    while ((m = patternRegex.exec(patternsBlock[1])) !== null) {
+      result.patterns.push({
+        content: m[2].trim(),
+        tags: m[1] ? m[1].split(',').map(t => t.trim()) : undefined,
+      })
+    }
+  }
+
+  // Warnings
+  const warningsBlock = body.match(/<warnings>([\s\S]*?)<\/warnings>/)
+  if (warningsBlock) {
+    const warningRegex = /<warning(?:\s+severity="([^"]*)")?\s*>([\s\S]*?)<\/warning>/g
+    let m
+    while ((m = warningRegex.exec(warningsBlock[1])) !== null) {
+      result.warnings.push({
+        content: m[2].trim(),
+        severity: m[1] || 'medium',
+      })
+    }
+  }
+
+  // Removed items
+  const removedBlock = body.match(/<removed>([\s\S]*?)<\/removed>/)
+  if (removedBlock) {
+    const itemRegex = /<item(?:\s+reason="([^"]*)")?\s*>([\s\S]*?)<\/item>/g
+    let m
+    while ((m = itemRegex.exec(removedBlock[1])) !== null) {
+      const reason = m[1] ? `${m[1].charAt(0).toUpperCase() + m[1].slice(1)}: ` : ''
+      result.removed!.push(`${reason}${m[2].trim()}`)
+    }
+  }
+
+  // Notes
+  const notesMatch = body.match(/<notes>([\s\S]*?)<\/notes>/)
+  if (notesMatch) result.notes = notesMatch[1].trim()
+
+  // Update summary after counts if we parsed patterns/warnings
+  if (result.summary) {
+    result.summary.patterns_after = result.patterns.length
+    result.summary.warnings_after = result.warnings.length
+  }
+
+  return result
+}
+
+/**
+ * Legacy YAML parser for backwards compatibility.
+ */
+function parseCompactionYamlLegacy(output: string): CompactionOutput | null {
   const yamlMatch = output.match(/```yaml\n([\s\S]*?)```/)
   if (!yamlMatch) return null
 
@@ -236,26 +340,22 @@ export function parseCompactionOutput(output: string): CompactionOutput | null {
         result.summary = { patterns_before: 0, patterns_after: 0, warnings_before: 0, warnings_after: 0, health: 'good' }
       } else if (trimmed === 'patterns:') {
         currentSection = 'patterns'
-        // Save any pending item from previous section
         if (currentItem && currentSection !== 'patterns') {
           currentItem = null
         }
       } else if (trimmed === 'warnings:') {
-        // Save pending pattern
         if (currentSection === 'patterns' && currentItem?.content) {
           result.patterns.push(currentItem as { content: string; tags?: string[] })
         }
         currentSection = 'warnings'
         currentItem = null
       } else if (trimmed === 'removed:') {
-        // Save pending warning
         if (currentSection === 'warnings' && currentItem?.content) {
           result.warnings.push(currentItem as { content: string; severity: string })
         }
         currentSection = 'removed'
         currentItem = null
       } else if (trimmed.startsWith('notes:')) {
-        // Save pending warning
         if (currentSection === 'warnings' && currentItem?.content) {
           result.warnings.push(currentItem as { content: string; severity: string })
         }
@@ -275,9 +375,9 @@ export function parseCompactionOutput(output: string): CompactionOutput | null {
         } else if (trimmed.startsWith('warnings_after:')) {
           result.summary.warnings_after = parseInt(trimmed.split(':')[1].trim())
         } else if (trimmed.startsWith('health:')) {
-          const health = trimmed.split(':')[1].trim()
-          if (health === 'good' || health === 'needs_attention' || health === 'cluttered') {
-            result.summary.health = health
+          const h = trimmed.split(':')[1].trim()
+          if (h === 'good' || h === 'needs_attention' || h === 'cluttered') {
+            result.summary.health = h
           }
         }
       }
@@ -285,7 +385,6 @@ export function parseCompactionOutput(output: string): CompactionOutput | null {
       // Patterns
       if (currentSection === 'patterns') {
         if (trimmed.startsWith('- content:')) {
-          // Save previous pattern
           if (currentItem?.content) {
             result.patterns.push(currentItem as { content: string; tags?: string[] })
           }
@@ -303,7 +402,6 @@ export function parseCompactionOutput(output: string): CompactionOutput | null {
       // Warnings
       if (currentSection === 'warnings') {
         if (trimmed.startsWith('- content:')) {
-          // Save previous warning
           if (currentItem?.content) {
             result.warnings.push(currentItem as { content: string; severity: string })
           }
@@ -315,7 +413,7 @@ export function parseCompactionOutput(output: string): CompactionOutput | null {
         }
       }
 
-      // Removed items (simple string list)
+      // Removed items
       if (currentSection === 'removed') {
         if (trimmed.startsWith('- "') || trimmed.startsWith("- '") || trimmed.startsWith('- ')) {
           const item = trimmed.replace(/^- ["']?|["']?$/g, '')
