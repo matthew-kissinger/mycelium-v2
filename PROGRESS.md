@@ -11,9 +11,23 @@
 - Agent dispatch (10 agents: Claude, Codex, Gemini, Cline, Cursor, Kiro, Vibe, Pi, OpenCode, Copilot)
 - Provider support (12 providers: anthropic, openai, google, cursor, aws, github, openrouter, cline, mistral, groq, cerebras, opencode-zen)
 - Dynamic registry (DB-backed agents/providers/models with auto-detection and API model fetching)
-- Frontend (three-column layout, React Flow)
+- Frontend (three-column layout, React Flow, Registry/GitHub/Max panels)
 - CLI, MCP server
 - GitHub integration (PRs, webhooks, security scanning, rulesets, merge queue)
+
+**Recent Work** (2026-02-12):
+- Frontend Integration: Registry, GitHub, and Max Alignment panels (39 files, 2400+ lines)
+  - Registry Panel: Matrix view (4 tabs), status indicators, 14 API endpoints wired
+  - GitHub Panel: PR lifecycle, security rulesets, repo management
+  - Max Alignment Panel: Findings explorer, trigger controls, history
+  - React Flow: 3 new node types (Registry, GitHub, MaxAlignment), connection store, custom edges
+  - Architecture: Lazy loading, route-based panels, unified store pattern
+- System Agents: XML output standardization (Armory, Digest, Compaction)
+  - Replaced YAML prompts with XML for robust parsing
+  - Telegram: Message splitting (4k limit), inline keyboards, improved formatting
+  - Agent Matrix: Added Composer 1.5, GPT-5.3-Codex variants
+- Dependency Management: Pinned all package.json versions (removed "latest")
+- Documentation: Aligned all markdown docs (CLAUDE.md, README.md, etc.) with current architecture
 
 **Recent Work** (2026-02-10):
 - Major architectural refactor: Drizzle migrations, query domain split (11 files), agent adapters (10 files), registry unified (blocking init, no dual-path), execution pipeline (single task path)
@@ -102,8 +116,6 @@ Focus areas for continued development:
 - Add global unhandled rejection handler to server startup
 - Route-level integration tests (0 of 16 route files tested)
 - Fix context.test.ts timeout (buildMcpSection takes 5s+)
-- Pin dependency versions (all using `latest`)
 - Agent success rate analytics (per-agent/model/task-type metrics)
-- Registry UI panel (frontend for agent/provider/model management)
 - Memory compaction tuning
 - Cursor pagination for large task lists (replace LIMIT/OFFSET)

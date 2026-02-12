@@ -177,6 +177,35 @@ export function extractError(agent: string, output: string): {
     }
   }
 
+  // Claude subscription rate limit (Max/Pro plan)
+  if (output.includes("hit your limit") || output.includes("You've hit your limit")) {
+    const resetMatch = output.match(/resets?\s+(.+?)(?:\s*$|\n)/im)
+    return {
+      error: `Claude rate limit${resetMatch ? ` - resets ${resetMatch[1].trim()}` : ''}`,
+      errorType: 'quota',
+    }
+  }
+
+  // Claude API credit exhaustion
+  if (output.includes('Credit balance is too low')) {
+    return {
+      error: 'Claude API credit balance exhausted',
+      errorType: 'quota',
+    }
+  }
+
+  // Gemini retryable quota with delay
+  const geminiRetryMatch = output.match(/Please retry in (\d+\.?\d*)(ms|s)/)
+  if (geminiRetryMatch) {
+    const value = parseFloat(geminiRetryMatch[1])
+    const multiplier = geminiRetryMatch[2] === 'ms' ? 1 : 1000
+    return {
+      error: 'Gemini rate limit - retry after delay',
+      errorType: 'quota',
+      quotaResetMs: Math.ceil(value * multiplier),
+    }
+  }
+
   // Cline process cleanup (crash)
   if (output.includes('Cleaning up core process') && output.includes('Cleaning up host process')) {
     return {
