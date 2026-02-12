@@ -1,6 +1,6 @@
 import type { ProviderType } from '@mycelium/shared'
 import { getCredential } from '../credentials'
-import type { AgentAdapter, AdapterOptions } from './types'
+import type { AgentAdapter, AdapterOptions, ParsedUsage } from './types'
 
 function mapProviderToPi(provider: ProviderType): string {
   switch (provider) {
@@ -85,5 +85,59 @@ export const piAdapter: AgentAdapter = {
 
   tracksOpenRouterUsage(options: AdapterOptions): boolean {
     return options.provider === 'openrouter' || !options.provider
+  },
+
+  parseUsage(rawOutput: string): ParsedUsage | undefined {
+    if (!rawOutput.trim()) return undefined
+    try {
+      const lines = rawOutput.trim().split('\n')
+      let inputTokens = 0
+      let outputTokens = 0
+      let cacheRead = 0
+      let cacheWrite = 0
+      let costUsd = 0
+      let sessionId: string | undefined
+      let modelUsed: string | undefined
+      let found = false
+
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          const event = JSON.parse(line)
+          if (event.type === 'session' && event.id) {
+            sessionId = event.id
+          }
+          if (event.type === 'model_change' && event.modelId) {
+            modelUsed = event.modelId
+          }
+          if (event.type === 'message_end' && event.usage) {
+            found = true
+            const u = event.usage
+            inputTokens += u.input ?? 0
+            outputTokens += u.output ?? 0
+            cacheRead += u.cacheRead ?? 0
+            cacheWrite += u.cacheWrite ?? 0
+            costUsd += u.cost?.total ?? 0
+          }
+        } catch {
+          // skip non-JSON lines
+        }
+      }
+
+      if (!found) return undefined
+
+      const usage: ParsedUsage = {
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        cost_usd: costUsd,
+      }
+      if (cacheRead > 0) usage.cache_read_tokens = cacheRead
+      if (cacheWrite > 0) usage.cache_write_tokens = cacheWrite
+      if (sessionId) usage.session_id = sessionId
+      if (modelUsed) usage.model_used = modelUsed
+      return usage
+    } catch {
+      return undefined
+    }
   },
 }

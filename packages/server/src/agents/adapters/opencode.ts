@@ -1,4 +1,4 @@
-import type { AgentAdapter, AdapterOptions } from './types'
+import type { AgentAdapter, AdapterOptions, ParsedUsage } from './types'
 
 export const opencodeAdapter: AgentAdapter = {
   id: 'opencode',
@@ -49,5 +49,57 @@ export const opencodeAdapter: AgentAdapter = {
 
     if (textParts.length > 0) return textParts.join('').trim()
     return output
+  },
+
+  parseUsage(rawOutput: string): ParsedUsage | undefined {
+    if (!rawOutput.trim()) return undefined
+    try {
+      const lines = rawOutput.trim().split('\n')
+      let inputTokens = 0
+      let outputTokens = 0
+      let reasoningTokens = 0
+      let cacheRead = 0
+      let cacheWrite = 0
+      let costUsd = 0
+      let sessionId: string | undefined
+      let found = false
+
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          const event = JSON.parse(line)
+          if (!sessionId && event.sessionID) sessionId = event.sessionID
+          if (event.type === 'step_finish' && event.part) {
+            found = true
+            const t = event.part.tokens
+            if (t) {
+              inputTokens += t.input ?? 0
+              outputTokens += t.output ?? 0
+              reasoningTokens += t.reasoning ?? 0
+              cacheRead += t.cache?.read ?? 0
+              cacheWrite += t.cache?.write ?? 0
+            }
+            costUsd += event.part.cost ?? 0
+          }
+        } catch {
+          // skip non-JSON lines
+        }
+      }
+
+      if (!found) return undefined
+
+      const usage: ParsedUsage = {
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        cost_usd: costUsd,
+      }
+      if (cacheRead > 0) usage.cache_read_tokens = cacheRead
+      if (cacheWrite > 0) usage.cache_write_tokens = cacheWrite
+      if (reasoningTokens > 0) usage.thinking_tokens = reasoningTokens
+      if (sessionId) usage.session_id = sessionId
+      return usage
+    } catch {
+      return undefined
+    }
   },
 }
