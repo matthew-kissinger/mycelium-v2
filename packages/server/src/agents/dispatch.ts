@@ -1,4 +1,5 @@
 import { spawn } from 'bun'
+import { unlinkSync } from 'fs'
 import { DEFAULT_AGENT_CONFIGS, type AgentType, type AgentExecuteResult, type ProviderType } from '@mycelium/shared'
 import { registerProcess, unregisterProcess } from './registry'
 import { checkOpenRouterCredits } from './health'
@@ -7,6 +8,7 @@ import { getAdapter } from './adapters'
 import type { AdapterOptions } from './adapters'
 import type { ParsedUsage } from './adapters/types'
 import { acquireClineAddress, releaseClineAddress } from './adapters/cline'
+import { writeTempMcpConfig } from '../config/mcp-sync'
 
 export interface DispatchOptions {
   agent: AgentType
@@ -17,6 +19,7 @@ export interface DispatchOptions {
   timeout?: number
   taskId?: string  // Required for process registry tracking
   sessionId?: string  // Claude session ID for --resume on retry
+  mcpServers?: string[]  // MCP server names to enable for this task
   extraEnv?: Record<string, string>  // Additional env vars merged into spawn environment
   onOutput?: (chunk: string, stream?: 'stdout' | 'stderr') => void
   onStart?: (pid: number) => void  // Called with PID after process spawns
@@ -67,7 +70,7 @@ function parseCostFromOutput(output: string): number | undefined {
  * Registers process with the registry for cleanup on cancel/shutdown.
  */
 export async function dispatch(options: DispatchOptions): Promise<AgentExecuteResult> {
-  const { agent, prompt, cwd, model, provider, timeout, taskId, sessionId, extraEnv, onOutput, onStart } = options
+  const { agent, prompt, cwd, model, provider, timeout, taskId, sessionId, mcpServers, extraEnv, onOutput, onStart } = options
 
   // Look up adapter for this agent
   const adapter = getAdapter(agent)
@@ -103,8 +106,15 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
   const timeoutMs = (timeout ?? config.timeout_seconds) * 1000
   const startTime = Date.now()
 
+  // Write temp MCP config file for agents that support runtime MCP injection
+  let mcpConfigPath: string | undefined
+  if (mcpServers && mcpServers.length > 0) {
+    const tempPath = writeTempMcpConfig(mcpServers)
+    if (tempPath) mcpConfigPath = tempPath
+  }
+
   // Build adapter options
-  const adapterOpts: AdapterOptions = { prompt, model, provider, cwd, sessionId, maxTurns: 50 }
+  const adapterOpts: AdapterOptions = { prompt, model, provider, cwd, sessionId, maxTurns: 50, mcpServers, mcpConfigPath }
 
   // Acquire resources (e.g. cline instance pool)
   let releaseResources: (() => void) | undefined
@@ -208,6 +218,9 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
       stderrReader.cancel().catch(() => {})
       if (taskId) unregisterProcess(taskId)
       releaseResources?.()
+      if (mcpConfigPath) {
+        try { unlinkSync(mcpConfigPath) } catch { /* ignore */ }
+      }
       return {
         success: false,
         output: output + '\n[TIMEOUT]',
@@ -222,6 +235,11 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
 
     if (taskId) unregisterProcess(taskId)
     releaseResources?.()
+
+    // Clean up temp MCP config file
+    if (mcpConfigPath) {
+      try { unlinkSync(mcpConfigPath) } catch { /* ignore */ }
+    }
 
     // Capture raw output before post-processing (parseUsage needs original structured output)
     const rawOutput = output
@@ -285,6 +303,9 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
   } catch (error) {
     if (taskId) unregisterProcess(taskId)
     releaseResources?.()
+    if (mcpConfigPath) {
+      try { unlinkSync(mcpConfigPath) } catch { /* ignore */ }
+    }
     return {
       success: false,
       output: error instanceof Error ? error.message : String(error),

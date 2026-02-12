@@ -222,6 +222,7 @@ export function registerTaskCommands(program: Command): void {
     .option('-p, --prompt <prompt>', 'Task prompt/specification')
     .option('-d, --depends-on <ids...>', 'Task IDs this task depends on')
     .option('--skills <skills>', 'Comma-separated skill names (e.g. threejs-collision,vitest)')
+    .option('--mcp-servers <servers>', 'Comma-separated MCP server names (e.g. playwright,context7)')
     .option('--json', 'Output as JSON')
     .action(async (title: string, options) => {
       try {
@@ -258,6 +259,9 @@ export function registerTaskCommands(program: Command): void {
         if (options.skills) {
           body.skills = options.skills.split(',').map((s: string) => s.trim()).filter(Boolean)
         }
+        if (options.mcpServers) {
+          body.mcp_servers = options.mcpServers.split(',').map((s: string) => s.trim()).filter(Boolean)
+        }
 
         const response = await client.post<TaskResponse>('/api/tasks', body)
 
@@ -283,6 +287,9 @@ export function registerTaskCommands(program: Command): void {
         }
         if (response.task.skills?.length > 0) {
           console.log(`  Skills: ${response.task.skills.join(', ')}`)
+        }
+        if (response.task.mcp_servers?.length > 0) {
+          console.log(`  MCPs:   ${response.task.mcp_servers.join(', ')}`)
         }
       } catch (err) {
         if (err instanceof ApiError) {

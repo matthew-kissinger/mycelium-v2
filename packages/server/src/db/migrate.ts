@@ -120,6 +120,9 @@ export function runMigrations(db: BunSQLiteDatabase<any>, sqlite: Database): voi
     try { sqlite.exec(ddl) } catch { /* column already exists */ }
   }
 
+  // Post-migration: mcp_servers column on tasks (JSON array of server names)
+  try { sqlite.exec(`ALTER TABLE tasks ADD COLUMN mcp_servers TEXT DEFAULT '[]';`) } catch { /* column already exists */ }
+
   // Performance indexes (idempotent)
   sqlite.exec(`
     CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);

@@ -4,14 +4,16 @@ export const claudeAdapter: AgentAdapter = {
   id: 'claude',
 
   buildArgs(options: AdapterOptions): string[] {
-    const { prompt, model, sessionId, maxTurns } = options
+    const { prompt, model, sessionId, maxTurns, mcpConfigPath } = options
     // claude -p "prompt" --model sonnet --output-format json --dangerously-skip-permissions
     // --resume <sessionId> continues a previous session (for retries)
     // --output-format json wraps output in a JSON envelope with usage/cost data
+    // --mcp-config <file> loads additional MCP servers for this invocation
     return [
       ...(sessionId ? ['--resume', sessionId] : ['-p', prompt]),
       ...(model ? ['--model', model] : []),
       ...(maxTurns ? ['--max-turns', String(maxTurns)] : []),
+      ...(mcpConfigPath ? ['--mcp-config', mcpConfigPath] : []),
       '--output-format', 'json',
       '--dangerously-skip-permissions',
     ]

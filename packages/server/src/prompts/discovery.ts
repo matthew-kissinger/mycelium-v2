@@ -122,7 +122,7 @@ Include ALL relevant data - the system parses this to track what discovery found
   <headline>Brief summary of findings</headline>
   <suggested_tasks count="N">
     <task agent="claude" model="sonnet" tier="subscription">Task title here</task>
-    <task agent="codex" model="gpt-5.2-codex" tier="subscription">Another task</task>
+    <task agent="codex" model="gpt-5.2-codex" tier="subscription" mcp_servers="context7">Another task</task>
     <task agent="opencode" model="kimi-k2.5-free" tier="free">Simple task</task>
   </suggested_tasks>
   <findings>
@@ -172,6 +172,8 @@ Your job has FOUR required steps - you MUST complete ALL of them:
 **For cline tasks**, add \`--provider openrouter\` or \`--provider cline\` to select the billing provider.
 
 **Add skills** when relevant: \`--skills threejs-collision,vitest\` (1-3 skills, comma-separated). Only add when specific domain knowledge would help the task. See "Available Skills" section below.
+
+**Add MCP servers** when a task needs tool capabilities: \`--mcp-servers playwright,context7\`. Only add when the task specifically needs browser automation, web search, library docs, or GitHub API access.
 
 **Wire dependencies** using \`--depends-on <task_id1> <task_id2>\` when creating tasks that must wait for others.
 
@@ -328,7 +330,7 @@ When ALL steps are complete, you MUST output this structured XML block.
   <headline>Created N tasks, updated X docs</headline>
   <tasks_created count="N">
     <task id="abc12345" agent="claude" model="sonnet" tier="subscription">Task title</task>
-    <task id="def67890" agent="codex" model="gpt-5.2-codex" tier="subscription" depends_on="abc12345">Dependent task</task>
+    <task id="def67890" agent="codex" model="gpt-5.2-codex" tier="subscription" depends_on="abc12345" mcp_servers="context7">Dependent task</task>
     <task id="ghi11111" agent="opencode" model="kimi-k2.5-free" tier="free">Simple task</task>
   </tasks_created>
   <docs_updated>
@@ -429,6 +431,8 @@ When complete: test your changes, commit with "fix: resolve intermittent 401 aft
 **For cline tasks**, add \`--provider openrouter\` or \`--provider cline\` to select the billing provider.
 
 **Add skills** when relevant: \`--skills threejs-collision,vitest\` (1-3 skills, comma-separated).
+
+**Add MCP servers** when needed: \`--mcp-servers playwright,context7\`.
 
 **Wire dependencies** with \`--depends-on <task_id>\` when tasks must run in sequence.
 

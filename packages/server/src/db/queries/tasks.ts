@@ -16,6 +16,7 @@ export interface TaskCreateInput {
   depends_on?: string[]
   timeout_seconds?: number
   skills?: string[]
+  mcp_servers?: string[]
 }
 
 export interface TaskUpdateInput {
@@ -31,6 +32,7 @@ export interface TaskUpdateInput {
   sequenced?: boolean
   depends_on?: string[]
   skills?: string[]
+  mcp_servers?: string[]
   cost_usd?: number | null
   duration_seconds?: number | null
   input_tokens?: number | null
@@ -123,6 +125,7 @@ export async function createTask(input: TaskCreateInput) {
     prompt: input.prompt ?? null,
     depends_on: JSON.stringify(input.depends_on ?? []),
     skills: JSON.stringify(input.skills ?? []),
+    mcp_servers: JSON.stringify(input.mcp_servers ?? []),
     sequenced: true,
     timeout_seconds: input.timeout_seconds ?? null,
     created_at: now,
@@ -153,6 +156,7 @@ export async function updateTask(id: string, input: TaskUpdateInput) {
   if (input.armory_reviewed_at !== undefined) updates.armory_reviewed_at = input.armory_reviewed_at
   if (input.depends_on !== undefined) updates.depends_on = JSON.stringify(input.depends_on)
   if (input.skills !== undefined) updates.skills = JSON.stringify(input.skills)
+  if (input.mcp_servers !== undefined) updates.mcp_servers = JSON.stringify(input.mcp_servers)
   if (input.parsed_result !== undefined) updates.parsed_result = JSON.stringify(input.parsed_result)
   if (input.error_details !== undefined) updates.error_details = JSON.stringify(input.error_details)
   if (input.retry_context !== undefined) updates.retry_context = input.retry_context

@@ -25,6 +25,7 @@ import {
   buildAgentsSectionWithCredits,
   buildSkillsSection,
   buildMcpSection,
+  buildMcpInventorySection,
   detectAllSkillsForRepo,
   buildRepoSkillsList,
 } from '../../prompts/context'
@@ -165,11 +166,15 @@ export async function runDiscoveryForRepo(
     const mcpSection = buildMcpSection('claude')
     const repoSkillsList = buildRepoSkillsList(repoPath, repoSkills)
 
+    // Build MCP inventory section so discovery can specify --mcp-servers on tasks
+    const mcpInventorySection = buildMcpInventorySection()
+
     // Build prompt with dynamic context
     const prompt = buildDiscoveryPrompt(context, mycelContext, agentsSection)
       + (repoSkillsList ? `\n\n${repoSkillsList}` : '')
       + (skillsSection ? `\n\n${skillsSection}` : '')
       + (mcpSection ? `\n\n${mcpSection}` : '')
+      + (mcpInventorySection ? `\n\n${mcpInventorySection}` : '')
 
     // Collect session log entries
     const sessionLog: Array<{ chunk: string; stream: string; timestamp: string }> = []

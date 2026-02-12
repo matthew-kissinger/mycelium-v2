@@ -170,6 +170,14 @@ async function startup() {
     console.error('[Credentials] Load failed:', error)
   }
 
+  // Sync canonical MCP config to all agent config files (non-blocking)
+  try {
+    const { syncToAllAgents } = await import('./config/mcp-sync')
+    syncToAllAgents()
+  } catch (error) {
+    console.error('[MCP Sync] Startup sync failed:', error)
+  }
+
   // Background: detect agent CLIs and fetch provider models (non-blocking)
   import('./agents/detect').then(({ detectAllAgents }) =>
     detectAllAgents().catch(e => console.error('[Startup] Agent detection failed:', e))

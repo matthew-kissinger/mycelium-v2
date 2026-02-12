@@ -53,6 +53,9 @@ export const tasks = sqliteTable('tasks', {
   // Skills (JSON array of skill names)
   skills: text('skills').default('[]'),
 
+  // MCP servers (JSON array of server names)
+  mcp_servers: text('mcp_servers').default('[]'),
+
   // Evaluation tracking
   shepherd_evaluated_at: text('shepherd_evaluated_at'),
   armory_reviewed_at: text('armory_reviewed_at'),

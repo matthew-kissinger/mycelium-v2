@@ -4,7 +4,7 @@
  * This module builds the dynamic sections that get injected into prompts:
  * - MYCEL_CONTEXT: CLI instructions for human communication
  * - AGENTS_SECTION: Available agents and models
- * - Skills: Domain-specific knowledge from ~/.claude/skills/
+ * - Skills: Domain-specific knowledge from ~/.mycelium/skills/
  */
 
 import { existsSync, readdirSync, readFileSync } from 'fs'
@@ -518,7 +518,7 @@ export function buildAgentsSection(creditsInfo?: AgentCreditsInfo, taskDistribut
   lines.push('| Bulk/mechanical | cline | openrouter | deepseek-v3.2 | Cheap $0.25/$0.38 |')
   lines.push('| Research | copilot | - | claude-opus-4.6 | GitHub MCP built-in |')
   if (creditsInfo?.gemini?.quotaStatus !== 'exceeded') {
-    lines.push('| Exploration | gemini | - | gemini-3-flash-preview | Free quota |')
+    lines.push('| Exploration | gemini | - | gemini-3-flash-preview | Sub, high quota |')
   }
   lines.push('')
 
@@ -625,7 +625,9 @@ interface SkillContent {
   truncated: boolean
 }
 
-const SKILLS_DIR = join(homedir(), '.claude', 'skills')
+import { getSkillsDir } from '../platform'
+
+const SKILLS_DIR = getSkillsDir()
 const MAX_SKILLS_PER_TASK = 5
 const MAX_CHARS_PER_SKILL = 8000
 
@@ -711,15 +713,15 @@ const TASK_SKILL_KEYWORDS: Record<string, string[]> = {
 }
 
 /**
- * List installed skills from ~/.claude/skills/
+ * List installed skills from ~/.mycelium/skills/
  */
 export function listInstalledSkills(): string[] {
   if (!existsSync(SKILLS_DIR)) return []
 
-  const skills: string[] = []
+  const skills = new Set<string>()
 
   for (const item of readdirSync(SKILLS_DIR, { withFileTypes: true })) {
-    if (!item.isDirectory()) continue
+    if (!item.isDirectory() && !item.isSymbolicLink()) continue
 
     const skillPath = join(SKILLS_DIR, item.name)
 
@@ -727,19 +729,19 @@ export function listInstalledSkills(): string[] {
     const nestedSkillsPath = join(skillPath, 'skills')
     if (existsSync(nestedSkillsPath)) {
       for (const nested of readdirSync(nestedSkillsPath, { withFileTypes: true })) {
-        if (nested.isDirectory() && existsSync(join(nestedSkillsPath, nested.name, 'SKILL.md'))) {
-          skills.push(nested.name)
+        if ((nested.isDirectory() || nested.isSymbolicLink()) && existsSync(join(nestedSkillsPath, nested.name, 'SKILL.md'))) {
+          skills.add(nested.name)
         }
       }
     }
 
     // Check for direct skill
     if (existsSync(join(skillPath, 'SKILL.md'))) {
-      skills.push(item.name)
+      skills.add(item.name)
     }
   }
 
-  return skills
+  return Array.from(skills)
 }
 
 /**
@@ -970,6 +972,7 @@ export function buildSkillsSection(
 // =============================================================================
 
 import { getMcpServers, getMcpServersForAgent } from '../config/inventory'
+import { getCanonicalMcpServers } from '../config/mcp-sync'
 
 /**
  * List MCP servers from all agent configs.
@@ -998,6 +1001,45 @@ export function buildMcpSection(agent?: string): string {
   for (const server of servers) {
     lines.push(`- **${server.name}**: \`${server.command}\``)
   }
+
+  return lines.join('\n')
+}
+
+/**
+ * Build unified MCP inventory section for discovery prompts.
+ * Shows ALL canonical MCP servers with their capabilities,
+ * so discovery can specify --mcp-servers on task creation.
+ */
+export function buildMcpInventorySection(): string {
+  const servers = getCanonicalMcpServers()
+  if (servers.length === 0) return ''
+
+  const lines: string[] = [
+    '## MCP Server Inventory',
+    '',
+    'These MCP servers are available to ALL agents via the canonical registry.',
+    'When creating tasks that need specific MCP capabilities, add `--mcp-servers name1,name2`.',
+    '',
+    '| Server | Command | Description |',
+    '|--------|---------|-------------|',
+  ]
+
+  const descriptions: Record<string, string> = {
+    playwright: 'Browser automation, web testing, screenshots',
+    context7: 'Up-to-date library documentation and code examples',
+    exa: 'Web search and content retrieval via Exa API',
+    github: 'GitHub API access (issues, PRs, repos)',
+  }
+
+  for (const server of servers) {
+    const desc = descriptions[server.name] ?? 'MCP tools'
+    const cmd = `${server.command} ${server.args.join(' ')}`.trim()
+    lines.push(`| ${server.name} | \`${cmd}\` | ${desc} |`)
+  }
+
+  lines.push('')
+  lines.push('**Usage**: `mycel task create "title" --mcp-servers playwright,context7 --repo /path`')
+  lines.push('')
 
   return lines.join('\n')
 }
