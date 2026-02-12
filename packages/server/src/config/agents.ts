@@ -49,7 +49,7 @@ export const DEFAULT_AGENTS_CONFIG: AgentsConfig = {
     gemini: {
       ...DEFAULT_AGENT_CONFIGS.gemini,
       enabled: true,
-      default_model: 'gemini-3-flash',
+      default_model: 'gemini-3-flash-preview',
       description: 'Google Gemini CLI - good for research tasks',
     },
     cline: {

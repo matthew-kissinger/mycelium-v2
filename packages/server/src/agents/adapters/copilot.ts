@@ -1,17 +1,4 @@
-import { existsSync, readFileSync } from 'fs'
-import { homedir } from 'os'
-import { join } from 'path'
 import type { AgentAdapter, AdapterOptions } from './types'
-
-function getCopilotToken(): string | null {
-  const tokenPath = join(homedir(), '.config', 'mk-agent', 'COPILOT_TOKEN')
-  if (!existsSync(tokenPath)) return null
-  try {
-    return readFileSync(tokenPath, 'utf-8').trim()
-  } catch {
-    return null
-  }
-}
 
 export const copilotAdapter: AgentAdapter = {
   id: 'copilot',
@@ -19,20 +6,23 @@ export const copilotAdapter: AgentAdapter = {
   buildArgs(options: AdapterOptions): string[] {
     const { prompt, model } = options
     // copilot -p "prompt" [--model <model>] --allow-all-tools --no-ask-user
+    // Without --model, falls back to ~/.copilot/config.json default (gemini-3-pro-preview)
     return [
       '-p', prompt,
-      ...(model ? ['--model', model] : ['--model', 'claude-sonnet-4.5']),
+      ...(model ? ['--model', model] : []),
       '--allow-all-tools',
       '--no-ask-user',
+      '--allow-all-paths',
+      '--no-auto-update',
+      '--no-custom-instructions',
+      '--disable-builtin-mcps',
     ]
   },
 
   buildEnv(): Record<string, string> {
-    const env: Record<string, string> = {}
-    const token = getCopilotToken()
-    if (token) {
-      env.GH_TOKEN = token
-    }
-    return env
+    // Strip GITHUB_TOKEN and GH_TOKEN to prevent fine-grained PAT from
+    // overriding Copilot's stored OAuth credentials (causes 401 on model listing).
+    // Copilot falls back to its own stored OAuth from `copilot login`.
+    return { GITHUB_TOKEN: '', GH_TOKEN: '' }
   },
 }
