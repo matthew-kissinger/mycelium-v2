@@ -12,7 +12,7 @@ export interface AdapterOptions {
   sessionId?: string
   /** Cline instance gRPC address (cline adapter only) */
   clineAddress?: string | null
-  /** Max turns safety cap for agents that support it (claude, cursor) */
+  /** Max turns safety cap for agents that support it (claude only) */
   maxTurns?: number
   /** MCP server names to enable for this task (resolved to config at dispatch time) */
   mcpServers?: string[]

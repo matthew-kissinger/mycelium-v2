@@ -86,6 +86,11 @@ mycel registry refresh                     # Full refresh
 mycel registry health                      # Health summary
 mycel registry fallback <agent> <model>    # Fallback chain
 
+# Agents (offline, no API needed)
+mycel agents                              # List agents + default models
+mycel agents models <agent>               # Valid models for agent
+mycel agents validate <agent> <model>     # Check if combo is valid
+
 # Discovery
 mycel discover /path --agent --auto
 
@@ -246,6 +251,13 @@ models (id, provider_id, model_id, context_window, cost_input, cost_output, free
 - Stale worktrees cleaned up
 - MCP config synced to all agent config files
 - Manual `POST /api/tasks/:id/run` gets full context enrichment (matches dispatcher pipeline)
+
+### Model Validation
+
+- Task creation (`POST /api/tasks`) validates agent and model against AGENT_MATRIX, returns 400 with valid options on mismatch
+- Dispatch validates model before execution, falls back to agent default with warning if invalid
+- `mycel agents` CLI provides offline validation (no running server needed)
+- Discovery prompt references `mycel agents` to check valid models before creating tasks
 
 ### Fallback & Health
 

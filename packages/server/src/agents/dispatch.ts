@@ -1,6 +1,6 @@
 import { spawn } from 'bun'
 import { unlinkSync } from 'fs'
-import { DEFAULT_AGENT_CONFIGS, type AgentType, type AgentExecuteResult, type ProviderType } from '@mycelium/shared'
+import { DEFAULT_AGENT_CONFIGS, type AgentType, type AgentExecuteResult, type ProviderType, getModelsForAgent } from '@mycelium/shared'
 import { registerProcess, unregisterProcess } from './registry'
 import { checkOpenRouterCredits } from './health'
 import { getCachedAgent, getCachedProvider } from './registry-cache'
@@ -9,6 +9,7 @@ import type { AdapterOptions } from './adapters'
 import type { ParsedUsage } from './adapters/types'
 import { acquireClineAddress, releaseClineAddress } from './adapters/cline'
 import { writeTempMcpConfig } from '../config/mcp-sync'
+import { resolveModel } from './fallback'
 
 export interface DispatchOptions {
   agent: AgentType
@@ -63,6 +64,42 @@ function parseCostFromOutput(output: string): number | undefined {
 }
 
 /**
+ * Validate that a model is known for an agent.
+ * Returns the validated model (or the agent's default if invalid).
+ * Logs a warning when an invalid model is corrected.
+ */
+function validateModel(agent: AgentType, model: string | undefined): string | undefined {
+  if (!model) return undefined
+
+  // Get all valid model IDs for this agent (both full and short names)
+  const validModels = getModelsForAgent(agent)
+  const validIds = new Set<string>()
+  for (const m of validModels) {
+    validIds.add(m.id)
+    if (m.short) validIds.add(m.short)
+  }
+
+  if (validIds.size === 0) {
+    // Agent not in matrix (shouldn't happen) - pass through
+    return model
+  }
+
+  if (validIds.has(model)) {
+    return model
+  }
+
+  // Invalid model - resolve to agent's default
+  const defaultModel = resolveModel(agent, undefined)
+  const validList = Array.from(validIds).slice(0, 8).join(', ')
+  console.warn(
+    `[Dispatch] Invalid model "${model}" for ${agent}. ` +
+    `Falling back to "${defaultModel}". ` +
+    `Valid models: ${validList}${validIds.size > 8 ? '...' : ''}`
+  )
+  return defaultModel !== 'unknown' ? defaultModel : undefined
+}
+
+/**
  * Dispatch a task to a CLI agent.
  * This is a "dumb pipe" - it spawns the CLI and streams output.
  * All intelligence is in the agent, not here.
@@ -70,14 +107,17 @@ function parseCostFromOutput(output: string): number | undefined {
  * Registers process with the registry for cleanup on cancel/shutdown.
  */
 export async function dispatch(options: DispatchOptions): Promise<AgentExecuteResult> {
-  const { agent, prompt, cwd, model, provider, timeout, taskId, sessionId, mcpServers, extraEnv, onOutput, onStart } = options
+  const { agent, prompt, cwd, provider, timeout, taskId, sessionId, mcpServers, extraEnv, onOutput, onStart } = options
+
+  // Validate model against agent's known models
+  const model = validateModel(agent, options.model)
 
   // Look up adapter for this agent
   const adapter = getAdapter(agent)
   if (!adapter) {
     return {
       success: false,
-      output: `Unknown agent: ${agent}`,
+      output: `Unknown agent: ${agent}. Valid agents: claude, codex, cursor, gemini, cline, kiro, copilot, vibe, pi, opencode`,
       exit_code: 1,
       duration_seconds: 0,
     }

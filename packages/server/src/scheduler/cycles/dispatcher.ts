@@ -147,9 +147,17 @@ export async function runDispatcherCycle(config: SchedulerConfig): Promise<void>
 
   console.log(`[Dispatcher] Found ${readyTasks.length} ready tasks`)
 
+  // Assign default agents to unassigned tasks ONCE (prevents double-call bug
+  // where pickDefaultAgent() gave different agents during filter vs dispatch)
+  for (const task of readyTasks) {
+    if (!task.agent) {
+      (task as any).agent = pickDefaultAgent()
+    }
+  }
+
   // Filter out tasks for unavailable agents
   const availableTasks = readyTasks.filter((task) => {
-    const agent = task.agent ?? pickDefaultAgent()
+    const agent = task.agent!
     const model = task.model ?? undefined
     const availability = isAgentAvailable(agent, model)
     if (!availability.available) {
