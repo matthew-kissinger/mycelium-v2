@@ -4,9 +4,10 @@ export const copilotAdapter: AgentAdapter = {
   id: 'copilot',
 
   buildArgs(options: AdapterOptions): string[] {
-    const { prompt, model } = options
+    const { prompt, model, mcpConfigPath } = options
     // copilot -p "prompt" [--model <model>] --allow-all-tools --no-ask-user
     // Without --model, falls back to ~/.copilot/config.json default (gemini-3-pro-preview)
+    // --additional-mcp-config @<file> loads MCP servers for this invocation
     return [
       '-p', prompt,
       ...(model ? ['--model', model] : []),
@@ -15,7 +16,7 @@ export const copilotAdapter: AgentAdapter = {
       '--allow-all-paths',
       '--no-auto-update',
       '--no-custom-instructions',
-      '--disable-builtin-mcps',
+      ...(mcpConfigPath ? ['--additional-mcp-config', `@${mcpConfigPath}`] : []),
     ]
   },
 

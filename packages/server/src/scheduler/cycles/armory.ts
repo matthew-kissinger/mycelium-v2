@@ -16,6 +16,7 @@ import { buildMycelContext } from '../../prompts/context'
 import { registerActiveRun, unregisterActiveRun } from '../active-runs'
 import { buildArmoryPrompt, parseArmoryOutput, ArmorySkill, ArmoryMcpServer } from '../../prompts/armory'
 import { getInstalledSkills, getMcpServers } from '../../config/inventory'
+import { syncToAllAgents } from '../../config/mcp-sync'
 import { homedir } from 'os'
 
 /**
@@ -163,6 +164,16 @@ export async function runArmoryCycle(config: SchedulerConfig): Promise<void> {
         }
         if (armoryOutput.mcps_installed.length > 0) {
           console.log(`[Armory] MCPs installed: ${armoryOutput.mcps_installed.map(m => m.name).join(', ')}`)
+          // Sync canonical MCP config to all agent config files
+          try {
+            syncToAllAgents()
+            console.log('[Armory] MCP config synced to all agents after installation')
+          } catch (e) {
+            console.error('[Armory] MCP sync failed after installation:', e)
+          }
+        }
+        if (armoryOutput.suggested_mappings.length > 0) {
+          console.log(`[Armory] Suggested skill mappings: ${armoryOutput.suggested_mappings.map(m => `${m.dep} -> ${m.skills.join(',')}`).join('; ')}`)
         }
         if (armoryOutput.gaps_remaining.length > 0) {
           console.log(`[Armory] Gaps remaining: ${armoryOutput.gaps_remaining.length}`)
@@ -182,6 +193,7 @@ export async function runArmoryCycle(config: SchedulerConfig): Promise<void> {
         skills_added: armoryOutput?.skills_added.length ?? 0,
         mcps_installed: armoryOutput?.mcps_installed.length ?? 0,
         gaps_remaining: armoryOutput?.gaps_remaining.length ?? 0,
+        suggested_mappings: armoryOutput?.suggested_mappings.length ?? 0,
         timestamp: new Date().toISOString(),
       })
     } else {

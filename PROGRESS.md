@@ -15,8 +15,35 @@
 - CLI, MCP server
 - GitHub integration (PRs, webhooks, security scanning, rulesets, merge queue)
 
-**Recent Work** (2026-02-11):
-- Structured Output Parsing: Exact token/cost tracking from 7/10 agent CLIs
+**Recent Work** (2026-02-12):
+- Skills & Armory Reorganization
+  - Relocated skills from `~/.claude/skills/` to `~/.mycelium/skills/` (stops Claude Code auto-loading 86 skills in every session)
+  - `getSkillsDir()` in platform/index.ts is now single source of truth for skills path
+  - Fixed `listInstalledSkills()` dedup bug (was returning duplicates when skill existed both standalone and nested)
+  - Fixed `listInstalledSkills()` to handle symlinks (matching inventory.ts behavior)
+  - Removed 22 broken symlinks, 2 empty parent repos (claude-skills-threejs-ecs-ts, webgpu-claude-skill)
+  - 62 skill entries remaining (was 86), 0 duplicate names
+  - Armory prompt rewritten: installs skills to `~/.mycelium/skills/`, MCPs to canonical `~/.cursor/mcp.json`
+  - Armory now documents how skills flow (TECH_SKILL_MAPPING -> auto-detect -> keyword select -> inject)
+  - Armory now triggers `syncToAllAgents()` after MCP installation
+  - New `suggested_mappings` field in Armory output for recommending new TECH_SKILL_MAPPING entries
+
+- Unified MCP Server Pipeline: Canonical MCP registry + agent config sync + per-task MCP dispatch
+  - `config/mcp-sync.ts`: Reads canonical config from `~/.cursor/mcp.json`, syncs to all 8 agent config files at startup
+  - Per-agent write targets: Codex/Vibe (TOML), Cursor/Cline/Copilot/Kiro/Gemini/OpenCode (JSON)
+  - Runtime MCP injection: Claude (`--mcp-config`), Copilot (`--additional-mcp-config`), Gemini (`--allowed-mcp-server-names`), Cursor (`--approve-mcps`)
+  - `mcp_servers` field on tasks (schema, DB, CLI `--mcp-servers`), passed through pipeline to dispatch
+  - `buildMcpInventorySection()` added to discovery context so it can specify `--mcp-servers` on task creation
+  - Output parser extracts `mcp_servers` attribute from discovery XML
+  - `writeTempMcpConfig()` creates per-invocation temp files, cleaned up after dispatch
+
+- Agent Autonomy Audit: Verified all 10 agents run in unattended mode
+  - Cursor adapter: added `--force` flag for auto-approving tool use (was missing)
+  - Verified: Claude (`--dangerously-skip-permissions`), Codex (`--full-auto`), Gemini (`--yolo`), Cline (`--yolo --act`), Kiro (`--no-interactive --trust-all-tools`), Copilot (`--allow-all-tools --no-ask-user`), Vibe (`-p` auto-approve), Pi/OpenCode (no approval UX in headless)
+
+- Tests: 383 pass, 1 skip, 0 fail, 0 regressions
+
+- Structured Output Parsing (2026-02-11): Exact token/cost tracking from 7/10 agent CLIs
   - `ParsedUsage` interface + `parseUsage()` method on `AgentAdapter`
   - Claude: `--output-format json` flag, JSON envelope parser (tokens, cost, session_id, num_turns)
   - OpenCode: NDJSON `step_finish` parser (tokens, reasoning, cache, cost, session_id)
@@ -156,6 +183,9 @@
 | Max Alignment | Cycle, prompt, parser, routes, tests | Complete |
 | CLI Alignment | Adapter fixes, JSON output, fallback chains, health patterns, safety caps | Complete |
 | Usage Parsing | ParsedUsage interface, 7 adapter parsers, dispatch wiring, 42 tests | Complete |
+| MCP Pipeline | Canonical registry, agent config sync, per-task dispatch, discovery integration | Complete |
+| Skills Reorg | Relocate to ~/.mycelium/skills/, dedup fix, armory alignment, suggested_mappings | Complete |
+| Autonomy Audit | All 10 agents verified for unattended execution, Cursor --force fix | Complete |
 
 ## What's Next
 

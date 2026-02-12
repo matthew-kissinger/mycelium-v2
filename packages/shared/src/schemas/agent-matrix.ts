@@ -164,9 +164,6 @@ export const AGENT_MATRIX: AgentCapabilities[] = [
     }],
   },
 
-  // =========================================================================
-  // FREE AGENTS (Rate-limited but $0)
-  // =========================================================================
   {
     agent: 'gemini',
     command: 'gemini',
@@ -182,6 +179,9 @@ export const AGENT_MATRIX: AgentCapabilities[] = [
     }],
   },
 
+  // =========================================================================
+  // FREE AGENTS (Rate-limited but $0)
+  // =========================================================================
   {
     agent: 'opencode',
     command: 'opencode',
@@ -322,11 +322,11 @@ export const AGENT_MATRIX: AgentCapabilities[] = [
       },
       {
         provider: 'google',
-        billing: 'free',
-        notes: 'GEMINI_API_KEY required. Gemini 3 models only.',
+        billing: 'per_use',
+        notes: 'GEMINI_API_KEY required. Gemini 3 models only. Pay-per-token via API.',
         models: [
-          { id: 'gemini-3-flash', context: 1000, strengths: ['fast', 'latest'], free: true },
-          { id: 'gemini-3-pro', context: 1000, strengths: ['capable', 'latest'], free: true },
+          { id: 'gemini-3-flash', context: 1000, strengths: ['fast', 'latest'] },
+          { id: 'gemini-3-pro', context: 1000, strengths: ['capable', 'latest'] },
         ],
       },
       {

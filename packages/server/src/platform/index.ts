@@ -109,12 +109,13 @@ export function getLogsDir(): string {
 }
 
 /**
- * Get the Claude skills directory.
- * - Unix: ~/.claude/skills
- * - Windows: %USERPROFILE%/.claude/skills
+ * Get the skills directory.
+ * Stored in ~/.mycelium/skills (not ~/.claude/skills) to avoid
+ * polluting Claude Code's auto-loaded context in every session.
+ * Mycelium injects skills into agent prompts via buildSkillsSection().
  */
-export function getClaudeSkillsDir(): string {
-  return join(getHomeDir(), '.claude', 'skills')
+export function getSkillsDir(): string {
+  return join(getHomeDir(), '.mycelium', 'skills')
 }
 
 /**

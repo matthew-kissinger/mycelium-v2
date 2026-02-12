@@ -101,6 +101,9 @@ export const Task = z.object({
   // Skills (explicit skill names for this task)
   skills: z.array(z.string()).default([]),
 
+  // MCP servers (explicit MCP server names for this task)
+  mcp_servers: z.array(z.string()).default([]),
+
   // Execution results
   result: z.string().optional(),
   parsed_result: ParsedResult.optional(),
@@ -152,6 +155,7 @@ export const TaskCreate = z.object({
   provider: ProviderType.optional(), // For cline: 'openrouter' or 'cline'
   depends_on: z.array(z.string()).default([]),
   skills: z.array(z.string()).default([]),
+  mcp_servers: z.array(z.string()).default([]),
   timeout_seconds: z.number().optional(),
 })
 export type TaskCreate = z.infer<typeof TaskCreate>
@@ -166,6 +170,7 @@ export const TaskUpdate = z.object({
   error: z.string().optional(),
   depends_on: z.array(z.string()).optional(),
   skills: z.array(z.string()).optional(),
+  mcp_servers: z.array(z.string()).optional(),
   sequenced: z.boolean().optional(),
 })
 export type TaskUpdate = z.infer<typeof TaskUpdate>

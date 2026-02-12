@@ -19,6 +19,62 @@ Your role: Ensure task agents have the domain knowledge (skills) and tools (MCP 
 
 {inventory}
 
+## How Skills Get Used by Task Agents
+
+Skills are domain-specific knowledge files (SKILL.md) that get injected into task agent prompts. Here is how they flow:
+
+1. **Auto-detection**: When a repo has \`package.json\`, dependencies are matched against a tech-skill mapping:
+   - \`three\` -> threejs-fundamentals, threejs-performance
+   - \`react\` -> react-best-practices, react-performance
+   - \`hono\` -> hono-framework
+   - \`drizzle-orm\` -> drizzle-orm
+   - \`zod\` -> zod-validation
+   - \`vitest\` -> vitest
+   - \`playwright\` -> webapp-testing
+   - \`zustand\` -> zustand
+   - \`@xyflow/react\` -> reactflow-node-graphs
+   - \`vite\` -> vite-optimization
+   - \`tailwindcss\` -> ui-design-system
+   - \`bitecs\` -> bitecs-skill
+   - \`rapier3d\` -> rapier3d-physics
+   - \`yuka\` -> yuka-game-ai
+
+2. **Keyword selection**: When a task runs, keywords in the task title/prompt are matched:
+   - "collision" -> threejs-collision, threejs-bvh-skill
+   - "shader" -> threejs-shaders, webgpu-threejs-tsl
+   - "physics" -> rapier3d-physics
+   - "test" -> vitest, game-testing-patterns
+   - "database" -> drizzle-orm
+   - "API" -> hono-framework
+   - "SSE" -> sse-streaming
+   - "react" -> react-best-practices
+
+3. **Injection**: Up to 5 skills (max 8KB each) get injected into the agent prompt as markdown content.
+
+4. **Discovery awareness**: Discovery sees all repo skills and can add \`--skills skill1,skill2\` when creating tasks.
+
+**For a skill to be useful, it needs**:
+- A SKILL.md file with clear, actionable content (not just a link or description)
+- A name that matches a tech-skill mapping key OR a task-keyword mapping key
+- If the skill covers a dependency not in the mapping, note it in your output so we can add the mapping
+
+## How MCP Servers Get Used by Task Agents
+
+MCP servers provide tools (web search, browser automation, etc.) to agents at dispatch time.
+
+**Canonical MCP registry**: \`~/.cursor/mcp.json\` is the single source of truth.
+At server startup, this canonical config is synced to ALL agent config files automatically.
+
+**Runtime injection**: Some agents support per-task MCP via CLI flags:
+- Claude: \`--mcp-config <file>\`
+- Copilot: \`--additional-mcp-config @<file>\`
+- Gemini: \`--allowed-mcp-server-names name1,name2\`
+- Cursor: \`--approve-mcps\`
+
+**Pre-synced agents**: Codex, Cline, Kiro, Vibe, OpenCode read from their config files (synced at startup).
+
+**For an MCP to be available to all agents, it must be in the canonical config.**
+
 ## Your Mission
 
 1. **Analyze Recent Work**
@@ -38,6 +94,8 @@ Your role: Ensure task agents have the domain knowledge (skills) and tools (MCP 
    - "Database migrations needed but no drizzle skill"
 
 3. **Acquire Skills**
+   Skills are stored in \`~/.mycelium/skills/\` (NOT \`~/.claude/skills/\`).
+
    For each gap, either:
    a. Search GitHub for existing skill repos (e.g., "threejs claude skill SKILL.md")
    b. WebFetch documentation and create a SKILL.md yourself
@@ -45,11 +103,11 @@ Your role: Ensure task agents have the domain knowledge (skills) and tools (MCP 
    To install a skill:
    \`\`\`bash
    # Clone existing
-   git clone <repo> ~/.claude/skills/<skill-name>
+   git clone <repo> ~/.mycelium/skills/<skill-name>
 
    # Or create new
-   mkdir -p ~/.claude/skills/<skill-name>
-   cat > ~/.claude/skills/<skill-name>/SKILL.md << 'EOF'
+   mkdir -p ~/.mycelium/skills/<skill-name>
+   cat > ~/.mycelium/skills/<skill-name>/SKILL.md << 'EOF'
    ---
    description: "Brief description"
    ---
@@ -60,15 +118,20 @@ Your role: Ensure task agents have the domain knowledge (skills) and tools (MCP 
    \`\`\`
 
 4. **Install MCP Servers**
-   Common helpful MCPs:
-   - playwright: Browser automation
-   - sqlite: Database queries
-   - filesystem: Extended file ops
+   MCP servers are managed via the canonical registry at \`~/.cursor/mcp.json\`.
+   To add a new MCP server, edit this file directly:
 
-   To install:
    \`\`\`bash
-   claude mcp add <server-name> -- <command>
+   # Read current config
+   cat ~/.cursor/mcp.json
+
+   # Add a new server (merge into mcpServers object)
+   # Use jq or edit directly - the format is:
+   # { "mcpServers": { "server-name": { "command": "npx", "args": ["@package/name@latest"] } } }
    \`\`\`
+
+   After adding to the canonical config, the system will sync to all agent configs on next startup.
+   Do NOT use \`claude mcp add\` - that only affects Claude's config, not the canonical registry.
 
 5. **Loop Until Satisfied**
    Keep going until you've addressed the gaps you identified.
@@ -79,8 +142,10 @@ Your role: Ensure task agents have the domain knowledge (skills) and tools (MCP 
 - **Don't duplicate**: Check inventory before adding
 - **Quality over quantity**: A few good skills > many mediocre ones
 - **Be specific**: Skills should have clear descriptions
-- **Test installs**: Verify skills load with \`ls ~/.claude/skills/\`
+- **Test installs**: Verify skills load with \`ls ~/.mycelium/skills/\`
 - **Document reasoning**: Explain why each addition helps
+- **MCP canonical**: Always add MCPs to \`~/.cursor/mcp.json\`, never to individual agent configs
+- **Skill mappings**: If you install a skill for a dependency not in the tech-skill mapping, note it so we can add the mapping
 
 ## Output Format
 
@@ -101,6 +166,9 @@ When done, output your results in this XML format (no backtick fencing):
   <gaps_remaining>
     <gap>Unfilled gap description and why it couldn't be filled</gap>
   </gaps_remaining>
+  <suggested_mappings>
+    <mapping dep="dependency-name" skills="skill1,skill2">Why this mapping should be added</mapping>
+  </suggested_mappings>
   <inventory_summary>
     <skills total="N" added="N"/>
     <mcps total="N" added="N"/>
@@ -115,6 +183,7 @@ Notes:
 - health="healthy" if all gaps filled, "warning" if some remain, "critical" if many unfilled gaps
 - Include empty sections if nothing to report (e.g., no skills added)
 - Source can be "github.com/..." for cloned or "self-authored" for created
+- suggested_mappings: Dependencies that should be added to TECH_SKILL_MAPPING for auto-detection
 - Patterns and warnings help the network learn about recurring tooling needs
 
 Start by analyzing recent tasks.
@@ -196,6 +265,12 @@ export interface ArmoryMcpInstalled {
   reason: string
 }
 
+export interface ArmorySuggestedMapping {
+  dep: string
+  skills: string[]
+  reason: string
+}
+
 export interface ArmoryOutput {
   health: 'healthy' | 'warning' | 'critical'
   headline: string
@@ -204,6 +279,7 @@ export interface ArmoryOutput {
   skills_added: ArmorySkillAdded[]
   mcps_installed: ArmoryMcpInstalled[]
   gaps_remaining: string[]
+  suggested_mappings: ArmorySuggestedMapping[]
   inventory_summary?: {
     skills_total: number
     skills_added: number
@@ -234,6 +310,7 @@ export function parseArmoryOutput(output: string): ArmoryOutput | null {
     skills_added: [],
     mcps_installed: [],
     gaps_remaining: [],
+    suggested_mappings: [],
   }
 
   // Headline
@@ -295,6 +372,25 @@ export function parseArmoryOutput(output: string): ArmoryOutput | null {
     let m
     while ((m = gapRegex.exec(gapsBlock[1])) !== null) {
       result.gaps_remaining.push(m[1].trim())
+    }
+  }
+
+  // Suggested mappings
+  const mappingsBlock = body.match(/<suggested_mappings>([\s\S]*?)<\/suggested_mappings>/)
+  if (mappingsBlock) {
+    const mappingRegex = /<mapping\s+([^>]*)>([\s\S]*?)<\/mapping>/g
+    let mm
+    while ((mm = mappingRegex.exec(mappingsBlock[1])) !== null) {
+      const attrs = mm[1]
+      const dep = attrs.match(/dep="([^"]*)"/)
+      const skills = attrs.match(/skills="([^"]*)"/)
+      if (dep && skills) {
+        result.suggested_mappings.push({
+          dep: dep[1],
+          skills: skills[1].split(',').map(s => s.trim()),
+          reason: mm[2].trim(),
+        })
+      }
     }
   }
 

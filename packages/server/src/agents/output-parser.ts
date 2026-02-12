@@ -210,6 +210,7 @@ export interface DiscoveryResult {
     tier: string
     title: string
     depends_on?: string
+    mcp_servers?: string  // comma-separated MCP server names
   }>
   docs_updated?: string[]
   findings?: Array<{ severity: string; description: string }>
@@ -256,6 +257,7 @@ export function parseDiscoveryResult(output: string): DiscoveryResult | null {
       const tier = attrs.match(/tier="([^"]*)"/)
       const id = attrs.match(/id="([^"]*)"/)
       const dependsOn = attrs.match(/depends_on="([^"]*)"/)
+      const mcpServers = attrs.match(/mcp_servers="([^"]*)"/)
 
       result.tasks.push({
         title,
@@ -264,6 +266,7 @@ export function parseDiscoveryResult(output: string): DiscoveryResult | null {
         tier: tier?.[1] ?? 'unknown',
         ...(id?.[1] ? { id: id[1] } : {}),
         ...(dependsOn?.[1] ? { depends_on: dependsOn[1] } : {}),
+        ...(mcpServers?.[1] ? { mcp_servers: mcpServers[1] } : {}),
       })
     }
 

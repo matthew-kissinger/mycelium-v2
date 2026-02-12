@@ -14,6 +14,10 @@ export interface AdapterOptions {
   clineAddress?: string | null
   /** Max turns safety cap for agents that support it (claude, cursor) */
   maxTurns?: number
+  /** MCP server names to enable for this task (resolved to config at dispatch time) */
+  mcpServers?: string[]
+  /** Path to a temp MCP config file for runtime injection */
+  mcpConfigPath?: string
 }
 
 /**

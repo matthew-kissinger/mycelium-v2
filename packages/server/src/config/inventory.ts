@@ -13,6 +13,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'fs'
 import { execSync } from 'child_process'
 import { homedir } from 'os'
 import { join } from 'path'
+import { getSkillsDir } from '../platform'
 
 // Types for inventory items
 export interface Skill {
@@ -29,7 +30,7 @@ export interface McpServer {
 }
 
 // Paths
-const SKILLS_DIR = join(homedir(), '.claude', 'skills')
+const SKILLS_DIR = getSkillsDir()
 const CURSOR_MCP_CONFIG = join(homedir(), '.cursor', 'mcp.json')
 const CLINE_MCP_CONFIG = join(homedir(), '.cline', 'data', 'settings', 'cline_mcp_settings.json')
 
@@ -63,7 +64,7 @@ function parseSkillDescription(content: string): string {
 }
 
 /**
- * Get all installed skills from ~/.claude/skills/
+ * Get all installed skills from ~/.mycelium/skills/
  * Handles both direct skills and nested skills in parent repos.
  */
 export function getInstalledSkills(): Skill[] {
@@ -246,7 +247,7 @@ function readMcpFromFile(filePath: string, source: string): McpServer[] {
 
 /**
  * Get MCP servers for a specific agent.
- * Only queries that agent's config - no cross-agent pollution.
+ * Queries agent's config file or CLI, with fallback to synced config files.
  */
 export function getMcpServersForAgent(agent: string): McpServer[] {
   let servers: McpServer[] = []
@@ -267,8 +268,17 @@ export function getMcpServersForAgent(agent: string): McpServer[] {
     case 'cline':
       servers = readMcpFromFile(CLINE_MCP_CONFIG, 'cline')
       break
+    case 'copilot':
+      servers = readMcpFromFile(join(homedir(), '.copilot', 'mcp-config.json'), 'copilot')
+      break
+    case 'kiro':
+      servers = readMcpFromFile(join(homedir(), '.kiro', 'settings', 'mcp.json'), 'kiro')
+      break
+    case 'opencode':
+      servers = readMcpFromFile(join(homedir(), '.config', 'opencode', 'opencode.json'), 'opencode')
+      break
     default:
-      // Unknown agent - return empty (safe default)
+      // Vibe, Pi, unknown agents - return empty (safe default)
       return []
   }
 

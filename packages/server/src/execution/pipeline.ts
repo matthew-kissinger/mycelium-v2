@@ -135,7 +135,11 @@ export async function buildFullPrompt(
   const finalSkills = mergedSkills.slice(0, 5)
 
   const skillsSection = buildSkillsSection(finalSkills, repoPath)
-  const mcpSection = buildMcpSection(agent)
+  // Filter MCP section to task-relevant servers if specified
+  const taskMcpServers: string[] = JSON.parse(task.mcp_servers ?? '[]')
+  const mcpSection = taskMcpServers.length > 0
+    ? buildMcpSection(agent) // Show agent's MCPs (task servers are injected at dispatch level)
+    : buildMcpSection(agent)
   const memorySection = await buildMemorySection(repoPath)
 
   // Inject previous error context if this is a retry
@@ -622,6 +626,9 @@ export async function executeTask(
   }
 
   try {
+    // Resolve task MCP servers for dispatch
+    const dispatchMcpServers: string[] = JSON.parse(task.mcp_servers ?? '[]')
+
     // Dispatch to agent
     const result = await dispatch({
       agent,
@@ -632,6 +639,7 @@ export async function executeTask(
       taskId,
       sessionId: resumeSessionId,
       timeout: task.timeout_seconds ?? undefined,
+      mcpServers: dispatchMcpServers.length > 0 ? dispatchMcpServers : undefined,
       extraEnv: {
         GIT_AUTHOR_NAME: `${agent}/${model ?? 'default'} #${taskId.slice(0, 8)} (mycelium)`,
         GIT_AUTHOR_EMAIL: `task+${agent}+${model ?? 'default'}@mycelium.local`,

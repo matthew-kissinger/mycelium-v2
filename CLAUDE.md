@@ -67,6 +67,7 @@ mycel stats
 mycel tasks [--status pending]
 mycel task create "title" --repo /path --agent claude --model sonnet
 mycel task create "title" --agent cline --provider openrouter
+mycel task create "title" --agent claude --mcp-servers playwright,context7 --repo /path
 mycel task run <id>
 mycel task cancel <id>
 
@@ -185,9 +186,9 @@ Shepherd -> evaluates completed tasks
 
 ```sql
 tasks (id, title, prompt, status, agent, model, provider, repo_path,
-       depends_on, sequenced, branch_name, worktree_path, github_pr_number,
-       github_pr_url, spec_context, retry_context, cost_usd, duration_seconds,
-       input_tokens, output_tokens, ...)
+       depends_on, sequenced, skills, mcp_servers, branch_name, worktree_path,
+       github_pr_number, github_pr_url, spec_context, retry_context,
+       cost_usd, duration_seconds, input_tokens, output_tokens, ...)
 
 repos (id, path, name, description, language, weight, ...)
 
@@ -224,15 +225,26 @@ models (id, provider_id, model_id, context_window, cost_input, cost_output, free
 
 - `buildMycelContext()` - CLI instructions, agent identity, worktree path, branch name
 - `buildAgentsSectionWithCredits()` - Agent matrix with live credits/quota (Discovery only)
-- `buildSkillsSection()` - Skills from ~/.claude/skills/
+- `buildSkillsSection()` - Skills from ~/.mycelium/skills/
 - `buildMcpSection(agent)` - MCP servers for specific agent
+- `buildMcpInventorySection()` - Full MCP inventory for discovery (all canonical servers)
 - `buildMemorySection(repoPath)` - Memory patterns/warnings for repo (task agents + shepherd)
+
+### MCP Server Sync
+
+- Canonical MCP source: `~/.cursor/mcp.json` (4 servers: playwright, context7, exa, github)
+- `syncToAllAgents()` runs at startup, writes to all 8 agent config files
+- Tasks can specify `--mcp-servers playwright,context7` for per-invocation MCP injection
+- Runtime MCP flags: Claude (`--mcp-config`), Copilot (`--additional-mcp-config`), Gemini (`--allowed-mcp-server-names`)
+- Pre-synced config agents: Codex, Cursor, Cline, Kiro, Vibe, OpenCode (rely on config files)
+- `writeTempMcpConfig()` creates per-invocation temp files, cleaned up after dispatch
 
 ### Startup Safety
 
 - Orphaned running tasks marked as failed on server restart (prevents token burn)
 - Orphaned system agent runs cleaned up (>1h threshold)
 - Stale worktrees cleaned up
+- MCP config synced to all agent config files
 - Manual `POST /api/tasks/:id/run` gets full context enrichment (matches dispatcher pipeline)
 
 ### Fallback & Health

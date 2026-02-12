@@ -4,15 +4,21 @@ export const geminiAdapter: AgentAdapter = {
   id: 'gemini',
 
   buildArgs(options: AdapterOptions): string[] {
-    const { prompt, model, sessionId } = options
+    const { prompt, model, sessionId, mcpServers } = options
     // gemini -p "prompt" --model gemini-3-pro-preview --yolo -o json
     // CRITICAL: -p is required for non-interactive (headless) mode.
     // Without it, gemini enters interactive TUI and hangs until timeout.
+    // Always pass --model to prevent CLI defaulting to 2.5-flash
+    // --allowed-mcp-server-names filters which pre-registered MCPs to enable
+    const resolvedModel = model || 'gemini-3-flash-preview'
     return [
       ...(sessionId ? ['--resume', sessionId, '-p', prompt] : ['-p', prompt]),
-      ...(model ? ['--model', model] : []),
+      '--model', resolvedModel,
       '--yolo',
       '-o', 'json',
+      ...(mcpServers && mcpServers.length > 0
+        ? ['--allowed-mcp-server-names', mcpServers.join(',')]
+        : []),
     ]
   },
 
