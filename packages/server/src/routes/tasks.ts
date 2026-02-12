@@ -6,6 +6,8 @@ import {
   TaskCreate,
   TaskUpdate,
   type AgentType,
+  AGENT_MATRIX,
+  getModelsForAgent,
 } from '@mycelium/shared'
 import { killProcess, clearDependencies } from '../agents'
 import { cleanupWorkspace } from '../agents/workspace'
@@ -15,6 +17,9 @@ import { getTaskLogs, getLogBufferStats } from '../logs'
 import { mergePR } from '../github/pr'
 import { type RepoSlug } from '../github/client'
 import { executeTask as pipelineExecuteTask } from '../execution/pipeline'
+
+// Valid agent IDs for creation-time validation
+const VALID_AGENTS = new Set(AGENT_MATRIX.map(a => a.agent))
 
 const app = new Hono()
 
@@ -233,6 +238,31 @@ app.post('/', zValidator('json', TaskCreate), async (c) => {
       return c.json({
         error: 'Some dependencies do not exist',
         missing: missing,
+      }, 400)
+    }
+  }
+
+  // Validate agent if specified
+  if (data.agent && !VALID_AGENTS.has(data.agent as any)) {
+    return c.json({
+      error: 'Invalid agent',
+      message: `Unknown agent "${data.agent}". Valid agents: ${Array.from(VALID_AGENTS).join(', ')}`,
+    }, 400)
+  }
+
+  // Validate model against agent's known models
+  if (data.agent && data.model) {
+    const validModels = getModelsForAgent(data.agent as AgentType)
+    const validIds = new Set<string>()
+    for (const m of validModels) {
+      validIds.add(m.id)
+      if (m.short) validIds.add(m.short)
+    }
+    if (validIds.size > 0 && !validIds.has(data.model)) {
+      const modelList = Array.from(validIds).slice(0, 10).join(', ')
+      return c.json({
+        error: 'Invalid model for agent',
+        message: `Model "${data.model}" is not valid for ${data.agent}. Valid models: ${modelList}${validIds.size > 10 ? '...' : ''}`,
       }, 400)
     }
   }

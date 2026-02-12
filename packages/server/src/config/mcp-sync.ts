@@ -126,6 +126,9 @@ function syncToCline(servers: CanonicalMcpServer[]): boolean {
  * Sync to Codex (~/.codex/config.toml).
  * Format: [mcp_servers.name] command = "..." args = [...]
  * IMPORTANT: Merge with existing config, don't overwrite.
+ *
+ * Strategy: Parse line-by-line, keep everything that's NOT an mcp_servers
+ * section or orphaned bracket line, then append fresh mcp_servers sections.
  */
 function syncToCodex(servers: CanonicalMcpServer[]): boolean {
   const filePath = join(homedir(), '.codex', 'config.toml')
@@ -136,25 +139,59 @@ function syncToCodex(servers: CanonicalMcpServer[]): boolean {
       content = readFileSync(filePath, 'utf-8')
     }
 
-    // Remove existing [mcp_servers.*] sections to rebuild them
-    content = content.replace(/\[mcp_servers\.[^\]]+\]\n(?:[^\[]*\n?)*/g, '')
-    content = content.trimEnd()
+    // Line-by-line filter: keep only non-MCP lines.
+    // This avoids the regex issue where orphaned bracket lines
+    // (e.g. ["-y", "pkg"]) weren't caught by the old pattern.
+    const lines = content.split('\n')
+    const kept: string[] = []
+    let inMcpSection = false
 
-    // Append MCP server sections
+    for (const line of lines) {
+      const trimmed = line.trim()
+
+      // Entering an [mcp_servers.*] section - skip it and its body
+      if (/^\[mcp_servers\.[^\]]+\]$/.test(trimmed)) {
+        inMcpSection = true
+        continue
+      }
+
+      // Any line starting with [ is a new section header
+      if (trimmed.startsWith('[')) {
+        // Check if this is a valid TOML table (not an orphaned array value)
+        // Valid tables: [projects."/path"], [mcp_servers.x], etc.
+        // Invalid (orphaned): ["-y", "pkg"], ["@playwright/mcp@latest"]
+        const isValidTable = /^\[[a-zA-Z_]/.test(trimmed)
+        if (isValidTable) {
+          inMcpSection = false
+          kept.push(line)
+        }
+        // else: orphaned bracket line from bad sync - skip it
+        continue
+      }
+
+      // Skip body lines of mcp_servers sections
+      if (inMcpSection) continue
+
+      kept.push(line)
+    }
+
+    content = kept.join('\n').trimEnd()
+
+    // Append fresh MCP server sections
     const mcpSections: string[] = []
     for (const server of servers) {
       const argsStr = server.args.map(a => `"${a}"`).join(', ')
-      const lines = [
+      const sectionLines = [
         `[mcp_servers.${server.name}]`,
         `command = "${server.command}"`,
         `args = [${argsStr}]`,
       ]
       if (server.env) {
         for (const [key, value] of Object.entries(server.env)) {
-          lines.push(`env.${key} = "${value}"`)
+          sectionLines.push(`env.${key} = "${value}"`)
         }
       }
-      mcpSections.push(lines.join('\n'))
+      mcpSections.push(sectionLines.join('\n'))
     }
 
     if (mcpSections.length > 0) {

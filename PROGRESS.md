@@ -16,6 +16,17 @@
 - GitHub integration (PRs, webhooks, security scanning, rulesets, merge queue)
 
 **Recent Work** (2026-02-12):
+- Model Validation & Dispatch Hardening
+  - Cursor adapter: removed invalid `--max-turns` flag (only Claude supports it)
+  - Codex config.toml: fixed corrupted TOML from bad MCP sync (orphaned bracket lines)
+  - `syncToCodex()` rewritten with line-by-line TOML parser (replaces fragile regex, prevents future config corruption)
+  - Model validation at dispatch: `dispatch.ts` validates models against AGENT_MATRIX, invalid models fall back to agent default with warning
+  - Model validation at task creation: `POST /api/tasks` returns 400 with valid options on bad agent/model combo
+  - CLI error messages: `mycel task create` now shows full validation message (not just error field)
+  - New `mycel agents` command (offline, no API): list agents, list models per agent, validate agent+model combos
+  - Discovery prompt updated to reference `mycel agents` for model validation before task creation
+  - Dispatcher bug fix: `pickDefaultAgent()` was called twice for tasks without explicit agent (could assign different agents between filter and dispatch)
+
 - Skills & Armory Reorganization
   - Relocated skills from `~/.claude/skills/` to `~/.mycelium/skills/` (stops Claude Code auto-loading 86 skills in every session)
   - `getSkillsDir()` in platform/index.ts is now single source of truth for skills path
@@ -186,6 +197,7 @@
 | MCP Pipeline | Canonical registry, agent config sync, per-task dispatch, discovery integration | Complete |
 | Skills Reorg | Relocate to ~/.mycelium/skills/, dedup fix, armory alignment, suggested_mappings | Complete |
 | Autonomy Audit | All 10 agents verified for unattended execution, Cursor --force fix | Complete |
+| Model Validation | Dispatch + creation validation, mycel agents CLI, Codex TOML fix, dispatcher bug fix | Complete |
 
 ## What's Next
 

@@ -23,6 +23,7 @@ import { registerConfigCommands } from './commands/config.ts'
 import { registerLogsCommands } from './commands/logs.ts'
 import { registerInventoryCommands } from './commands/inventory.ts'
 import { registerRegistryCommands } from './commands/registry.ts'
+import { registerAgentsCommands } from './commands/agents.ts'
 
 const VERSION = '0.1.0'
 const DEFAULT_API_URL = 'http://localhost:8765'
@@ -61,6 +62,7 @@ registerConfigCommands(program)    // config agents/prompts/hooks/history (exten
 registerLogsCommands(program)      // logs <task-id>, export tasks/stats/memory
 registerInventoryCommands(program) // inventory, inventory skills/mcps/scan
 registerRegistryCommands(program)  // registry, registry agents/providers/models/detect/refresh/health/fallback
+registerAgentsCommands(program)   // agents, agents models <agent>, agents validate <agent> <model>
 
 // Parse and execute
 program.parse()

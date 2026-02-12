@@ -167,6 +167,8 @@ Your job has FOUR required steps - you MUST complete ALL of them:
 
 **Update stale docs** directly - you have write access. Don't create tasks for doc updates you can do yourself.
 
+**List valid agents/models** using \`mycel agents\` (offline) or \`mycel agents models <agent>\` to see valid models for a specific agent. The backend validates agent/model combos at task creation time and will reject invalid ones with a descriptive error.
+
 **Create tasks** using \`mycel task create "title" --repo {repo_path} --agent <agent> --model <model> --prompt "..."\`
 
 **For cline tasks**, add \`--provider openrouter\` or \`--provider cline\` to select the billing provider.
@@ -425,6 +427,8 @@ When complete: test your changes, commit with "fix: resolve intermittent 401 aft
 {MYCEL_CONTEXT}
 
 ## Task Creator-Specific Behavior
+
+**List valid agents/models** using \`mycel agents\` or \`mycel agents models <agent>\` to check valid models before creating tasks. The backend validates agent/model combos and will reject invalid ones.
 
 **Create tasks** using \`mycel task create "title" --repo {repo_path} --agent <agent> --model <model> --prompt "..."\`
 

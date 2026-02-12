@@ -293,8 +293,9 @@ export function registerTaskCommands(program: Command): void {
         }
       } catch (err) {
         if (err instanceof ApiError) {
-          const body = err.body as { error?: string } | undefined
-          error(`Failed to create task: ${body?.error ?? err.message}`)
+          const body = err.body as { error?: string; message?: string } | undefined
+          const detail = body?.message ?? body?.error ?? err.message
+          error(`Failed to create task: ${detail}`)
         } else {
           error(`Failed to create task: ${err}`)
         }
