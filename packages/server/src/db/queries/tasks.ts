@@ -347,3 +347,56 @@ export async function getTaskDistributionByAgent(): Promise<Record<string, { tot
 
   return dist
 }
+
+/**
+ * Get agent performance analytics: success rate, avg cost, avg duration, avg tokens
+ * broken down by agent and model. Used by discovery to make informed dispatch decisions.
+ */
+export async function getAgentPerformanceStats(): Promise<AgentPerformanceRow[]> {
+  const rows = await db.select({
+    agent: schema.tasks.agent,
+    model: schema.tasks.model,
+    total: sql<number>`COUNT(*)`,
+    done: sql<number>`SUM(CASE WHEN ${schema.tasks.status} = 'done' THEN 1 ELSE 0 END)`,
+    failed: sql<number>`SUM(CASE WHEN ${schema.tasks.status} = 'failed' THEN 1 ELSE 0 END)`,
+    avg_cost: sql<number>`AVG(CASE WHEN ${schema.tasks.status} = 'done' THEN ${schema.tasks.cost_usd} END)`,
+    avg_duration: sql<number>`AVG(CASE WHEN ${schema.tasks.status} = 'done' THEN ${schema.tasks.duration_seconds} END)`,
+    avg_input_tokens: sql<number>`AVG(CASE WHEN ${schema.tasks.status} = 'done' THEN ${schema.tasks.input_tokens} END)`,
+    avg_output_tokens: sql<number>`AVG(CASE WHEN ${schema.tasks.status} = 'done' THEN ${schema.tasks.output_tokens} END)`,
+    total_cost: sql<number>`COALESCE(SUM(${schema.tasks.cost_usd}), 0)`,
+  })
+    .from(schema.tasks)
+    .where(
+      sql`${schema.tasks.status} IN ('done', 'failed') AND ${schema.tasks.agent} IS NOT NULL`
+    )
+    .groupBy(schema.tasks.agent, schema.tasks.model)
+    .orderBy(sql`COUNT(*) DESC`)
+
+  return rows.map(r => ({
+    agent: r.agent ?? 'unknown',
+    model: r.model ?? 'default',
+    total: Number(r.total),
+    done: Number(r.done),
+    failed: Number(r.failed),
+    success_rate: Number(r.total) > 0 ? Number(r.done) / Number(r.total) : 0,
+    avg_cost_usd: r.avg_cost ? Number(r.avg_cost) : null,
+    avg_duration_seconds: r.avg_duration ? Number(r.avg_duration) : null,
+    avg_input_tokens: r.avg_input_tokens ? Math.round(Number(r.avg_input_tokens)) : null,
+    avg_output_tokens: r.avg_output_tokens ? Math.round(Number(r.avg_output_tokens)) : null,
+    total_cost_usd: Number(r.total_cost),
+  }))
+}
+
+export interface AgentPerformanceRow {
+  agent: string
+  model: string
+  total: number
+  done: number
+  failed: number
+  success_rate: number
+  avg_cost_usd: number | null
+  avg_duration_seconds: number | null
+  avg_input_tokens: number | null
+  avg_output_tokens: number | null
+  total_cost_usd: number
+}

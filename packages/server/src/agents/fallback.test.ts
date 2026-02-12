@@ -34,9 +34,10 @@ describe('getFallbackModel', () => {
   })
 
   test('codex escalation chain', () => {
-    expect(getFallbackModel('codex', 'gpt-5.2-codex-fast')).toBe('gpt-5.2-codex')
-    expect(getFallbackModel('codex', 'gpt-5.2-codex')).toBe('gpt-5.2-codex-high')
-    expect(getFallbackModel('codex', 'gpt-5.2-codex-high')).toBe('gpt-5.3-codex')
+    expect(getFallbackModel('codex', 'gpt-5.1-codex-mini')).toBe('gpt-5.1-codex')
+    expect(getFallbackModel('codex', 'gpt-5.1-codex')).toBe('gpt-5.1-codex-max')
+    expect(getFallbackModel('codex', 'gpt-5.1-codex-max')).toBe('gpt-5.2-codex')
+    expect(getFallbackModel('codex', 'gpt-5.2-codex')).toBe('gpt-5.3-codex')
     expect(getFallbackModel('codex', 'gpt-5.3-codex')).toBeNull()
   })
 
@@ -104,9 +105,9 @@ describe('shouldRetry', () => {
       ],
     }
     const result = shouldRetry('codex', 'gpt-5.2-codex', JSON.stringify(ctx))
-    // codex has fallback gpt-5.2-codex -> gpt-5.2-codex-high, so it can still retry
+    // codex has fallback gpt-5.2-codex -> gpt-5.3-codex, so it can still retry
     expect(result.retry).toBe(true)
-    expect(result.fallbackModel).toBe('gpt-5.2-codex-high')
+    expect(result.fallbackModel).toBe('gpt-5.3-codex')
   })
 
   test('max retries exhausted is not retryable', () => {
@@ -271,7 +272,7 @@ describe('resolveModel', () => {
   test('null model defaults to agent default', () => {
     expect(resolveModel('claude', null)).toBe('sonnet')
     expect(resolveModel('codex', null)).toBe('gpt-5.2-codex')
-    expect(resolveModel('gemini', null)).toBe('flash')
+    expect(resolveModel('gemini', null)).toBe('gemini-3-flash-preview')
   })
 
   test('explicit model passes through', () => {

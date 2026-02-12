@@ -11,6 +11,7 @@ import { existsSync, readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import { DEFAULT_AGENT_CONFIGS, AGENT_PROVIDERS, type AgentType, type ProviderType } from '@mycelium/shared'
+import type { AgentPerformanceRow } from '../db/queries/tasks'
 import { getCachedEnabledAgents } from '../agents/registry-cache'
 
 // =============================================================================
@@ -415,7 +416,7 @@ export interface TaskDistribution {
  * Build the AGENTS_SECTION for prompts.
  * Compact matrix of all valid agent/provider/model combinations.
  */
-export function buildAgentsSection(creditsInfo?: AgentCreditsInfo, taskDistribution?: TaskDistribution): string {
+export function buildAgentsSection(creditsInfo?: AgentCreditsInfo, taskDistribution?: TaskDistribution, performanceStats?: AgentPerformanceRow[]): string {
   const lines: string[] = [
     '## Agent-Provider-Model Matrix',
     '',
@@ -504,7 +505,7 @@ export function buildAgentsSection(creditsInfo?: AgentCreditsInfo, taskDistribut
   lines.push('')
   lines.push('| Task Type | Agent | Provider | Model | Why |')
   lines.push('|-----------|-------|----------|-------|-----|')
-  lines.push('| Simple fix | pi | groq | kimi-k2-instruct | Free, ultra-fast |')
+  lines.push('| Simple fix | pi | groq | gpt-oss-120b | Free, ultra-fast |')
   lines.push('| Simple fix | pi | cerebras | gpt-oss-120b | Free, ultra-fast |')
   lines.push('| Simple fix | opencode | - | kimi-k2.5-free | Free, capable |')
   lines.push('| Docs/comments | claude | - | haiku | Sub, fast |')
@@ -517,7 +518,7 @@ export function buildAgentsSection(creditsInfo?: AgentCreditsInfo, taskDistribut
   lines.push('| Bulk/mechanical | cline | openrouter | deepseek-v3.2 | Cheap $0.25/$0.38 |')
   lines.push('| Research | copilot | - | claude-opus-4.6 | GitHub MCP built-in |')
   if (creditsInfo?.gemini?.quotaStatus !== 'exceeded') {
-    lines.push('| Exploration | gemini | - | flash | Free quota |')
+    lines.push('| Exploration | gemini | - | gemini-3-flash-preview | Free quota |')
   }
   lines.push('')
 
@@ -529,11 +530,11 @@ export function buildAgentsSection(creditsInfo?: AgentCreditsInfo, taskDistribut
   lines.push('mycel task create "title" --agent claude --model sonnet --repo /path')
   lines.push('mycel task create "title" --agent cursor --model composer-1.5 --repo /path')
   lines.push('mycel task create "title" --agent opencode --model opencode/kimi-k2.5-free --repo /path')
-  lines.push('mycel task create "title" --agent gemini --model flash --repo /path')
+  lines.push('mycel task create "title" --agent gemini --model gemini-3-flash-preview --repo /path')
   lines.push('')
   lines.push('# Multi-provider agents (MUST include --provider)')
   lines.push('mycel task create "title" --agent cline --provider openrouter --model kimi-k2.5 --repo /path')
-  lines.push('mycel task create "title" --agent pi --provider groq --model kimi-k2-instruct --repo /path')
+  lines.push('mycel task create "title" --agent pi --provider groq --model openai/gpt-oss-120b --repo /path')
   lines.push('mycel task create "title" --agent pi --provider cerebras --model gpt-oss-120b --repo /path')
   lines.push('```')
   lines.push('')
@@ -541,8 +542,8 @@ export function buildAgentsSection(creditsInfo?: AgentCreditsInfo, taskDistribut
   // Pi provider quick ref
   lines.push('### Pi Provider Reference')
   lines.push('`pi` is a multi-provider agent. You MUST specify --provider:')
-  lines.push('- **groq**: Free, ultra-fast (kimi-k2-instruct, llama-3.3-70b-versatile)')
-  lines.push('- **cerebras**: Free, ultra-fast (gpt-oss-120b, qwen-3-235b, glm-4.7)')
+  lines.push('- **groq**: Free, ultra-fast (gpt-oss-120b, qwen3-32b, llama-3.3-70b-versatile)')
+  lines.push('- **cerebras**: Free, ultra-fast (gpt-oss-120b, qwen-3-235b)')
   lines.push('- **openrouter**: 100+ models, some free (deepseek-v3.2, qwen3-coder)')
   lines.push('- **mistral**: Per-use (devstral-latest, mistral-large-latest)')
   lines.push('- **google**: Free quota (gemini-3-flash, gemini-3-pro)')
@@ -574,6 +575,28 @@ export function buildAgentsSection(creditsInfo?: AgentCreditsInfo, taskDistribut
     }
   }
 
+  // Performance analytics by agent+model
+  if (performanceStats && performanceStats.length > 0) {
+    lines.push('### Performance Analytics (by agent + model)')
+    lines.push('')
+    lines.push('| Agent | Model | Tasks | Success | Avg Cost | Avg Duration | Avg Tokens |')
+    lines.push('|-------|-------|-------|---------|----------|--------------|------------|')
+
+    for (const stat of performanceStats.slice(0, 20)) {
+      const rate = (stat.success_rate * 100).toFixed(0) + '%'
+      const cost = stat.avg_cost_usd != null ? '$' + stat.avg_cost_usd.toFixed(3) : '-'
+      const dur = stat.avg_duration_seconds != null ? Math.round(stat.avg_duration_seconds) + 's' : '-'
+      const tokens = stat.avg_input_tokens != null && stat.avg_output_tokens != null
+        ? `${Math.round(stat.avg_input_tokens / 1000)}K/${Math.round(stat.avg_output_tokens / 1000)}K`
+        : '-'
+      lines.push(`| ${stat.agent} | ${stat.model} | ${stat.total} | ${rate} | ${cost} | ${dur} | ${tokens} |`)
+    }
+    lines.push('')
+    lines.push('**Use this data** to route tasks to high-success-rate agent+model combos.')
+    lines.push('**Avoid** agents with <50% success rate unless the task type specifically needs them.')
+    lines.push('')
+  }
+
   return lines.join('\n')
 }
 
@@ -582,11 +605,12 @@ export function buildAgentsSection(creditsInfo?: AgentCreditsInfo, taskDistribut
  * Use this for Discovery and other system agents that benefit from cost awareness.
  */
 export async function buildAgentsSectionWithCredits(): Promise<string> {
-  const [creditsInfo, taskDistribution] = await Promise.all([
+  const [creditsInfo, taskDistribution, performanceStats] = await Promise.all([
     getAgentCreditsInfo(),
     import('../db/queries').then(q => q.getTaskDistributionByAgent()).catch(() => undefined),
+    import('../db/queries').then(q => q.getAgentPerformanceStats()).catch(() => undefined),
   ])
-  return buildAgentsSection(creditsInfo, taskDistribution)
+  return buildAgentsSection(creditsInfo, taskDistribution, performanceStats ?? undefined)
 }
 
 // =============================================================================

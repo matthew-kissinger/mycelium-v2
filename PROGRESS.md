@@ -40,6 +40,27 @@
 - Tests: 383 pass, 1 skip, 0 fail, 0 regressions
 
 **Recent Work** (2026-02-12):
+- Model Audit & Matrix Update: Verified all model IDs against live CLIs and provider APIs
+  - agent-matrix.ts: Verified 108 models across 10 agents, 12 providers against live CLI outputs
+  - Codex: Real models from models_cache.json (272K context, removed fake Cursor quality tiers)
+  - Copilot: All 17 models from `--help`, 128K context (gpt-5.2-codex at 272K)
+  - Gemini: 3.x only (removed all 2.5 models), default gemini-3-flash-preview
+  - Cline/OpenRouter: Added GLM-5 (z-ai/glm-5, 744B MoE, released today), updated pricing from API
+  - Groq: Reorganized models (gpt-oss-120b, qwen3-32b, llama-3.3-70b + K2 for compat)
+  - Cerebras: Removed old GLM-4.7, kept gpt-oss-120b + qwen-3-235b
+  - Cursor: Confirmed Composer 1.5, 33 models via `agent models`
+  - Fallback chains: Updated all chains for correct model IDs, added Composer 1.5 to cursor chain
+  - Context/seed-registry: Updated all stale model references (flash -> gemini-3-flash-preview, etc.)
+  - Cline adapter: Added glm-5 alias, updated model map
+- Model Audit Script: `scripts/model-audit.ts` - automated validation process
+  - Collects from 9 CLI agents + OpenRouter API in parallel
+  - Pi `--list-models` is richest source (364 models from 8 providers)
+  - Cross-references against AGENT_MATRIX, reports discrepancies
+  - Usage: `bun run scripts/model-audit.ts [--diff|--json|--agent X|--provider X]`
+- Agent Performance Analytics: New query + context injection for discovery
+  - `getAgentPerformanceStats()`: Success rate, avg cost/duration/tokens by agent+model
+  - Injected into discovery's AGENTS_SECTION as performance table
+  - Discovery can now route tasks to high-success-rate agent+model combos
 - Frontend Integration: Registry, GitHub, and Max Alignment panels (39 files, 2400+ lines)
   - Registry Panel: Matrix view (4 tabs), status indicators, 14 API endpoints wired
   - GitHub Panel: PR lifecycle, security rulesets, repo management
