@@ -1,6 +1,4 @@
-import { existsSync, readFileSync } from 'fs'
-import { homedir } from 'os'
-import { join } from 'path'
+import { getCredential } from '../credentials'
 import type { AgentAdapter, AdapterOptions } from './types'
 
 export const vibeAdapter: AgentAdapter = {
@@ -8,21 +6,36 @@ export const vibeAdapter: AgentAdapter = {
 
   buildArgs(options: AdapterOptions): string[] {
     const { prompt } = options
-    // vibe -p "prompt" --output text
     return [
       '-p', prompt,
-      '--output', 'text',
+      '--output', 'json',
     ]
   },
 
   buildEnv(): Record<string, string> {
     const env: Record<string, string> = {}
-    const keyPath = join(homedir(), '.config', 'mk-agent', 'MISTRAL_API_KEY')
-    if (existsSync(keyPath)) {
-      const content = readFileSync(keyPath, 'utf-8')
-      const match = content.match(/MISTRAL_API_KEY=(.+)/)
-      if (match) env.MISTRAL_API_KEY = match[1].trim()
-    }
+    const key = getCredential('MISTRAL_API_KEY')
+    if (key) env.MISTRAL_API_KEY = key
     return env
+  },
+
+  postProcessOutput(output: string): string {
+    if (!output.trim()) return output
+
+    // --output json returns a JSON array of messages
+    try {
+      const messages = JSON.parse(output.trim())
+      if (Array.isArray(messages)) {
+        // Find the last assistant message
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === 'assistant' && messages[i].content) {
+            return messages[i].content
+          }
+        }
+      }
+    } catch {
+      // Not valid JSON, return as-is
+    }
+    return output
   },
 }

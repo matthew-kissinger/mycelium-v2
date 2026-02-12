@@ -9,7 +9,7 @@
 
 | Component | Status |
 |-----------|--------|
-| Backend API | Hono + Bun, 85+ endpoints |
+| Backend API | Hono + Bun, 100+ endpoints |
 | Scheduler | 11 cycles (dispatcher, discovery, shepherd, max_alignment, github_sync, registry_refresh, etc.) |
 | Agent Dispatch | 10 agents (Claude, Codex, Gemini, Cline, Cursor, Kiro, Vibe, Pi, OpenCode, Copilot) across 12 providers |
 | Frontend | Three-column layout (sidebar, React Flow canvas, detail panel) |

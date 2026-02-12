@@ -1,7 +1,5 @@
-import { existsSync, readFileSync } from 'fs'
-import { homedir } from 'os'
-import { join } from 'path'
 import type { ProviderType } from '@mycelium/shared'
+import { getCredential } from '../credentials'
 import type { AgentAdapter, AdapterOptions } from './types'
 
 function mapProviderToPi(provider: ProviderType): string {
@@ -17,25 +15,14 @@ function mapProviderToPi(provider: ProviderType): string {
   }
 }
 
-function getGroqApiKey(): string | null {
-  const configPath = join(homedir(), '.groq', 'config.json')
-  if (!existsSync(configPath)) return null
-  try {
-    const config = JSON.parse(readFileSync(configPath, 'utf-8'))
-    return config.apiKey ?? null
-  } catch {
-    return null
-  }
-}
-
 export const piAdapter: AgentAdapter = {
   id: 'pi',
 
   buildArgs(options: AdapterOptions): string[] {
     const { prompt, model, provider } = options
-    // pi -p "prompt" --provider <provider> --model <model>
     return [
       '-p', prompt,
+      '--mode', 'json',
       ...(provider ? ['--provider', mapProviderToPi(provider)] : ['--provider', 'openrouter']),
       ...(model ? ['--model', model] : []),
     ]
@@ -43,35 +30,57 @@ export const piAdapter: AgentAdapter = {
 
   buildEnv(options: AdapterOptions): Record<string, string> {
     const env: Record<string, string> = {}
-    const configDir = join(homedir(), '.config', 'mk-agent')
     const p = options.provider ?? 'openrouter'
 
     if (p === 'openrouter') {
-      const keyPath = join(configDir, 'OPENROUTER_API_KEY')
-      if (existsSync(keyPath)) {
-        const content = readFileSync(keyPath, 'utf-8')
-        const match = content.match(/OPENROUTER_API_KEY=(.+)/)
-        if (match) env.OPENROUTER_API_KEY = match[1].trim()
-      }
+      const key = getCredential('OPENROUTER_API_KEY')
+      if (key) env.OPENROUTER_API_KEY = key
     } else if (p === 'mistral') {
-      const keyPath = join(configDir, 'MISTRAL_API_KEY')
-      if (existsSync(keyPath)) {
-        const content = readFileSync(keyPath, 'utf-8')
-        const match = content.match(/MISTRAL_API_KEY=(.+)/)
-        if (match) env.MISTRAL_API_KEY = match[1].trim()
-      }
+      const key = getCredential('MISTRAL_API_KEY')
+      if (key) env.MISTRAL_API_KEY = key
     } else if (p === 'groq') {
-      const apiKey = getGroqApiKey()
-      if (apiKey) env.GROQ_API_KEY = apiKey
+      const key = getCredential('GROQ_API_KEY')
+      if (key) env.GROQ_API_KEY = key
     } else if (p === 'cerebras') {
-      const keyPath = join(configDir, 'CEREBRAS_API_KEY')
-      if (existsSync(keyPath)) {
-        const content = readFileSync(keyPath, 'utf-8').trim()
-        env.CEREBRAS_API_KEY = content
-      }
+      const key = getCredential('CEREBRAS_API_KEY')
+      if (key) env.CEREBRAS_API_KEY = key
     }
 
     return env
+  },
+
+  postProcessOutput(output: string): string {
+    if (!output.trim()) return output
+
+    // --mode json outputs NDJSON events
+    // Extract text from message_update events and agent_end
+    const lines = output.trim().split('\n')
+    const textParts: string[] = []
+
+    for (const line of lines) {
+      if (!line.trim()) continue
+      try {
+        const event = JSON.parse(line)
+        // agent_end contains the final messages array
+        if (event.type === 'agent_end' && Array.isArray(event.messages)) {
+          for (const msg of event.messages) {
+            if (msg.role === 'assistant' && typeof msg.content === 'string') {
+              return msg.content
+            }
+          }
+        }
+        // Fallback: collect text deltas from message_update
+        if (event.type === 'message_update' && event.delta?.type === 'text' && event.delta?.text) {
+          textParts.push(event.delta.text)
+        }
+      } catch {
+        // Non-JSON line, include as raw text
+        textParts.push(line)
+      }
+    }
+
+    if (textParts.length > 0) return textParts.join('').trim()
+    return output
   },
 
   tracksOpenRouterUsage(options: AdapterOptions): boolean {

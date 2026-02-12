@@ -4,12 +4,13 @@ export const claudeAdapter: AgentAdapter = {
   id: 'claude',
 
   buildArgs(options: AdapterOptions): string[] {
-    const { prompt, model, sessionId } = options
+    const { prompt, model, sessionId, maxTurns } = options
     // claude -p "prompt" --model sonnet --dangerously-skip-permissions
     // --resume <sessionId> continues a previous session (for retries)
     return [
       ...(sessionId ? ['--resume', sessionId] : ['-p', prompt]),
       ...(model ? ['--model', model] : []),
+      ...(maxTurns ? ['--max-turns', String(maxTurns)] : []),
       '--dangerously-skip-permissions',
     ]
   },
