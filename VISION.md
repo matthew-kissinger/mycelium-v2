@@ -77,7 +77,7 @@ Like the underground fungal networks that connect trees in a forest, Mycelium co
 - Drizzle migrations (replacing raw SQL initDb)
 - Memory patterns and warnings injected into task context
 - Registry UI panel (matrix view, status indicators, 14 API endpoints wired)
-- Structured JSON output parsing for 7/10 agents (exact token/cost tracking)
+- Structured output parsing for 7/10 agents (exact tokens, cache stats, cost, session IDs - replaces character-count estimation)
 - Max-turns safety cap on agents that support it (default 50)
 - Complete fallback chains for all 10 agents (in-agent model escalation + cross-agent)
 

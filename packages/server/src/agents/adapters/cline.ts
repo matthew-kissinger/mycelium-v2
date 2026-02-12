@@ -1,4 +1,4 @@
-import type { AgentAdapter, AdapterOptions } from './types'
+import type { AgentAdapter, AdapterOptions, ParsedUsage } from './types'
 
 /**
  * Map short model names to OpenRouter model IDs.
@@ -78,6 +78,42 @@ export const clineAdapter: AgentAdapter = {
 
   tracksOpenRouterUsage(): boolean {
     return true
+  },
+
+  parseUsage(rawOutput: string): ParsedUsage | undefined {
+    if (!rawOutput.trim()) return undefined
+    try {
+      const lines = rawOutput.trim().split('\n')
+      let lastFinished: Record<string, unknown> | null = null
+
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          const event = JSON.parse(line)
+          if (event.type === 'say' && event.say === 'api_req_finished' && event.text) {
+            // Token data is a JSON string inside the text field - double-parse
+            lastFinished = JSON.parse(event.text)
+          }
+        } catch {
+          // Non-JSON line, skip
+        }
+      }
+
+      if (!lastFinished) return undefined
+      const result: ParsedUsage = {}
+      if (typeof lastFinished.tokensIn === 'number') result.input_tokens = lastFinished.tokensIn
+      if (typeof lastFinished.tokensOut === 'number') result.output_tokens = lastFinished.tokensOut
+      if (typeof lastFinished.cacheReads === 'number' && (lastFinished.cacheReads as number) > 0) {
+        result.cache_read_tokens = lastFinished.cacheReads as number
+      }
+      if (typeof lastFinished.cacheWrites === 'number' && (lastFinished.cacheWrites as number) > 0) {
+        result.cache_write_tokens = lastFinished.cacheWrites as number
+      }
+      if (typeof lastFinished.totalCost === 'number') result.cost_usd = lastFinished.totalCost
+      return result
+    } catch {
+      return undefined
+    }
   },
 }
 

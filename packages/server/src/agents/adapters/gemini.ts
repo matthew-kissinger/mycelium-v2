@@ -1,4 +1,4 @@
-import type { AgentAdapter, AdapterOptions } from './types'
+import type { AgentAdapter, AdapterOptions, ParsedUsage } from './types'
 
 export const geminiAdapter: AgentAdapter = {
   id: 'gemini',
@@ -31,6 +31,36 @@ export const geminiAdapter: AgentAdapter = {
       return data.response ?? output
     } catch {
       return output
+    }
+  },
+
+  parseUsage(rawOutput: string): ParsedUsage | undefined {
+    if (!rawOutput.trim()) return undefined
+    try {
+      const data = JSON.parse(rawOutput)
+      const models = data.stats?.models
+      if (!models) return undefined
+
+      const modelName = Object.keys(models)[0]
+      if (!modelName) return undefined
+
+      const entry = models[modelName]
+      const tokens = entry.tokens
+      if (!tokens) return undefined
+
+      const usage: ParsedUsage = {
+        input_tokens: tokens.input ?? 0,
+        output_tokens: tokens.candidates ?? 0,
+      }
+      if (tokens.cached > 0) usage.cache_read_tokens = tokens.cached
+      if (tokens.thoughts > 0) usage.thinking_tokens = tokens.thoughts
+      if (tokens.tool > 0) usage.tool_tokens = tokens.tool
+      if (entry.api?.totalLatencyMs) usage.api_duration_ms = entry.api.totalLatencyMs
+      if (data.session_id) usage.session_id = data.session_id
+      usage.model_used = modelName
+      return usage
+    } catch {
+      return undefined
     }
   },
 }

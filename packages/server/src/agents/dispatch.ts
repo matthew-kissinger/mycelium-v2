@@ -5,6 +5,7 @@ import { checkOpenRouterCredits } from './health'
 import { getCachedAgent, getCachedProvider } from './registry-cache'
 import { getAdapter } from './adapters'
 import type { AdapterOptions } from './adapters'
+import type { ParsedUsage } from './adapters/types'
 import { acquireClineAddress, releaseClineAddress } from './adapters/cline'
 
 export interface DispatchOptions {
@@ -222,11 +223,17 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
     if (taskId) unregisterProcess(taskId)
     releaseResources?.()
 
+    // Capture raw output before post-processing (parseUsage needs original structured output)
+    const rawOutput = output
+
     // Post-process output (e.g. strip kiro banner)
     let finalOutput = output
     if (adapter.postProcessOutput) {
       finalOutput = adapter.postProcessOutput(finalOutput)
     }
+
+    // Parse structured usage data from raw output
+    const usage = adapter.parseUsage?.(rawOutput, stderr)
 
     // Calculate cost for per_use billing via registry cache
     let billingType = config.billing_type
@@ -239,7 +246,9 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
 
     let cost_usd: number | undefined
     if (billingType === 'per_use') {
-      if (openRouterUsageBefore !== null) {
+      // Prefer: parsed usage > OpenRouter balance diff > regex from output
+      cost_usd = usage?.cost_usd
+      if (cost_usd === undefined && openRouterUsageBefore !== null) {
         const creditsAfter = await checkOpenRouterCredits()
         if (creditsAfter) {
           cost_usd = creditsAfter.usage - openRouterUsageBefore
@@ -252,7 +261,9 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
       cost_usd = 0
     }
 
-    const tokens = estimateTokens(prompt, finalOutput)
+    const estimated = estimateTokens(prompt, finalOutput)
+    const input_tokens = usage?.input_tokens ?? estimated.input_tokens
+    const output_tokens = usage?.output_tokens ?? estimated.output_tokens
 
     return {
       success: exitCode === 0,
@@ -260,8 +271,16 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
       exit_code: exitCode,
       duration_seconds: duration,
       cost_usd,
-      input_tokens: tokens.input_tokens,
-      output_tokens: tokens.output_tokens,
+      input_tokens,
+      output_tokens,
+      cache_read_tokens: usage?.cache_read_tokens,
+      cache_write_tokens: usage?.cache_write_tokens,
+      thinking_tokens: usage?.thinking_tokens,
+      session_id: usage?.session_id,
+      model_used: usage?.model_used,
+      num_turns: usage?.num_turns,
+      api_duration_ms: usage?.api_duration_ms,
+      premium_requests: usage?.premium_requests,
     }
   } catch (error) {
     if (taskId) unregisterProcess(taskId)

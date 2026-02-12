@@ -16,6 +16,19 @@
 - GitHub integration (PRs, webhooks, security scanning, rulesets, merge queue)
 
 **Recent Work** (2026-02-11):
+- Structured Output Parsing: Exact token/cost tracking from 7/10 agent CLIs
+  - `ParsedUsage` interface + `parseUsage()` method on `AgentAdapter`
+  - Claude: `--output-format json` flag, JSON envelope parser (tokens, cost, session_id, num_turns)
+  - OpenCode: NDJSON `step_finish` parser (tokens, reasoning, cache, cost, session_id)
+  - Pi: NDJSON `message_end` parser (tokens, cache, cost, session_id, model_used)
+  - Gemini: JSON `stats.models` parser (tokens by category, latency, session_id, model_used)
+  - Codex: JSONL `turn.completed` parser (tokens, cache, session_id)
+  - Cline: NDJSON `api_req_finished` double-parse (tokens, cache, cost)
+  - Copilot: stderr parser (premium requests, kilotoken approximations, API time)
+  - dispatch.ts: `parseUsage()` wired in, replaces `estimateTokens()` when structured data available
+  - `AgentExecuteResult` extended with cache_read/write_tokens, thinking_tokens, session_id, model_used, num_turns, api_duration_ms, premium_requests
+  - Cost waterfall: parsed usage > OpenRouter balance diff > regex fallback
+  - Agent data surface reference doc: `docs/cli/agent-data-surface.md`
 - CLI Research Alignment: Fixed all 10 agent adapters against CLI research docs
   - Cline adapter rewritten for v2.2.0 (task new -> task, --mode act -> --act, --json output, instance pool removed)
   - Vibe, OpenCode, Pi adapters: centralized credentials, JSON structured output
@@ -24,7 +37,7 @@
   - dispatch.ts: require() hack removed, max-turns default wired
   - Fallback chains completed for all 10 agents (was missing Pi, Copilot, Vibe, OpenCode, Kiro)
   - Health error patterns added: Cursor resource_exhausted, Kiro SSO expiry, Copilot premium tracking, Vibe credential errors
-- Tests: 341 pass, 1 skip, 1 fail (Playwright e2e isolation), 0 regressions
+- Tests: 383 pass, 1 skip, 0 fail, 0 regressions
 
 **Recent Work** (2026-02-12):
 - Frontend Integration: Registry, GitHub, and Max Alignment panels (39 files, 2400+ lines)
@@ -121,6 +134,7 @@
 | Refactor | Drizzle migrations, query split, adapters, pipeline, registry unified | Complete |
 | Max Alignment | Cycle, prompt, parser, routes, tests | Complete |
 | CLI Alignment | Adapter fixes, JSON output, fallback chains, health patterns, safety caps | Complete |
+| Usage Parsing | ParsedUsage interface, 7 adapter parsers, dispatch wiring, 42 tests | Complete |
 
 ## What's Next
 
