@@ -12,6 +12,8 @@ export interface AdapterOptions {
   sessionId?: string
   /** Cline instance gRPC address (cline adapter only) */
   clineAddress?: string | null
+  /** Max turns safety cap for agents that support it (claude, cursor) */
+  maxTurns?: number
 }
 
 /**

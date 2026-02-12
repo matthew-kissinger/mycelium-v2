@@ -1,5 +1,3 @@
-import { spawn } from 'bun'
-import { acquireClineInstance, releaseClineInstance } from '../cline-instances'
 import type { AgentAdapter, AdapterOptions } from './types'
 
 /**
@@ -19,105 +17,28 @@ const CLINE_MODEL_MAP: Record<string, string> = {
   'devstral': 'mistralai/devstral-2512',
 }
 
-/** Track current model and provider per cline instance address */
-const clineModelByInstance = new Map<string, string>()
-const clineProviderByInstance = new Map<string, string>()
-
 /**
- * Switch cline's model and optionally provider before dispatch.
- * Uses `cline config set` for fast switching.
+ * Resolve a model name: expand short names via CLINE_MODEL_MAP,
+ * pass full OpenRouter model IDs through unchanged.
  */
-async function switchClineModel(
-  model: string,
-  instanceAddress?: string | null,
-  provider: 'openrouter' | 'cline' = 'openrouter'
-): Promise<void> {
-  const modelId = CLINE_MODEL_MAP[model] ?? model
-  const address = instanceAddress ?? 'default'
-
-  const currentModel = clineModelByInstance.get(address)
-  const currentProvider = clineProviderByInstance.get(address)
-
-  if (currentModel === modelId && currentProvider === provider) return
-
-  console.log(`[Dispatch] Switching cline to ${provider}/${modelId} on ${address}`)
-
-  try {
-    const configArgs: string[] = []
-    if (currentProvider !== provider) {
-      configArgs.push(`act-mode-api-provider=${provider}`)
-    }
-    if (provider === 'openrouter' && currentModel !== modelId) {
-      configArgs.push(`act-mode-open-router-model-id=${modelId}`)
-    }
-
-    if (configArgs.length === 0) return
-
-    const proc = spawn({
-      cmd: [
-        'cline',
-        ...(instanceAddress ? ['--address', instanceAddress] : []),
-        'config', 'set',
-        ...configArgs,
-      ],
-      stdout: 'pipe',
-      stderr: 'pipe',
-      stdin: 'ignore',
-    })
-
-    await proc.exited
-    clineModelByInstance.set(address, modelId)
-    clineProviderByInstance.set(address, provider)
-    console.log(`[Dispatch] Cline switched to ${provider}/${modelId} on ${address}`)
-  } catch (error) {
-    console.error(`[Dispatch] Failed to switch cline config:`, error)
-  }
-}
-
-/**
- * Get current cline config for an instance.
- */
-export async function getClineConfig(instanceAddress?: string | null): Promise<{
-  provider: string
-  model: string
-} | null> {
-  try {
-    const proc = spawn({
-      cmd: [
-        'cline',
-        ...(instanceAddress ? ['--address', instanceAddress] : []),
-        'config', 'list', '-F', 'plain',
-      ],
-      stdout: 'pipe',
-      stderr: 'pipe',
-    })
-    const output = await new Response(proc.stdout).text()
-    await proc.exited
-
-    const providerMatch = output.match(/act-mode-api-provider:\s*(\S+)/)
-    const modelMatch = output.match(/act-mode-open-router-model-id:\s*(\S+)/)
-
-    return {
-      provider: providerMatch?.[1] ?? 'unknown',
-      model: modelMatch?.[1] ?? 'unknown',
-    }
-  } catch {
-    return null
-  }
+function resolveModel(model: string): string {
+  return CLINE_MODEL_MAP[model] ?? model
 }
 
 export const clineAdapter: AgentAdapter = {
   id: 'cline',
 
   buildArgs(options: AdapterOptions): string[] {
-    const { prompt, clineAddress } = options
-    // cline task new "prompt" --yolo --mode act [--address <addr>]
+    const { prompt, model } = options
+    const resolvedModel = model ? resolveModel(model) : null
     return [
-      ...(clineAddress ? ['--address', clineAddress] : []),
-      'task', 'new',
+      'task',
       prompt,
       '--yolo',
-      '--mode', 'act',
+      '--act',
+      '--json',
+      '--timeout', '900',
+      ...(resolvedModel ? ['-m', resolvedModel] : []),
     ]
   },
 
@@ -125,21 +46,34 @@ export const clineAdapter: AgentAdapter = {
     return {}
   },
 
-  async preSpawn(options: AdapterOptions): Promise<void> {
-    const { model, provider, clineAddress } = options
-    if (model || provider) {
-      await switchClineModel(
-        model ?? 'moonshotai/kimi-k2.5',
-        clineAddress,
-        (provider as 'openrouter' | 'cline') ?? 'openrouter'
-      )
-    }
-  },
+  postProcessOutput(output: string): string {
+    if (!output.trim()) return output
 
-  async acquireResources(): Promise<() => void> {
-    const address = await acquireClineInstance()
-    // Store address so buildArgs can access it - caller sets clineAddress on options
-    return () => releaseClineInstance(address)
+    // Parse NDJSON output from --json mode
+    // Look for completion_result or text events
+    const lines = output.trim().split('\n')
+    const textParts: string[] = []
+    let completionResult: string | null = null
+
+    for (const line of lines) {
+      if (!line.trim()) continue
+      try {
+        const event = JSON.parse(line)
+        if (event.type === 'say' && event.say === 'completion_result' && event.text) {
+          completionResult = event.text
+        } else if (event.type === 'say' && event.say === 'text' && event.text) {
+          textParts.push(event.text)
+        }
+      } catch {
+        // Non-JSON line, include as raw text
+        textParts.push(line)
+      }
+    }
+
+    // Prefer completion_result if available, otherwise concatenate text events
+    if (completionResult) return completionResult
+    if (textParts.length > 0) return textParts.join('\n').trim()
+    return output
   },
 
   tracksOpenRouterUsage(): boolean {
@@ -148,13 +82,20 @@ export const clineAdapter: AgentAdapter = {
 }
 
 /**
- * Acquire a cline instance and return its address.
- * The caller must set options.clineAddress before calling buildArgs.
+ * Stub exports for backward compatibility.
+ * The instance pool (cline-instances.ts) is dead code since Cline v2.x
+ * removed `cline instance new/list/kill`. These stubs prevent import
+ * errors in dispatch.ts and adapters/index.ts until they are cleaned up.
  */
 export async function acquireClineAddress(): Promise<string> {
-  return acquireClineInstance()
+  return 'localhost:50052'
 }
 
-export function releaseClineAddress(address: string): void {
-  releaseClineInstance(address)
+export function releaseClineAddress(_address: string): void {}
+
+export async function getClineConfig(): Promise<{
+  provider: string
+  model: string
+} | null> {
+  return null
 }

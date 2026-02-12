@@ -76,6 +76,27 @@ const FALLBACK_MODEL_MAP: Record<string, Record<string, string | null>> = {
     'opus-4.6-thinking': null,
     'opus-4.5-thinking': null,  // Legacy
   },
+  pi: {
+    'google/gemini-2.5-flash': 'qwen/qwen3-coder',
+    'qwen/qwen3-coder': 'moonshotai/kimi-k2.5',
+    'moonshotai/kimi-k2.5': null,
+  },
+  copilot: {
+    'gpt-4.1': 'gpt-5-mini',              // 0 premium -> 0 premium
+    'gpt-5-mini': 'claude-sonnet-4.5',     // 0 premium -> 1 premium
+    'claude-sonnet-4.5': 'claude-opus-4.6', // 1 premium -> 3 premium
+    'claude-opus-4.6': null,
+  },
+  vibe: {
+    'devstral-small': 'devstral-2',
+    'devstral-2': null,
+  },
+  opencode: {
+    'opencode/kimi-k2.5-free': null,  // Free tier only, go to cross-agent
+  },
+  kiro: {
+    'default': null,  // Single model, go to cross-agent
+  },
 }
 
 /**
@@ -105,10 +126,10 @@ const AGENT_DEFAULT_MODELS: Record<string, string> = {
   cline: 'moonshotai/kimi-k2.5',
   cursor: 'opus-4.6-thinking',
   kiro: 'default',
-  vibe: 'default',
+  vibe: 'devstral-2',
   pi: 'moonshotai/kimi-k2.5',
   opencode: 'opencode/kimi-k2.5-free',
-  copilot: 'claude-opus-4.6',
+  copilot: 'gpt-4.1',
 }
 
 // =============================================================================

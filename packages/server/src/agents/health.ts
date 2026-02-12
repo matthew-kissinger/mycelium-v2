@@ -334,6 +334,121 @@ export function extractError(agent: string, output: string): {
     }
   }
 
+  // Cursor resource exhausted (usage limit hit)
+  if (agent === 'cursor' && output.includes('resource_exhausted')) {
+    return {
+      error: 'Cursor resource exhausted',
+      errorType: 'quota',
+      quotaResetMs: 60000, // 1 min default backoff
+    }
+  }
+
+  // Cursor invalid model
+  if (agent === 'cursor' && output.includes('Cannot use this model:')) {
+    return {
+      error: output.match(/Cannot use this model: \S+/)?.[0] || 'Cursor invalid model',
+      errorType: 'api_error',
+    }
+  }
+
+  // Copilot premium request tracking (stderr stats)
+  if (agent === 'copilot' && output.includes('Error: No authentication')) {
+    return {
+      error: 'Copilot authentication not configured - run copilot login',
+      errorType: 'api_error',
+    }
+  }
+
+  // Copilot 401 - wrong token (e.g. GITHUB_TOKEN PAT without Copilot scope)
+  if (agent === 'copilot' && output.includes('Failed to list models: 401')) {
+    return {
+      error: 'Copilot auth token invalid - GITHUB_TOKEN may be overriding OAuth',
+      errorType: 'api_error',
+    }
+  }
+
+  // Copilot classic PAT rejection
+  if (output.includes('Classic PATs are not supported')) {
+    return {
+      error: 'Copilot requires fine-grained PATs, not classic PATs',
+      errorType: 'api_error',
+    }
+  }
+
+  // Copilot invalid model
+  if (agent === 'copilot' && output.includes("argument") && output.includes('is invalid. Allowed choices are')) {
+    return {
+      error: 'Copilot invalid model - check available model IDs',
+      errorType: 'api_error',
+    }
+  }
+
+  // Vibe rate limit
+  if (agent === 'vibe' && (output.includes('Rate limits exceeded') || output.includes('rate limit exceeded'))) {
+    return {
+      error: 'Mistral rate limit exceeded',
+      errorType: 'quota',
+      quotaResetMs: 60000, // Default 1 min backoff
+    }
+  }
+
+  // Vibe missing API key
+  if (agent === 'vibe' && output.includes('Missing MISTRAL_API_KEY')) {
+    return {
+      error: 'Vibe missing MISTRAL_API_KEY environment variable',
+      errorType: 'api_error',
+    }
+  }
+
+  // Vibe invalid API key (401)
+  if (agent === 'vibe' && output.includes('Invalid API key')) {
+    return {
+      error: 'Vibe MISTRAL_API_KEY is invalid',
+      errorType: 'api_error',
+    }
+  }
+
+  // OpenCode silent auth failure (empty output with exit code 1)
+  if (agent === 'opencode' && output.trim() === '') {
+    return {
+      error: 'OpenCode silent failure - likely auth or provider error',
+      errorType: 'api_error',
+    }
+  }
+
+  // Cline auth failure (Clerk 502)
+  if (agent === 'cline' && output.includes('Failed to authenticate request with Clerk')) {
+    return {
+      error: 'Cline authentication failed (Clerk 502)',
+      errorType: 'api_error',
+    }
+  }
+
+  // Cline credit exhaustion (OpenRouter)
+  if (agent === 'cline' && output.includes('credit balance') && output.includes('too low')) {
+    return {
+      error: 'OpenRouter credit balance too low for Cline',
+      errorType: 'quota',
+    }
+  }
+
+  // Kiro model not found
+  if (agent === 'kiro' && output.includes('does not exist') && output.includes('Model')) {
+    const modelMatch = output.match(/Model '([^']+)' does not exist/)
+    return {
+      error: modelMatch ? `Kiro model "${modelMatch[1]}" does not exist` : 'Kiro model not found',
+      errorType: 'api_error',
+    }
+  }
+
+  // Kiro token expired (additional patterns beyond SSO session)
+  if (agent === 'kiro' && (output.includes('token expired') || output.includes('credentials expired'))) {
+    return {
+      error: 'Kiro credentials expired - run kiro-cli login',
+      errorType: 'api_error',
+    }
+  }
+
   // Generic error extraction - find first line that looks like an error
   const lines = output.split('\n')
   for (const line of lines) {

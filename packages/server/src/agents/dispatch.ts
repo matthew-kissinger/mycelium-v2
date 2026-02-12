@@ -5,6 +5,7 @@ import { checkOpenRouterCredits } from './health'
 import { getCachedAgent, getCachedProvider } from './registry-cache'
 import { getAdapter } from './adapters'
 import type { AdapterOptions } from './adapters'
+import { acquireClineAddress, releaseClineAddress } from './adapters/cline'
 
 export interface DispatchOptions {
   agent: AgentType
@@ -102,16 +103,14 @@ export async function dispatch(options: DispatchOptions): Promise<AgentExecuteRe
   const startTime = Date.now()
 
   // Build adapter options
-  const adapterOpts: AdapterOptions = { prompt, model, provider, cwd, sessionId }
+  const adapterOpts: AdapterOptions = { prompt, model, provider, cwd, sessionId, maxTurns: 50 }
 
   // Acquire resources (e.g. cline instance pool)
   let releaseResources: (() => void) | undefined
   if (adapter.acquireResources) {
-    const { acquireClineAddress } = require('./adapters/cline')
     const address = await acquireClineAddress()
     adapterOpts.clineAddress = address
     releaseResources = () => {
-      const { releaseClineAddress } = require('./adapters/cline')
       releaseClineAddress(address)
     }
   }

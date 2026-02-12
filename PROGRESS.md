@@ -6,7 +6,7 @@
 ## Status Summary
 
 **Core System**: Complete
-- Backend API (85+ endpoints)
+- Backend API (100+ endpoints)
 - Scheduler (11 cycles: dispatcher, discovery, shepherd, max_alignment, armory, digest, compaction, blocked_check, health_check, github_sync, registry_refresh)
 - Agent dispatch (10 agents: Claude, Codex, Gemini, Cline, Cursor, Kiro, Vibe, Pi, OpenCode, Copilot)
 - Provider support (12 providers: anthropic, openai, google, cursor, aws, github, openrouter, cline, mistral, groq, cerebras, opencode-zen)
@@ -14,6 +14,17 @@
 - Frontend (three-column layout, React Flow, Registry/GitHub/Max panels)
 - CLI, MCP server
 - GitHub integration (PRs, webhooks, security scanning, rulesets, merge queue)
+
+**Recent Work** (2026-02-11):
+- CLI Research Alignment: Fixed all 10 agent adapters against CLI research docs
+  - Cline adapter rewritten for v2.2.0 (task new -> task, --mode act -> --act, --json output, instance pool removed)
+  - Vibe, OpenCode, Pi adapters: centralized credentials, JSON structured output
+  - OpenCode env var security: strips paid-provider keys for free-tier models
+  - Claude, Cursor: --max-turns 50 safety cap
+  - dispatch.ts: require() hack removed, max-turns default wired
+  - Fallback chains completed for all 10 agents (was missing Pi, Copilot, Vibe, OpenCode, Kiro)
+  - Health error patterns added: Cursor resource_exhausted, Kiro SSO expiry, Copilot premium tracking, Vibe credential errors
+- Tests: 341 pass, 1 skip, 1 fail (Playwright e2e isolation), 0 regressions
 
 **Recent Work** (2026-02-12):
 - Frontend Integration: Registry, GitHub, and Max Alignment panels (39 files, 2400+ lines)
@@ -109,6 +120,7 @@
 | Registry | DB tables, cache, consumers, auto-detection, API, CLI | Complete |
 | Refactor | Drizzle migrations, query split, adapters, pipeline, registry unified | Complete |
 | Max Alignment | Cycle, prompt, parser, routes, tests | Complete |
+| CLI Alignment | Adapter fixes, JSON output, fallback chains, health patterns, safety caps | Complete |
 
 ## What's Next
 

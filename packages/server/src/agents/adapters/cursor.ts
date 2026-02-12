@@ -4,12 +4,13 @@ export const cursorAdapter: AgentAdapter = {
   id: 'cursor',
 
   buildArgs(options: AdapterOptions): string[] {
-    const { prompt, model } = options
-    // agent --print --output-format json [--model <model>] "prompt"
+    const { prompt, model, maxTurns } = options
+    // agent --print --output-format json [--model <model>] [--max-turns N] "prompt"
     return [
       '--print',
       '--output-format', 'json',
       ...(model ? ['--model', model] : []),
+      ...(maxTurns ? ['--max-turns', String(maxTurns)] : []),
       prompt,
     ]
   },

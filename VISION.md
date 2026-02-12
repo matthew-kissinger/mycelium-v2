@@ -76,6 +76,10 @@ Like the underground fungal networks that connect trees in a forest, Mycelium co
 - Query domain split (11 files under db/queries/)
 - Drizzle migrations (replacing raw SQL initDb)
 - Memory patterns and warnings injected into task context
+- Registry UI panel (matrix view, status indicators, 14 API endpoints wired)
+- Structured JSON output parsing for 7/10 agents (exact token/cost tracking)
+- Max-turns safety cap on agents that support it (default 50)
+- Complete fallback chains for all 10 agents (in-agent model escalation + cross-agent)
 
 ## Current Focus
 
@@ -86,7 +90,6 @@ Like the underground fungal networks that connect trees in a forest, Mycelium co
 
 ## Not Yet Built
 
-- Registry UI panel (frontend for agent/provider/model management)
 - Agent performance benchmarking (success rates by agent/model/task-type)
 - Automated testing of generated code
 - Multi-user access control
