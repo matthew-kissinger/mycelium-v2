@@ -12,7 +12,7 @@ const CLINE_MODEL_MAP: Record<string, string> = {
   'deepseek-r1': 'deepseek/deepseek-r1-0528',
   'qwen3-coder': 'qwen/qwen3-coder',
   'qwen3-coder-next': 'qwen/qwen3-coder-next',
-  'glm-4.7': 'z-ai/glm-4.7',
+  'glm-5': 'z-ai/glm-5',
   'glm-4.7-flash': 'z-ai/glm-4.7-flash',
   'devstral': 'mistralai/devstral-2512',
 }

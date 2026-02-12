@@ -48,36 +48,34 @@ const FALLBACK_MODEL_MAP: Record<string, Record<string, string | null>> = {
     opus: null,
   },
   codex: {
-    'gpt-5.2-codex-fast': 'gpt-5.2-codex',
-    'gpt-5.2-codex': 'gpt-5.2-codex-high',
-    'gpt-5.2-codex-high': 'gpt-5.3-codex',
+    'gpt-5.1-codex-mini': 'gpt-5.1-codex',
+    'gpt-5.1-codex': 'gpt-5.1-codex-max',
+    'gpt-5.1-codex-max': 'gpt-5.2-codex',
+    'gpt-5.2-codex': 'gpt-5.3-codex',
     'gpt-5.3-codex': null,
   },
   gemini: {
-    flash: 'gemini-3-flash-preview',
     'gemini-3-flash-preview': 'gemini-3-pro-preview',
     'gemini-3-pro-preview': null,
-    'gemini-2.5-flash': 'gemini-3-flash-preview',
-    'gemini-2.5-pro': null,
   },
   cline: {
     // Escalation chain: cheaper -> more capable
-    'glm-4.7-flash': 'glm-4.7',
-    'glm-4.7': 'deepseek/deepseek-v3.2',
+    'z-ai/glm-4.7-flash': 'z-ai/glm-5',
+    'z-ai/glm-5': 'deepseek/deepseek-v3.2',
     'deepseek/deepseek-v3.2': 'qwen/qwen3-coder',
     'qwen/qwen3-coder': 'moonshotai/kimi-k2.5',
     'moonshotai/kimi-k2.5': null,
   },
   cursor: {
-    'gemini-3-flash': 'composer-1',
-    'gpt-5.2-codex': 'composer-1',
-    'sonnet-4.5': 'composer-1',
-    'composer-1': 'opus-4.6-thinking',
+    'gemini-3-flash': 'composer-1.5',
+    'gpt-5.2-codex': 'composer-1.5',
+    'sonnet-4.5': 'composer-1.5',
+    'composer-1': 'composer-1.5',
+    'composer-1.5': 'opus-4.6-thinking',
     'opus-4.6-thinking': null,
-    'opus-4.5-thinking': null,  // Legacy
   },
   pi: {
-    'google/gemini-2.5-flash': 'qwen/qwen3-coder',
+    'google/gemini-3-flash-preview': 'qwen/qwen3-coder',
     'qwen/qwen3-coder': 'moonshotai/kimi-k2.5',
     'moonshotai/kimi-k2.5': null,
   },
@@ -88,8 +86,9 @@ const FALLBACK_MODEL_MAP: Record<string, Record<string, string | null>> = {
     'claude-opus-4.6': null,
   },
   vibe: {
-    'devstral-small': 'devstral-2',
-    'devstral-2': null,
+    'codestral-latest': 'devstral-small-latest',
+    'devstral-small-latest': 'devstral-latest',
+    'devstral-latest': null,
   },
   opencode: {
     'opencode/kimi-k2.5-free': null,  // Free tier only, go to cross-agent
@@ -105,14 +104,14 @@ const FALLBACK_MODEL_MAP: Record<string, Record<string, string | null>> = {
  */
 const CROSS_AGENT_FALLBACK: Record<string, { agent: string; model: string }> = {
   claude: { agent: 'codex', model: 'gpt-5.2-codex' },       // Subscription -> subscription
-  codex: { agent: 'cursor', model: 'composer-1' },           // Subscription -> subscription
+  codex: { agent: 'cursor', model: 'composer-1.5' },         // Subscription -> subscription
   cursor: { agent: 'claude', model: 'sonnet' },              // Subscription -> subscription
-  gemini: { agent: 'pi', model: 'google/gemini-2.5-flash' }, // Free -> free via OpenRouter
+  gemini: { agent: 'pi', model: 'google/gemini-3-flash-preview' }, // Free -> free via Pi
   cline: { agent: 'pi', model: 'qwen/qwen3-coder' },        // Per-use -> per-use via OpenRouter
   kiro: { agent: 'claude', model: 'sonnet' },                // Subscription -> subscription
   copilot: { agent: 'claude', model: 'sonnet' },             // Subscription -> subscription
   pi: { agent: 'opencode', model: 'opencode/kimi-k2.5-free' }, // Free alternative
-  opencode: { agent: 'gemini', model: 'flash' },             // Free alternative
+  opencode: { agent: 'gemini', model: 'gemini-3-flash-preview' }, // Free alternative
   vibe: { agent: 'cline', model: 'mistralai/devstral-2512' }, // Same Mistral backend via OpenRouter
 }
 
@@ -122,11 +121,11 @@ const CROSS_AGENT_FALLBACK: Record<string, { agent: string; model: string }> = {
 const AGENT_DEFAULT_MODELS: Record<string, string> = {
   claude: 'sonnet',
   codex: 'gpt-5.2-codex',
-  gemini: 'flash',
+  gemini: 'gemini-3-flash-preview',
   cline: 'moonshotai/kimi-k2.5',
   cursor: 'opus-4.6-thinking',
   kiro: 'default',
-  vibe: 'devstral-2',
+  vibe: 'devstral-latest',
   pi: 'moonshotai/kimi-k2.5',
   opencode: 'opencode/kimi-k2.5-free',
   copilot: 'gpt-4.1',
