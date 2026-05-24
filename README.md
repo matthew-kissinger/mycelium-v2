@@ -1,5 +1,11 @@
 # Mycelium v2
 
+> **Frozen Jan-Feb 2026 snapshot.** This is a Bun + TypeScript exploration of a multi-agent orchestration system: 10 agent adapters across 12 providers, a harness layer for evaluation, and a session-scoped memory model. It is no longer being developed. The agent-orchestration paradigms that prompted it have moved, and I'm building the next iteration on different foundations. The code, the docs, and the design notes are kept public as reference - for anyone mining ideas, tracing my work, or interested in what one snapshot of this design space looked like in early 2026. Issues and PRs will not be triaged. Treat it as a museum, not a tool.
+>
+> Built in paired-dev mode from a hub workstation; commits are authored under `MK Agent` (the operating identity), not my personal handle.
+>
+> This was a TypeScript rewrite of an earlier Python exploration; the prior generation remains private.
+
 **Autonomous agent orchestration system** - coordinates 10 AI coding agents across 12 providers to work on your codebase.
 
 ```

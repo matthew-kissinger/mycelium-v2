@@ -1,44 +1,19 @@
 # Security Policy
 
-## Supported Versions
+## Status
 
-| Version | Supported |
-|---------|-----------|
-| latest  | Yes       |
+This repository is a **frozen Jan-Feb 2026 snapshot**, archived as a reference artifact. It is no longer being developed and no maintenance is committed.
 
-## Reporting a Vulnerability
+## Reporting
 
-If you discover a security vulnerability in mycelium-v2, please report it responsibly.
-
-**Do not open a public GitHub issue for security vulnerabilities.**
-
-Instead, please use one of the following methods:
-
-1. **GitHub Security Advisories**: Use the [Security tab](https://github.com/matthew-kissinger/mycelium-v2/security/advisories/new) to privately report a vulnerability.
-
-2. **Email**: Contact the maintainer directly at the email associated with this GitHub account.
-
-## What to Include
-
-- Description of the vulnerability
-- Steps to reproduce
-- Potential impact
-- Suggested fix (if any)
-
-## Response Timeline
-
-- **Acknowledgment**: Within 48 hours
-- **Assessment**: Within 1 week
-- **Fix**: Depends on severity, but we aim for patches within 2 weeks for critical issues
+If you find a security issue in the snapshot and want to report it for the historical record, you may use [GitHub Security Advisories](https://github.com/matthew-kissinger/mycelium-v2/security/advisories/new). **There is no response SLA.** Reports may be acknowledged at the maintainer's discretion or not at all.
 
 ## Scope
 
-This policy applies to the mycelium-v2 codebase. Issues in dependencies should be reported to the respective upstream projects.
+The code as published reflects the design and dependencies of early 2026. Dependencies have evolved since. Anyone using this as reference material should evaluate vulnerabilities against current upstream versions, not the pinned set in this repo.
 
-## Security Features
+## What is preserved
 
-- Webhook signature verification (HMAC-SHA256)
-- No credentials stored in the repository
-- Dependabot automated dependency updates
-- CodeQL code scanning on push and PRs
-- Secret scanning with push protection (public repos)
+- Webhook signature verification scaffolding (HMAC-SHA256)
+- No credentials in the repository (and none in history per pre-publication scrub)
+- CodeQL configuration retained for historical visibility
