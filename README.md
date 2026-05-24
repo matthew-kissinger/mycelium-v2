@@ -6,32 +6,22 @@
 >
 > This was a TypeScript rewrite of an earlier Python exploration; the prior generation remains private.
 
-**Autonomous agent orchestration system** - coordinates 10 AI coding agents across 12 providers to work on your codebase.
+**Autonomous agent orchestration system** - coordinates 10 AI coding-agent adapters across 12 providers, supervised by 7 named system-agents (Discovery, Shepherd, Armory, Digest, Compaction, Max Alignment, Genesis) running on an 11-cycle scheduler.
 
-```
-                    Discovery Agent
-                          |
-                    finds work in repos
-                          |
-                          v
-    +------------------------------------------+
-    |              Task Queue                   |
-    |  [pending] -----> [running] ----> [done]  |
-    |       \               |                   |
-    |     --depends-on     retry                |
-    +------------------------------------------+
-                          |
-              Dispatcher assigns to agents
-                          |
-    +-----+-----+------+-----+------+-----+
-    |     |     |      |     |      |     |
-  Claude Codex Gemini Cline Cursor Kiro  ...
-    |     |     |      |     |      |     |
-    +-----+-----+------+-----+------+-----+
-                          |
-                          v
-                   Shepherd Agent
-                   evaluates results
+### Task lifecycle
+
+```mermaid
+flowchart TD
+  Discovery[Discovery cycle<br/>15min] -->|creates tasks +<br/>--depends-on| Queue[(Task Queue<br/>tasks table)]
+  Queue -->|deps resolved| Dispatcher[Dispatcher cycle<br/>60s]
+  Dispatcher --> Adapters{10 agent adapters}
+  Adapters --> Claude & Codex & Gemini & Cline & Cursor & Kiro & Vibe & Pi & OpenCode & Copilot
+  Claude & Codex & Gemini & Cline & Cursor & Kiro & Vibe & Pi & OpenCode & Copilot --> Output[Output parser<br/>+ fruiting session]
+  Output -->|success| Shepherd[Shepherd cycle<br/>15min]
+  Output -->|failure| Fallback[Fallback chain<br/>retry w/ stronger model]
+  Fallback --> Adapters
+  Shepherd --> MaxAlign[Max Alignment cycle<br/>repo health audit]
+  Shepherd -->|merge / reject| GH[GitHub PR / merge queue]
 ```
 
 ## Features
@@ -46,6 +36,7 @@
 - **Fallback Chains** - Automatic retry with different models on failure
 - **Real-time Streaming** - SSE streaming of agent output to frontend
 - **Telegram Integration** - Notifications, alignment signals, remote control
+- **MCP Server** - 13-tool MCP server (`packages/mcp`) wrapping the HTTP API so any MCP-aware client (Claude Code, Cursor, etc.) can drive Mycelium directly
 - **GitHub Integration** - PRs, webhooks, security scanning, rulesets, merge queue
 - **Max Alignment** - Repo-level health audits: runtime verification, doc alignment, cruft cleanup
 - **Startup Safety** - Orphaned tasks cleaned up on restart to prevent token burn
@@ -109,15 +100,61 @@ GITHUB_WEBHOOK_SECRET=your_webhook_secret
 
 ## Architecture
 
-### Monorepo Structure
+### System architecture
+
+```mermaid
+flowchart LR
+  subgraph Surfaces
+    CLI[mycel CLI<br/>16 commands]
+    MCP[MCP server<br/>13 tools]
+    UI[React 19 + React Flow<br/>10 node types · 13 panels]
+    TG[Telegram<br/>poller + buffer]
+    WH[GitHub webhooks]
+  end
+
+  subgraph Server[Hono server :8765]
+    Routes[17 route modules]
+    SSE[SSE stream /api/events]
+    Sched[Scheduler<br/>11 cycles]
+    Dispatch[Agent dispatch<br/>+ fallback + health]
+    Registry[DB-backed registry<br/>agents x providers x models]
+    GHInt[GitHub integration<br/>PRs / merge queue / rulesets / security]
+    Exec[Execution pipeline<br/>+ fruiting sessions]
+  end
+
+  subgraph Data[SQLite + Drizzle - 17 tables]
+    TasksRepos[tasks · repos · signals]
+    Mem[memory_patterns · memory_warnings<br/>fruiting_sessions · shepherd_evaluations]
+    Reg[providers · agents · models · agent_stats]
+    Cfg[config_overrides · prompt_overrides<br/>config_history · devices · scheduler_stats]
+  end
+
+  subgraph Cycles[System agents - prompted via packages/server/src/prompts/]
+    C1[Discovery] & C2[Shepherd] & C3[Armory]
+    C4[Digest] & C5[Compaction] & C6[Max Alignment] & C7[Genesis]
+  end
+
+  CLI & MCP & UI --> Routes
+  TG <--> Routes
+  WH --> Routes
+  Routes --> Sched & Dispatch & Registry & GHInt & Exec
+  Sched --> Cycles
+  Cycles --> Dispatch
+  Dispatch --> Registry
+  Server --> Data
+  Server --> SSE
+  SSE -.live.-> UI
+```
+
+### Monorepo
 
 ```
 packages/
   shared/     # Zod schemas, types, constants
-  server/     # Hono API + scheduler + agent dispatch
-  client/     # React 19 + React Flow frontend
+  server/     # Hono API + scheduler + agent dispatch + system-agents
+  client/     # React 19 + React Flow control surface
   cli/        # mycel CLI tool
-  mcp/        # MCP server for agent integration
+  mcp/        # MCP server (13 tools) for agent integration
 ```
 
 ### Scheduler Cycles
@@ -354,12 +391,13 @@ GET    /api/events             SSE stream for live updates
 
 ## Frontend
 
-The React frontend provides:
+The React 19 + React Flow frontend is a **control surface**, not a passive viewer. The architecture graph at `packages/client/src/flow/architecture.ts` declares the system as a set of nodes; the frontend renders them, lets you act on them, and routes per-node detail into a composable side panel.
 
-- **Three-column layout**: Sidebar | Canvas | Detail Panel
-- **React Flow canvas**: Visual task/cycle graph
-- **Live task output**: Streaming logs via SSE
-- **Config editors**: Scheduler, agents, prompts
+- **Dual-sidebar layout** — `LeftSidebar` (always-visible navigation + system overview) + `RightPanel` (context-aware detail surface). Responsive: collapses to hamburger + modal on mobile/tablet.
+- **10 React Flow node types** — `AgentSlots, Alignment, Cycle, GitHub, MaxAlignment, Memory, Registry, Repos, Scheduler, TaskPool`. Each one a real system subsystem; clicking a node routes the matching panel into the right sidebar via `usePanelRouter`.
+- **13 composable panels** — `Agent, Alignment, Cycle, GitHub, Inventory, Logs, MaxAlignment, Memory, Prompts, Registry, Repos, Scheduler, TaskPool`. Drop-in modules with their own state (Zustand + TanStack Query). New panels register in `panels/index.ts`; new node types register in `nodes/index.ts`. The composition pattern is the extension point — adding a subsystem means adding a node, a panel, and a route, not editing a monolith.
+- **Live SSE stream** — `/api/events` pushes task / scheduler / agent / repo events into the UI in real time.
+- **Config editors live in-panel** — Scheduler cycles, agent enable/disable, prompt overrides, registry tuning are all editable from their respective panels, no separate admin view.
 
 Access at `http://localhost:5765` when running `bun run dev:client`.
 
