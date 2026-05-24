@@ -1,12 +1,14 @@
 # Mycelium v2
 
-> **Frozen Jan-Feb 2026 snapshot.** This is a Bun + TypeScript exploration of a multi-agent orchestration system: 10 agent adapters across 12 providers, a harness layer for evaluation, and a session-scoped memory model. It is no longer being developed. The agent-orchestration paradigms that prompted it have moved, and I'm building the next iteration on different foundations. The code, the docs, and the design notes are kept public as reference - for anyone mining ideas, tracing my work, or interested in what one snapshot of this design space looked like in early 2026. Issues and PRs will not be triaged. Treat it as a museum, not a tool.
->
-> Built in paired-dev mode from a hub workstation; commits are authored under `MK Agent` (the operating identity), not my personal handle.
->
-> This was a TypeScript rewrite of an earlier Python exploration; the prior generation remains private.
+> Archived Jan-Feb 2026 architectural exploration. See [Status](#status) at the bottom for context.
 
-**Autonomous agent orchestration system** - coordinates 10 AI coding-agent adapters across 12 providers, supervised by 7 named system-agents (Discovery, Shepherd, Armory, Digest, Compaction, Max Alignment, Genesis) running on an 11-cycle scheduler.
+A multi-agent coding orchestration system. Three things in here are uncommon in the 2026 agent-framework landscape:
+
+- **Real CLI-adapter substrate** — 10 actual coding-CLI integrations (Claude Code, Codex, Gemini, Cline, Cursor, Kiro, Vibe, Pi, OpenCode, Copilot) shelling to real binaries, not just LLM API wrappers. Fallback chains across 12 providers.
+- **MCP server wrapping its own HTTP API** — `packages/mcp` exposes 13 tools so any MCP-aware client (Claude Code, Cursor, etc.) can drive Mycelium directly. Recursive composition.
+- **Architecture-graph-as-UI** — the React Flow control surface *is* the system diagram. 10 node types each map to a real subsystem; clicking a node routes the matching panel into the right sidebar.
+
+Underneath those, the standard 2026 shape: Discovery → Task Queue → Dispatcher → fan-out → Shepherd, with seven named system-agents (Discovery, Shepherd, Armory, Digest, Compaction, Max Alignment, Genesis) running on an 11-cycle scheduler.
 
 ### Task lifecycle
 
@@ -122,7 +124,7 @@ flowchart LR
     Exec[Execution pipeline<br/>+ fruiting sessions]
   end
 
-  subgraph Data[SQLite + Drizzle - 17 tables]
+  subgraph Data[SQLite + Drizzle - 18 tables]
     TasksRepos[tasks · repos · signals]
     Mem[memory_patterns · memory_warnings<br/>fruiting_sessions · shepherd_evaluations]
     Reg[providers · agents · models · agent_stats]
@@ -451,6 +453,22 @@ bun test
 | Styling | Tailwind v4 |
 | Validation | Zod |
 | Real-time | Server-Sent Events (SSE) |
+
+## What worked, where it stopped
+
+This worked, for a while — and a fair amount of mycelium-v2's own codebase was built by mycelium-v2 running unsupervised on itself. Agents picked up tasks against this repo, the seven system-agents discovered work, executed it, shepherded the output, and routed alignment signals to Telegram for the moments a human-in-the-loop check was needed. End to end, with real CLIs against real code, including its own.
+
+The wall it hit was **unsupervised discovery at length**. Keeping the loop productive across many tasks without a human in it kept breaking down with the agents and tooling available in early 2026 — Discovery would converge on stale or low-value work, Shepherd evaluations were noisy enough to wave through bad output, Max Alignment drifted from the actual repo state. The system worked as a supervised orchestrator and as a short-horizon autonomous one; it did not yet hold up over the long horizon I wanted.
+
+Capable agents and IDE-side agent modes have moved a lot since. A future iteration would take a different shape — probably incorporating ideas from adjacent tools I've been building — but **there is no v3 in active development**. The vision is real, the build is not yet.
+
+## Status
+
+This repository is a frozen Jan-Feb 2026 snapshot, archived as a reference artifact. The code, the docs, and the design notes are kept public for anyone mining ideas, tracing my work, or interested in what one snapshot of this design space looked like in early 2026. Issues and PRs will not be triaged.
+
+Built in paired-dev mode from a hub workstation; commits are authored under `MK Agent` (the operating identity), not my personal handle.
+
+This was a TypeScript rewrite of an earlier Python exploration; the prior generation remains private.
 
 ## License
 
